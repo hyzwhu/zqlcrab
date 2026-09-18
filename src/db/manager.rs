@@ -28,18 +28,59 @@ impl ConnectionManager {
         let _ = fs::create_dir_all(&base_dir);
         let config_file_path = base_dir.join("connections.json");
 
-        let manager = Self {
+        let mut manager = Self {
             active_connections: Arc::new(RwLock::new(HashMap::new())),
             config_file_path,
         };
 
-        // Initialize with default demo configuration if empty
-        if manager.load_saved_configs().is_empty() {
-            let demo_sqlite = ConnectionConfig::sqlite("Demo Memory DB", ":memory:");
-            let _ = manager.save_config(demo_sqlite);
-        }
+        // Ensure default presets (Docker MySQL and SQLite) are present
+        manager.ensure_default_presets();
 
         manager
+    }
+
+    /// Ensure default friendly presets (Local Docker MySQL, Demo SQLite) exist in profile list.
+    pub fn ensure_default_presets(&mut self) {
+        let mut configs = self.load_saved_configs();
+        let mut updated = false;
+
+        // Add Local Docker MySQL preset if not present
+        if !configs.iter().any(|c| c.name.contains("Docker MySQL")) {
+            let mut mysql_cfg = ConnectionConfig::mysql(
+                "Local Docker MySQL",
+                "127.0.0.1",
+                3306,
+                "skill_up_web",
+                "root",
+                Some("skillup_local_test".to_string()),
+            );
+            mysql_cfg.environment = crate::db::types::EnvironmentTag::Development;
+            configs.insert(0, mysql_cfg);
+            updated = true;
+        }
+
+        // Add SQLite memory DB preset if not present
+        if !configs.iter().any(|c| c.db_type == crate::db::types::DatabaseType::Sqlite) {
+            let sqlite_cfg = ConnectionConfig::sqlite("Sample SQLite (In-Memory)", ":memory:");
+            configs.push(sqlite_cfg);
+            updated = true;
+        }
+
+        if updated {
+            let _ = self.save_all_configs(&configs);
+        }
+    }
+
+    /// Save full configuration list to disk.
+    pub fn save_all_configs(&self, configs: &[ConnectionConfig]) -> DbResult<()> {
+        if let Some(parent) = self.config_file_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let json = serde_json::to_string_pretty(configs)
+            .map_err(|e| DbError::Configuration(e.to_string()))?;
+        fs::write(&self.config_file_path, json)
+            .map_err(|e| DbError::Io(e.to_string()))?;
+        Ok(())
     }
 
     /// Load all saved connection configurations from disk.

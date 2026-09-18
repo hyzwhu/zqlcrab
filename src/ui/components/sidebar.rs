@@ -111,13 +111,16 @@ impl Sidebar {
 
 impl RenderOnce for Sidebar {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        let on_new_action = self.on_new_connection.clone();
         let mut new_btn = Button::new("new_conn")
-            .ghost()
+            .primary()
             .xsmall()
             .icon(IconName::Plus)
-            .tooltip("New Connection");
+            .label("New")
+            .tooltip("New Connection Profile");
 
-        if let Some(on_new) = self.on_new_connection {
+        if let Some(ref on_new) = on_new_action {
+            let on_new = on_new.clone();
             new_btn = new_btn.on_click(move |_, window, cx| {
                 on_new(window, cx);
             });
@@ -300,6 +303,20 @@ impl RenderOnce for Sidebar {
             conn_list = conn_list.child(conn_item);
         }
 
+        let mut add_conn_bottom = Button::new("add_conn_bottom")
+            .outline()
+            .xsmall()
+            .w_full()
+            .icon(IconName::Plus)
+            .label("Add Connection");
+        if let Some(ref on_new) = on_new_action {
+            let on_new = on_new.clone();
+            add_conn_bottom = add_conn_bottom.on_click(move |_, window, cx| {
+                on_new(window, cx);
+            });
+        }
+        conn_list = conn_list.child(add_conn_bottom);
+
         // Tables list when connected
         let filter = self.table_filter.trim().to_lowercase();
         let filtered_tables: Vec<&TableInfo> = if filter.is_empty() {
@@ -450,7 +467,7 @@ impl RenderOnce for Sidebar {
             });
 
         v_flex()
-            .w(px(240.0))
+            .w(px(260.0))
             .h_full()
             .bg(ThemeColors::BG_APP)
             .border_r_1()

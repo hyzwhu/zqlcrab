@@ -21,7 +21,7 @@ use gpui_kit::component::{
     input::{InputState, TextareaState},
 };
 use gpui_kit::gpui::{
-    App, AsyncApp, ClipboardItem, Context, Entity, FontWeight, IntoElement, ParentElement, Render,
+    App, AsyncApp, ClipboardItem, Context, ElementId, Entity, FontWeight, IntoElement, ParentElement, Render,
     Styled, Window, div, prelude::*, px, transparent_black,
 };
 use uuid::Uuid;
@@ -79,15 +79,19 @@ pub struct CrabStudioApp {
 
 impl CrabStudioApp {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let manager = ConnectionManager::new();
-
-        // If no saved connections exist, add a friendly default SQLite memory database
-        if manager.list_configs().is_empty() {
-            let sample_cfg = ConnectionConfig::sqlite("Sample SQLite (In-Memory)", ":memory:");
-            let _ = manager.save_config(sample_cfg);
-        }
-
+        let mut manager = ConnectionManager::new();
+        manager.ensure_default_presets();
         let saved = manager.list_configs();
+
+        let handle = cx.entity().clone();
+        let first_conn_id = saved.first().map(|c| c.id.clone());
+        if let Some(conn_id) = first_conn_id {
+            cx.defer(move |cx| {
+                handle.update(cx, |this, cx| {
+                    this.select_connection(&conn_id, cx);
+                });
+            });
+        }
 
         let query_editor = cx.new(|cx| {
             TextareaState::new(window, cx).default_value(
@@ -538,6 +542,8 @@ impl Render for CrabStudioApp {
         let db_type_str = self.active_connection.as_ref().map(|c| c.config.db_type.to_string());
         let active_status = self.active_connection.as_ref().and_then(|c| c.status.clone());
 
+        let app_handle = cx.entity().clone();
+
         // Header TitleBar
         let title_bar = TitleBar::new().child(
             h_flex()
@@ -592,11 +598,22 @@ impl Render for CrabStudioApp {
                                     .text_color(ThemeColors::TEXT_MUTED)
                                     .child(msg.clone()),
                             )
+                        })
+                        .child({
+                            let handle = app_handle.clone();
+                            Button::new("title_new_conn")
+                                .primary()
+                                .xsmall()
+                                .icon(IconName::Plus)
+                                .label("New Connection")
+                                .on_click(move |_, window, cx| {
+                                    handle.update(cx, |this, cx| {
+                                        this.open_connection_dialog(window, cx);
+                                    });
+                                })
                         }),
                 ),
         );
-
-        let app_handle = cx.entity().clone();
 
         // Left Sidebar
         let sidebar = Sidebar::new(
@@ -781,12 +798,89 @@ impl Render for CrabStudioApp {
                     }
                 };
 
-                QueryConsole::new(&self.query_editor)
+                let console = QueryConsole::new(&self.query_editor)
                     .result(self.console_result.clone())
                     .error(self.console_error.clone())
                     .executing(self.is_executing_query)
                     .on_run(on_run)
-                    .on_clear(on_clear)
+                    .on_clear(on_clear);
+
+                let quick_connect_banner = if !is_connected {
+                    let mut conn_chips = h_flex().gap_2().items_center();
+                    for conn in self.saved_connections.iter().take(4) {
+                        let conn_id = conn.id.clone();
+                        let handle = app_handle.clone();
+                        let icon = match conn.db_type.family() {
+                            DatabaseFamily::Sqlite => IconName::Database,
+                            DatabaseFamily::MySql => IconName::Cpu,
+                            DatabaseFamily::Postgres => IconName::Layers,
+                        };
+                        let chip = Button::new(ElementId::Name(format!("quick_conn_{}", conn.id).into()))
+                            .outline()
+                            .small()
+                            .icon(icon)
+                            .label(format!("Connect: {}", conn.name))
+                            .on_click(move |_, _, cx| {
+                                handle.update(cx, |this, cx| {
+                                    this.select_connection(&conn_id, cx);
+                                });
+                            });
+                        conn_chips = conn_chips.child(chip);
+                    }
+
+                    let handle = app_handle.clone();
+                    let new_profile_btn = Button::new("quick_new_profile")
+                        .primary()
+                        .small()
+                        .icon(IconName::Plus)
+                        .label("New Database Connection")
+                        .on_click(move |_, window, cx| {
+                            handle.update(cx, |this, cx| {
+                                this.open_connection_dialog(window, cx);
+                            });
+                        });
+
+                    Some(
+                        v_flex()
+                            .w_full()
+                            .p_3()
+                            .gap_2()
+                            .bg(ThemeColors::BG_SURFACE)
+                            .border_b_1()
+                            .border_color(ThemeColors::BORDER)
+                            .child(
+                                h_flex()
+                                    .items_center()
+                                    .justify_between()
+                                    .child(
+                                        h_flex()
+                                            .items_center()
+                                            .gap_2()
+                                            .child(
+                                                Icon::new(IconName::Server)
+                                                    .size(px(16.0))
+                                                    .text_color(ThemeColors::PRIMARY_BORDER),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .font_weight(FontWeight::SEMIBOLD)
+                                                    .text_color(ThemeColors::TEXT_PRIMARY)
+                                                    .child("⚡ Ready to Connect: Select a database or create a new profile (supports 16 database systems)"),
+                                            ),
+                                    )
+                                    .child(new_profile_btn),
+                            )
+                            .child(conn_chips),
+                    )
+                } else {
+                    None
+                };
+
+                v_flex()
+                    .size_full()
+                    .children(quick_connect_banner)
+                    .child(div().flex_1().child(console))
                     .into_any_element()
             }
             WorkspaceTab::DataGrid => {
