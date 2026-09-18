@@ -22,6 +22,7 @@ pub struct SchemaViewer {
     indexes: Vec<IndexInfo>,
     ddl: Option<String>,
     on_quick_query: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
+    on_create_table: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
 }
 
 impl SchemaViewer {
@@ -37,7 +38,16 @@ impl SchemaViewer {
             indexes,
             ddl,
             on_quick_query: None,
+            on_create_table: None,
         }
+    }
+
+    pub fn on_create_table<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&mut Window, &mut App) + 'static,
+    {
+        self.on_create_table = Some(Rc::new(handler));
+        self
     }
 
     pub fn on_quick_query<F>(mut self, handler: F) -> Self
@@ -51,7 +61,19 @@ impl SchemaViewer {
 
 impl RenderOnce for SchemaViewer {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        let on_create_empty = self.on_create_table.clone();
         let Some(table_name) = self.table_name else {
+            let mut create_btn = Button::new("schema_empty_create_table_btn")
+                .primary()
+                .small()
+                .icon(IconName::Plus)
+                .label("Create New Table");
+            if let Some(on_create) = on_create_empty {
+                create_btn = create_btn.on_click(move |_, window, cx| {
+                    on_create(window, cx);
+                });
+            }
+
             return v_flex()
                 .id("schema_viewer_empty")
                 .size_full()
@@ -74,7 +96,12 @@ impl RenderOnce for SchemaViewer {
                     div()
                         .text_xs()
                         .text_color(ThemeColors::TEXT_MUTED)
-                        .child("Select a table from the sidebar to inspect its columns, keys, and DDL."),
+                        .child("Select a table from the sidebar to inspect its columns, keys, and DDL, or design a new table."),
+                )
+                .child(
+                    div()
+                        .pt_2()
+                        .child(create_btn),
                 );
         };
 
@@ -85,6 +112,19 @@ impl RenderOnce for SchemaViewer {
         let on_quick_sel = self.on_quick_query.clone();
         let on_quick_cnt = self.on_quick_query.clone();
         let on_quick_exp = self.on_quick_query.clone();
+        let on_create_hdr = self.on_create_table.clone();
+
+        let mut new_table_btn = Button::new("schema_new_table_btn")
+            .ghost()
+            .xsmall()
+            .icon(IconName::Plus)
+            .tooltip("Create New Table")
+            .child("New Table");
+        if let Some(on_create) = on_create_hdr {
+            new_table_btn = new_table_btn.on_click(move |_, window, cx| {
+                on_create(window, cx);
+            });
+        }
 
         let header = h_flex()
             .items_center()
@@ -150,7 +190,8 @@ impl RenderOnce for SchemaViewer {
                                     handler(format!("EXPLAIN SELECT * FROM \"{}\" LIMIT 100;", tbl_for_exp), window, cx);
                                 })
                             }),
-                    ),
+                    )
+                    .child(new_table_btn),
             );
 
         // Columns section

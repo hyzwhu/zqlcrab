@@ -1,4 +1,5 @@
 pub mod connection_dialog;
+pub mod create_table_modal;
 pub mod data_grid;
 pub mod explain_panel;
 pub mod query_console;
@@ -9,6 +10,7 @@ pub mod sql_review_modal;
 pub mod status_bar;
 
 pub use connection_dialog::ConnectionDialog;
+pub use create_table_modal::{CreateTableColumnState, CreateTableModal};
 pub use data_grid::DataGrid;
 pub use explain_panel::{ExplainPanel, ExplainViewMode};
 pub use query_console::{ConsoleBottomTab, QueryConsole};

@@ -29,5 +29,7 @@ pub use postgres::PostgresAdapter;
 pub use runtime::{run_on_tokio, tokio_runtime};
 pub use safety::QuerySafetyValidator;
 pub use sqlite::SqliteAdapter;
-pub use sql_gen::{generate_review_plan, SqlReviewPlan};
+pub use sql_gen::{
+    generate_create_table_sql, generate_review_plan, ColumnDef, CreateTableDef, SqlReviewPlan,
+};
 pub use types::*;

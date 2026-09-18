@@ -410,6 +410,337 @@ fn strip_identifier_quotes(s: &str) -> String {
         .to_string()
 }
 
+/// Column definition for table creation DDL generation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ColumnDef {
+    pub name: String,
+    pub data_type: String,
+    pub is_primary_key: bool,
+    pub is_nullable: bool,
+    pub is_auto_increment: bool,
+    pub default_value: Option<String>,
+    pub comment: Option<String>,
+}
+
+impl ColumnDef {
+    pub fn new(name: impl Into<String>, data_type: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            data_type: data_type.into(),
+            is_primary_key: false,
+            is_nullable: true,
+            is_auto_increment: false,
+            default_value: None,
+            comment: None,
+        }
+    }
+
+    pub fn primary_key(mut self, pk: bool) -> Self {
+        self.is_primary_key = pk;
+        if pk {
+            self.is_nullable = false;
+        }
+        self
+    }
+
+    pub fn nullable(mut self, nullable: bool) -> Self {
+        self.is_nullable = nullable;
+        self
+    }
+
+    pub fn auto_increment(mut self, auto: bool) -> Self {
+        self.is_auto_increment = auto;
+        if auto {
+            self.is_primary_key = true;
+            self.is_nullable = false;
+        }
+        self
+    }
+
+    pub fn default_value(mut self, default: Option<String>) -> Self {
+        self.default_value = default;
+        self
+    }
+
+    pub fn comment(mut self, comment: Option<String>) -> Self {
+        self.comment = comment;
+        self
+    }
+}
+
+/// Specifications for creating a new database table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreateTableDef {
+    pub table_name: String,
+    pub schema: Option<String>,
+    pub columns: Vec<ColumnDef>,
+    pub comment: Option<String>,
+}
+
+impl CreateTableDef {
+    pub fn new(table_name: impl Into<String>) -> Self {
+        Self {
+            table_name: table_name.into(),
+            schema: None,
+            columns: Vec::new(),
+            comment: None,
+        }
+    }
+
+    pub fn schema(mut self, schema: Option<String>) -> Self {
+        self.schema = schema;
+        self
+    }
+
+    pub fn column(mut self, column: ColumnDef) -> Self {
+        self.columns.push(column);
+        self
+    }
+
+    pub fn comment(mut self, comment: Option<String>) -> Self {
+        self.comment = comment;
+        self
+    }
+}
+
+/// Generates dialect-specific CREATE TABLE SQL DDL for SQLite, PostgreSQL, or MySQL.
+pub fn generate_create_table_sql(
+    def: &CreateTableDef,
+    family: DatabaseFamily,
+) -> Result<String, String> {
+    let table_name = def.table_name.trim();
+    if table_name.is_empty() {
+        return Err("Table name cannot be empty".to_string());
+    }
+
+    let valid_cols: Vec<&ColumnDef> = def
+        .columns
+        .iter()
+        .filter(|c| !c.name.trim().is_empty())
+        .collect();
+
+    if valid_cols.is_empty() {
+        return Err("At least one column with a valid name is required".to_string());
+    }
+
+    // Check duplicate column names
+    let mut seen = std::collections::HashSet::new();
+    for col in &valid_cols {
+        let name_lower = col.name.trim().to_lowercase();
+        if !seen.insert(name_lower) {
+            return Err(format!("Duplicate column name: '{}'", col.name.trim()));
+        }
+    }
+
+    let quoted_table = if let Some(schema) = &def.schema {
+        let schema_trimmed = schema.trim();
+        if !schema_trimmed.is_empty() && !schema_trimmed.eq_ignore_ascii_case("main") {
+            format!("{}.{}", quote_ident(schema_trimmed, family), quote_ident(table_name, family))
+        } else {
+            quote_ident(table_name, family)
+        }
+    } else {
+        quote_ident(table_name, family)
+    };
+
+    let pks: Vec<&ColumnDef> = valid_cols.iter().filter(|c| c.is_primary_key).copied().collect();
+
+    let mut col_clauses = Vec::new();
+    let mut post_statements = Vec::new();
+
+    match family {
+        DatabaseFamily::Sqlite => {
+            let single_pk_auto = pks.len() == 1 && pks[0].is_auto_increment;
+            let single_pk = pks.len() == 1 && !pks[0].is_auto_increment;
+
+            for col in &valid_cols {
+                let col_name = col.name.trim();
+                let col_type = col.data_type.trim();
+                let quoted_col = quote_ident(col_name, family);
+
+                if single_pk_auto && col.is_primary_key {
+                    // SQLite requires INTEGER PRIMARY KEY AUTOINCREMENT
+                    col_clauses.push(format!("    {quoted_col} INTEGER PRIMARY KEY AUTOINCREMENT"));
+                    continue;
+                }
+
+                let mut clause = format!("    {quoted_col}");
+                if !col_type.is_empty() {
+                    clause.push_str(&format!(" {col_type}"));
+                } else {
+                    clause.push_str(" TEXT");
+                }
+
+                if single_pk && col.is_primary_key {
+                    clause.push_str(" PRIMARY KEY");
+                } else if !col.is_nullable {
+                    clause.push_str(" NOT NULL");
+                }
+
+                if let Some(ref def_val) = col.default_value {
+                    let d = def_val.trim();
+                    if !d.is_empty() {
+                        clause.push_str(&format!(" DEFAULT {d}"));
+                    }
+                }
+
+                col_clauses.push(clause);
+            }
+
+            // Composite primary key
+            if pks.len() > 1 {
+                let pk_cols = pks
+                    .iter()
+                    .map(|c| quote_ident(c.name.trim(), family))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                col_clauses.push(format!("    PRIMARY KEY ({pk_cols})"));
+            }
+
+            let ddl = format!(
+                "CREATE TABLE {quoted_table} (\n{}\n);",
+                col_clauses.join(",\n")
+            );
+            Ok(ddl)
+        }
+
+        DatabaseFamily::Postgres => {
+            let single_pk = pks.len() == 1;
+
+            for col in &valid_cols {
+                let col_name = col.name.trim();
+                let mut col_type = col.data_type.trim().to_string();
+                let quoted_col = quote_ident(col_name, family);
+
+                if col.is_auto_increment {
+                    if col_type.to_lowercase().contains("big") {
+                        col_type = "BIGSERIAL".to_string();
+                    } else {
+                        col_type = "SERIAL".to_string();
+                    }
+                } else if col_type.is_empty() {
+                    col_type = "TEXT".to_string();
+                }
+
+                let mut clause = format!("    {quoted_col} {col_type}");
+
+                if single_pk && col.is_primary_key {
+                    clause.push_str(" PRIMARY KEY");
+                } else if !col.is_nullable {
+                    clause.push_str(" NOT NULL");
+                }
+
+                if let Some(ref def_val) = col.default_value {
+                    let d = def_val.trim();
+                    if !d.is_empty() {
+                        clause.push_str(&format!(" DEFAULT {d}"));
+                    }
+                }
+
+                col_clauses.push(clause);
+
+                if let Some(ref comment) = col.comment {
+                    let c = comment.trim();
+                    if !c.is_empty() {
+                        post_statements.push(format!(
+                            "COMMENT ON COLUMN {quoted_table}.{quoted_col} IS '{}';",
+                            c.replace('\'', "''")
+                        ));
+                    }
+                }
+            }
+
+            if pks.len() > 1 {
+                let pk_cols = pks
+                    .iter()
+                    .map(|c| quote_ident(c.name.trim(), family))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                col_clauses.push(format!("    PRIMARY KEY ({pk_cols})"));
+            }
+
+            if let Some(ref t_comment) = def.comment {
+                let c = t_comment.trim();
+                if !c.is_empty() {
+                    post_statements.push(format!(
+                        "COMMENT ON TABLE {quoted_table} IS '{}';",
+                        c.replace('\'', "''")
+                    ));
+                }
+            }
+
+            let mut ddl = format!(
+                "CREATE TABLE {quoted_table} (\n{}\n);",
+                col_clauses.join(",\n")
+            );
+            if !post_statements.is_empty() {
+                ddl.push_str("\n\n");
+                ddl.push_str(&post_statements.join("\n"));
+            }
+            Ok(ddl)
+        }
+
+        DatabaseFamily::MySql => {
+            for col in &valid_cols {
+                let col_name = col.name.trim();
+                let mut col_type = col.data_type.trim().to_string();
+                let quoted_col = quote_ident(col_name, family);
+
+                if col_type.is_empty() {
+                    col_type = "VARCHAR(255)".to_string();
+                }
+
+                let mut clause = format!("    {quoted_col} {col_type}");
+
+                if col.is_auto_increment {
+                    clause.push_str(" NOT NULL AUTO_INCREMENT");
+                } else if !col.is_nullable {
+                    clause.push_str(" NOT NULL");
+                }
+
+                if let Some(ref def_val) = col.default_value {
+                    let d = def_val.trim();
+                    if !d.is_empty() {
+                        clause.push_str(&format!(" DEFAULT {d}"));
+                    }
+                }
+
+                if let Some(ref comment) = col.comment {
+                    let c = comment.trim();
+                    if !c.is_empty() {
+                        clause.push_str(&format!(" COMMENT '{}'", c.replace('\'', "''")));
+                    }
+                }
+
+                col_clauses.push(clause);
+            }
+
+            if !pks.is_empty() {
+                let pk_cols = pks
+                    .iter()
+                    .map(|c| quote_ident(c.name.trim(), family))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                col_clauses.push(format!("    PRIMARY KEY ({pk_cols})"));
+            }
+
+            let mut table_suffix = " ENGINE=InnoDB DEFAULT CHARSET=utf8mb4".to_string();
+            if let Some(ref t_comment) = def.comment {
+                let c = t_comment.trim();
+                if !c.is_empty() {
+                    table_suffix.push_str(&format!(" COMMENT='{}'", c.replace('\'', "''")));
+                }
+            }
+
+            let ddl = format!(
+                "CREATE TABLE {quoted_table} (\n{}\n){table_suffix};",
+                col_clauses.join(",\n")
+            );
+            Ok(ddl)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -736,5 +1067,90 @@ mod tests {
         // Non-table queries
         assert_eq!(extract_table_from_sql("SELECT 1 + 1;"), None);
         assert_eq!(extract_table_from_sql("SHOW DATABASES;"), None);
+    }
+
+    #[test]
+    fn test_generate_create_table_sql_sqlite() {
+        let def = CreateTableDef::new("users")
+            .column(ColumnDef::new("id", "INTEGER").auto_increment(true))
+            .column(ColumnDef::new("username", "TEXT").nullable(false))
+            .column(ColumnDef::new("email", "TEXT").nullable(false))
+            .column(ColumnDef::new("status", "TEXT").default_value(Some("'active'".into())))
+            .column(ColumnDef::new("created_at", "DATETIME").default_value(Some("CURRENT_TIMESTAMP".into())));
+
+        let ddl = generate_create_table_sql(&def, DatabaseFamily::Sqlite).unwrap();
+        assert!(ddl.contains("CREATE TABLE \"users\" ("));
+        assert!(ddl.contains("    \"id\" INTEGER PRIMARY KEY AUTOINCREMENT,"));
+        assert!(ddl.contains("    \"username\" TEXT NOT NULL,"));
+        assert!(ddl.contains("    \"email\" TEXT NOT NULL,"));
+        assert!(ddl.contains("    \"status\" TEXT DEFAULT 'active',"));
+        assert!(ddl.contains("    \"created_at\" DATETIME DEFAULT CURRENT_TIMESTAMP"));
+    }
+
+    #[test]
+    fn test_generate_create_table_sql_sqlite_composite_pk() {
+        let def = CreateTableDef::new("order_items")
+            .column(ColumnDef::new("order_id", "INTEGER").primary_key(true))
+            .column(ColumnDef::new("item_id", "INTEGER").primary_key(true))
+            .column(ColumnDef::new("quantity", "INTEGER").default_value(Some("1".into())));
+
+        let ddl = generate_create_table_sql(&def, DatabaseFamily::Sqlite).unwrap();
+        assert!(ddl.contains("CREATE TABLE \"order_items\" ("));
+        assert!(ddl.contains("    \"order_id\" INTEGER NOT NULL,"));
+        assert!(ddl.contains("    \"item_id\" INTEGER NOT NULL,"));
+        assert!(ddl.contains("    PRIMARY KEY (\"order_id\", \"item_id\")"));
+    }
+
+    #[test]
+    fn test_generate_create_table_sql_postgres() {
+        let def = CreateTableDef::new("customers")
+            .schema(Some("public".into()))
+            .comment(Some("Customer records".into()))
+            .column(ColumnDef::new("id", "BIGINT").auto_increment(true).comment(Some("Unique ID".into())))
+            .column(ColumnDef::new("name", "VARCHAR(255)").nullable(false))
+            .column(ColumnDef::new("balance", "NUMERIC(10,2)").default_value(Some("0.00".into())));
+
+        let ddl = generate_create_table_sql(&def, DatabaseFamily::Postgres).unwrap();
+        assert!(ddl.contains("CREATE TABLE \"public\".\"customers\" ("));
+        assert!(ddl.contains("    \"id\" BIGSERIAL PRIMARY KEY,"));
+        assert!(ddl.contains("    \"name\" VARCHAR(255) NOT NULL,"));
+        assert!(ddl.contains("    \"balance\" NUMERIC(10,2) DEFAULT 0.00"));
+        assert!(ddl.contains("COMMENT ON TABLE \"public\".\"customers\" IS 'Customer records';"));
+        assert!(ddl.contains("COMMENT ON COLUMN \"public\".\"customers\".\"id\" IS 'Unique ID';"));
+    }
+
+    #[test]
+    fn test_generate_create_table_sql_mysql() {
+        let def = CreateTableDef::new("products")
+            .schema(Some("shop_db".into()))
+            .comment(Some("Catalog table".into()))
+            .column(ColumnDef::new("id", "INT").auto_increment(true))
+            .column(ColumnDef::new("title", "VARCHAR(255)").nullable(false).comment(Some("Item name".into())))
+            .column(ColumnDef::new("price", "DECIMAL(10,2)").default_value(Some("0.0".into())));
+
+        let ddl = generate_create_table_sql(&def, DatabaseFamily::MySql).unwrap();
+        assert!(ddl.contains("CREATE TABLE `shop_db`.`products` ("));
+        assert!(ddl.contains("    `id` INT NOT NULL AUTO_INCREMENT,"));
+        assert!(ddl.contains("    `title` VARCHAR(255) NOT NULL COMMENT 'Item name',"));
+        assert!(ddl.contains("    `price` DECIMAL(10,2) DEFAULT 0.0"));
+        assert!(ddl.contains("    PRIMARY KEY (`id`)"));
+        assert!(ddl.contains("ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Catalog table';"));
+    }
+
+    #[test]
+    fn test_generate_create_table_validation() {
+        // Empty table name
+        let def = CreateTableDef::new("").column(ColumnDef::new("id", "INT"));
+        assert!(generate_create_table_sql(&def, DatabaseFamily::Sqlite).is_err());
+
+        // No columns
+        let def = CreateTableDef::new("empty");
+        assert!(generate_create_table_sql(&def, DatabaseFamily::Sqlite).is_err());
+
+        // Duplicate column names
+        let def = CreateTableDef::new("dup")
+            .column(ColumnDef::new("name", "TEXT"))
+            .column(ColumnDef::new("Name", "VARCHAR(50)"));
+        assert!(generate_create_table_sql(&def, DatabaseFamily::Sqlite).is_err());
     }
 }

@@ -7,12 +7,16 @@ use crate::db::handle::ActiveConnection;
 use crate::db::history::{QueryHistoryItem, QueryHistoryManager, QueryHistoryStatus};
 use crate::db::manager::ConnectionManager;
 use crate::db::sql_format::format_sql;
-use crate::db::sql_gen::{extract_table_from_sql, generate_review_plan, SqlReviewPlan};
+use crate::db::sql_gen::{
+    extract_table_from_sql, generate_create_table_sql, generate_review_plan, ColumnDef,
+    CreateTableDef, SqlReviewPlan,
+};
 use crate::db::types::{
     ColumnInfo, ConnectionConfig, DatabaseFamily, DatabaseType, IndexInfo, QueryResult,
     QueryValue, SortDirection, TableInfo,
 };
 use crate::ui::components::{
+    create_table_modal::{CreateTableColumnState, CreateTableModal},
     data_grid::GridCellCoord,
     AppStatusBar, ConnectionDialog, ConsoleBottomTab, DataGrid, ExplainViewMode, QueryConsole,
     QueryHistoryView, SchemaViewer, Sidebar, SqlReviewModal,
@@ -163,6 +167,16 @@ pub struct CrabStudioApp {
     dialog_is_read_only: bool,
     dialog_is_testing: bool,
     dialog_test_result: Option<Result<String, String>>,
+
+    // Create Table state
+    create_table_modal_open: bool,
+    create_table_name_input: Entity<InputState>,
+    create_table_schema_input: Entity<InputState>,
+    create_table_comment_input: Entity<InputState>,
+    create_table_columns: Vec<CreateTableColumnState>,
+    create_table_is_executing: bool,
+    create_table_error: Option<String>,
+    create_table_copied: bool,
 }
 
 impl CrabStudioApp {
@@ -234,6 +248,43 @@ impl CrabStudioApp {
             InputState::new(window, cx).placeholder("Edit cell value...")
         });
 
+        let create_table_name_input = cx.new(|cx| {
+            InputState::new(window, cx).default_value("new_table")
+        });
+        let create_table_schema_input = cx.new(|cx| {
+            InputState::new(window, cx).default_value("")
+        });
+        let create_table_comment_input = cx.new(|cx| {
+            InputState::new(window, cx).default_value("")
+        });
+
+        let col1_name = cx.new(|cx| InputState::new(window, cx).default_value("id"));
+        let col1_type = cx.new(|cx| InputState::new(window, cx).default_value("INTEGER"));
+        let col1_def = cx.new(|cx| InputState::new(window, cx).default_value(""));
+
+        let col2_name = cx.new(|cx| InputState::new(window, cx).default_value("name"));
+        let col2_type = cx.new(|cx| InputState::new(window, cx).default_value("TEXT"));
+        let col2_def = cx.new(|cx| InputState::new(window, cx).default_value(""));
+
+        let create_table_columns = vec![
+            CreateTableColumnState {
+                name: col1_name,
+                data_type: col1_type,
+                is_primary_key: true,
+                is_nullable: false,
+                is_auto_increment: true,
+                default_val: col1_def,
+            },
+            CreateTableColumnState {
+                name: col2_name,
+                data_type: col2_type,
+                is_primary_key: false,
+                is_nullable: false,
+                is_auto_increment: false,
+                default_val: col2_def,
+            },
+        ];
+
         let history_manager = QueryHistoryManager::new();
 
         Self {
@@ -291,6 +342,14 @@ impl CrabStudioApp {
             dialog_is_read_only: false,
             dialog_is_testing: false,
             dialog_test_result: None,
+            create_table_modal_open: false,
+            create_table_name_input,
+            create_table_schema_input,
+            create_table_comment_input,
+            create_table_columns,
+            create_table_is_executing: false,
+            create_table_error: None,
+            create_table_copied: false,
         }
     }
 
@@ -1067,6 +1126,299 @@ impl CrabStudioApp {
         }).detach();
     }
 
+    /// Open the create table modal and configure default inputs according to database family
+    pub fn open_create_table_modal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(conn) = self.active_connection.as_ref() else {
+            self.status_message = Some("Please connect to a database first before creating a table".to_string());
+            cx.notify();
+            return;
+        };
+
+        if conn.config.is_read_only {
+            self.status_message = Some("Cannot create table: connection is in Read-Only mode".to_string());
+            cx.notify();
+            return;
+        }
+
+        let family = conn.config.db_type.family();
+        let default_schema = match family {
+            DatabaseFamily::Postgres => "public",
+            DatabaseFamily::MySql => conn.config.database.as_str(),
+            DatabaseFamily::Sqlite => "",
+        };
+
+        self.create_table_name_input.update(cx, |inp, cx| {
+            inp.set_value("new_table", window, cx);
+        });
+        self.create_table_schema_input.update(cx, |inp, cx| {
+            inp.set_value(default_schema, window, cx);
+        });
+        self.create_table_comment_input.update(cx, |inp, cx| {
+            inp.set_value("", window, cx);
+        });
+
+        let (id_type, name_type) = match family {
+            DatabaseFamily::Sqlite => ("INTEGER", "TEXT"),
+            DatabaseFamily::Postgres => ("SERIAL", "VARCHAR(255)"),
+            DatabaseFamily::MySql => ("INT", "VARCHAR(255)"),
+        };
+
+        let col1_name = cx.new(|cx| InputState::new(window, cx).default_value("id"));
+        let col1_type = cx.new(|cx| InputState::new(window, cx).default_value(id_type));
+        let col1_def = cx.new(|cx| InputState::new(window, cx).default_value(""));
+
+        let col2_name = cx.new(|cx| InputState::new(window, cx).default_value("name"));
+        let col2_type = cx.new(|cx| InputState::new(window, cx).default_value(name_type));
+        let col2_def = cx.new(|cx| InputState::new(window, cx).default_value(""));
+
+        self.create_table_columns = vec![
+            CreateTableColumnState {
+                name: col1_name,
+                data_type: col1_type,
+                is_primary_key: true,
+                is_nullable: false,
+                is_auto_increment: true,
+                default_val: col1_def,
+            },
+            CreateTableColumnState {
+                name: col2_name,
+                data_type: col2_type,
+                is_primary_key: false,
+                is_nullable: false,
+                is_auto_increment: false,
+                default_val: col2_def,
+            },
+        ];
+
+        self.create_table_modal_open = true;
+        self.create_table_is_executing = false;
+        self.create_table_error = None;
+        self.create_table_copied = false;
+        cx.notify();
+    }
+
+    /// Close create table modal
+    pub fn close_create_table_modal(&mut self, cx: &mut Context<Self>) {
+        self.create_table_modal_open = false;
+        self.create_table_is_executing = false;
+        self.create_table_error = None;
+        cx.notify();
+    }
+
+    /// Add a new column to the create table designer
+    pub fn add_create_table_column(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let family = self
+            .active_connection
+            .as_ref()
+            .map(|c| c.config.db_type.family())
+            .unwrap_or(DatabaseFamily::Sqlite);
+        let default_type = match family {
+            DatabaseFamily::Sqlite => "TEXT",
+            DatabaseFamily::Postgres => "VARCHAR(255)",
+            DatabaseFamily::MySql => "VARCHAR(255)",
+        };
+        let col_name_str = format!("col_{}", self.create_table_columns.len() + 1);
+        let name_inp = cx.new(|cx| InputState::new(window, cx).default_value(&col_name_str));
+        let type_inp = cx.new(|cx| InputState::new(window, cx).default_value(default_type));
+        let def_inp = cx.new(|cx| InputState::new(window, cx).default_value(""));
+
+        self.create_table_columns.push(CreateTableColumnState {
+            name: name_inp,
+            data_type: type_inp,
+            is_primary_key: false,
+            is_nullable: true,
+            is_auto_increment: false,
+            default_val: def_inp,
+        });
+        cx.notify();
+    }
+
+    /// Remove a column from the create table designer
+    pub fn remove_create_table_column(&mut self, idx: usize, cx: &mut Context<Self>) {
+        if self.create_table_columns.len() > 1 && idx < self.create_table_columns.len() {
+            self.create_table_columns.remove(idx);
+            cx.notify();
+        }
+    }
+
+    /// Toggle Primary Key flag for a column
+    pub fn toggle_create_table_pk(&mut self, idx: usize, cx: &mut Context<Self>) {
+        if let Some(col) = self.create_table_columns.get_mut(idx) {
+            col.is_primary_key = !col.is_primary_key;
+            if col.is_primary_key {
+                col.is_nullable = false;
+            } else {
+                col.is_auto_increment = false;
+            }
+            cx.notify();
+        }
+    }
+
+    /// Toggle Nullable constraint for a column
+    pub fn toggle_create_table_nullable(&mut self, idx: usize, cx: &mut Context<Self>) {
+        if let Some(col) = self.create_table_columns.get_mut(idx) {
+            col.is_nullable = !col.is_nullable;
+            if col.is_nullable {
+                col.is_primary_key = false;
+                col.is_auto_increment = false;
+            }
+            cx.notify();
+        }
+    }
+
+    /// Toggle Auto-Increment constraint for a column
+    pub fn toggle_create_table_auto_inc(&mut self, idx: usize, cx: &mut Context<Self>) {
+        if let Some(col) = self.create_table_columns.get_mut(idx) {
+            col.is_auto_increment = !col.is_auto_increment;
+            if col.is_auto_increment {
+                col.is_primary_key = true;
+                col.is_nullable = false;
+            }
+            cx.notify();
+        }
+    }
+
+    /// Quickly set column data type from presets
+    pub fn set_create_table_quick_type(
+        &mut self,
+        idx: usize,
+        data_type: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(col) = self.create_table_columns.get(idx) {
+            col.data_type.update(cx, |inp, cx| {
+                inp.set_value(&data_type, window, cx);
+            });
+            cx.notify();
+        }
+    }
+
+    /// Build CreateTableDef from input states
+    pub fn build_create_table_def(&self, cx: &App) -> CreateTableDef {
+        let table_name = self.create_table_name_input.read(cx).value().to_string();
+        let schema_raw = self.create_table_schema_input.read(cx).value().to_string();
+        let schema = if schema_raw.trim().is_empty() {
+            None
+        } else {
+            Some(schema_raw.trim().to_string())
+        };
+        let comment_raw = self.create_table_comment_input.read(cx).value().to_string();
+        let comment = if comment_raw.trim().is_empty() {
+            None
+        } else {
+            Some(comment_raw.trim().to_string())
+        };
+
+        let mut def = CreateTableDef::new(table_name)
+            .schema(schema)
+            .comment(comment);
+
+        for col in &self.create_table_columns {
+            let col_name = col.name.read(cx).value().to_string();
+            let col_type = col.data_type.read(cx).value().to_string();
+            let def_raw = col.default_val.read(cx).value().to_string();
+            let default_val = if def_raw.trim().is_empty() {
+                None
+            } else {
+                Some(def_raw.trim().to_string())
+            };
+
+            let col_def = ColumnDef::new(col_name, col_type)
+                .primary_key(col.is_primary_key)
+                .nullable(col.is_nullable)
+                .auto_increment(col.is_auto_increment)
+                .default_value(default_val);
+
+            def = def.column(col_def);
+        }
+
+        def
+    }
+
+    /// Generate real-time preview SQL DDL and any validation error
+    pub fn get_create_table_preview_sql(&self, cx: &App) -> (String, Option<String>) {
+        let family = self
+            .active_connection
+            .as_ref()
+            .map(|c| c.config.db_type.family())
+            .unwrap_or(DatabaseFamily::Sqlite);
+
+        let def = self.build_create_table_def(cx);
+        match generate_create_table_sql(&def, family) {
+            Ok(sql) => (sql, None),
+            Err(err) => (format!("-- Validation notice: {err}"), Some(err)),
+        }
+    }
+
+    /// Execute CREATE TABLE DDL atomically and refresh tables
+    pub fn execute_create_table(&mut self, cx: &mut Context<Self>) {
+        let (sql, validation_err) = self.get_create_table_preview_sql(cx);
+        if let Some(err) = validation_err {
+            self.create_table_error = Some(err);
+            cx.notify();
+            return;
+        }
+
+        let Some(conn) = self.active_connection.clone() else {
+            self.create_table_error = Some("No active database connection".to_string());
+            cx.notify();
+            return;
+        };
+
+        if conn.config.is_read_only {
+            self.create_table_error = Some("Connection is in Read-Only mode".to_string());
+            cx.notify();
+            return;
+        }
+
+        self.create_table_is_executing = true;
+        self.create_table_error = None;
+        cx.notify();
+
+        let new_table_name = self.create_table_name_input.read(cx).value().trim().to_string();
+
+        cx.spawn(async move |this, cx: &mut AsyncApp| {
+            let res = conn.execute_batch(&sql).await;
+
+            this.update(cx, |app, cx| {
+                app.create_table_is_executing = false;
+                match res {
+                    Ok(_) => {
+                        app.create_table_modal_open = false;
+                        app.status_message = Some(format!("Table '{new_table_name}' created successfully"));
+                        app.refresh_schema(cx);
+                        app.active_tab = WorkspaceTab::Schema;
+                        cx.notify();
+                    }
+                    Err(err) => {
+                        app.create_table_error = Some(err.to_string());
+                        app.status_message = Some(format!("Create table failed: {err}"));
+                        cx.notify();
+                    }
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Transfer generated DDL to Query Console for custom editing
+    pub fn open_create_table_in_console(
+        &mut self,
+        sql: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.create_table_modal_open = false;
+        self.query_editor.update(cx, |editor, cx| {
+            editor.set_value(&sql, window, cx);
+        });
+        self.active_tab = WorkspaceTab::QueryConsole;
+        self.status_message = Some("Loaded Create Table DDL into Query Console".to_string());
+        cx.notify();
+    }
+
     /// Clear console editor & results
     pub fn clear_console(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.query_editor.update(cx, |editor, cx| {
@@ -1387,6 +1739,21 @@ impl Render for CrabStudioApp {
                                         this.open_connection_dialog(window, cx);
                                     });
                                 })
+                        })
+                        .when(is_connected, |this| {
+                            let handle = app_handle.clone();
+                            this.child(
+                                Button::new("title_create_table")
+                                    .outline()
+                                    .xsmall()
+                                    .icon(IconName::Table)
+                                    .label("Create Table")
+                                    .on_click(move |_, window, cx| {
+                                        handle.update(cx, |this, cx| {
+                                            this.open_create_table_modal(window, cx);
+                                        });
+                                    }),
+                            )
                         }),
                 ),
         );
@@ -1401,6 +1768,14 @@ impl Render for CrabStudioApp {
             &self.sidebar_split,
         )
         .selected_table(self.selected_table.clone())
+        .on_create_table({
+            let handle = app_handle.clone();
+            move |window, cx| {
+                handle.update(cx, |this, cx| {
+                    this.open_create_table_modal(window, cx);
+                });
+            }
+        })
         .on_new_connection({
             let handle = app_handle.clone();
             move |window, cx| {
@@ -1977,6 +2352,14 @@ impl Render for CrabStudioApp {
                         });
                     }
                 };
+                let on_create = {
+                    let handle = app_handle.clone();
+                    move |window: &mut Window, cx: &mut App| {
+                        handle.update(cx, |this, cx| {
+                            this.open_create_table_modal(window, cx);
+                        });
+                    }
+                };
 
                 SchemaViewer::new(
                     self.selected_table.clone(),
@@ -1985,6 +2368,7 @@ impl Render for CrabStudioApp {
                     self.schema_ddl.clone(),
                 )
                 .on_quick_query(on_quick)
+                .on_create_table(on_create)
                 .into_any_element()
             }
             WorkspaceTab::History => {
@@ -2177,6 +2561,129 @@ impl Render for CrabStudioApp {
             None
         };
 
+        // Create Table Modal overlay if open
+        let create_table_overlay = if self.create_table_modal_open {
+            if let Some(ref conn) = self.active_connection {
+                let family = conn.config.db_type.family();
+                let db_name = conn.config.database.clone();
+                let (preview_sql, validation_err) = self.get_create_table_preview_sql(cx);
+
+                let on_cancel = {
+                    let handle = app_handle.clone();
+                    move |_: &mut Window, cx: &mut App| {
+                        handle.update(cx, |this, cx| {
+                            this.close_create_table_modal(cx);
+                        });
+                    }
+                };
+                let on_exec = {
+                    let handle = app_handle.clone();
+                    move |_: &mut Window, cx: &mut App| {
+                        handle.update(cx, |this, cx| {
+                            this.execute_create_table(cx);
+                        });
+                    }
+                };
+                let on_add_col = {
+                    let handle = app_handle.clone();
+                    move |window: &mut Window, cx: &mut App| {
+                        handle.update(cx, |this, cx| {
+                            this.add_create_table_column(window, cx);
+                        });
+                    }
+                };
+                let on_remove_col = {
+                    let handle = app_handle.clone();
+                    move |idx: usize, _: &mut Window, cx: &mut App| {
+                        handle.update(cx, |this, cx| {
+                            this.remove_create_table_column(idx, cx);
+                        });
+                    }
+                };
+                let on_toggle_pk = {
+                    let handle = app_handle.clone();
+                    move |idx: usize, _: &mut Window, cx: &mut App| {
+                        handle.update(cx, |this, cx| {
+                            this.toggle_create_table_pk(idx, cx);
+                        });
+                    }
+                };
+                let on_toggle_nn = {
+                    let handle = app_handle.clone();
+                    move |idx: usize, _: &mut Window, cx: &mut App| {
+                        handle.update(cx, |this, cx| {
+                            this.toggle_create_table_nullable(idx, cx);
+                        });
+                    }
+                };
+                let on_toggle_ai = {
+                    let handle = app_handle.clone();
+                    move |idx: usize, _: &mut Window, cx: &mut App| {
+                        handle.update(cx, |this, cx| {
+                            this.toggle_create_table_auto_inc(idx, cx);
+                        });
+                    }
+                };
+                let on_quick_type = {
+                    let handle = app_handle.clone();
+                    move |idx: usize, dt: String, window: &mut Window, cx: &mut App| {
+                        handle.update(cx, |this, cx| {
+                            this.set_create_table_quick_type(idx, dt, window, cx);
+                        });
+                    }
+                };
+                let on_copy = {
+                    let handle = app_handle.clone();
+                    move |sql: String, _: &mut Window, cx: &mut App| {
+                        handle.update(cx, |this, cx| {
+                            cx.write_to_clipboard(ClipboardItem::new_string(sql));
+                            this.create_table_copied = true;
+                            this.status_message = Some("Copied Create Table DDL to clipboard".to_string());
+                            cx.notify();
+                        });
+                    }
+                };
+                let on_console = {
+                    let handle = app_handle.clone();
+                    move |sql: String, window: &mut Window, cx: &mut App| {
+                        handle.update(cx, |this, cx| {
+                            this.open_create_table_in_console(sql, window, cx);
+                        });
+                    }
+                };
+
+                Some(
+                    CreateTableModal::new(
+                        family,
+                        db_name,
+                        &self.create_table_name_input,
+                        &self.create_table_schema_input,
+                        &self.create_table_comment_input,
+                        self.create_table_columns.clone(),
+                        preview_sql,
+                    )
+                    .validation_error(validation_err)
+                    .error(self.create_table_error.clone())
+                    .executing(self.create_table_is_executing)
+                    .copied(self.create_table_copied)
+                    .on_add_column(on_add_col)
+                    .on_remove_column(on_remove_col)
+                    .on_toggle_pk(on_toggle_pk)
+                    .on_toggle_nullable(on_toggle_nn)
+                    .on_toggle_auto_inc(on_toggle_ai)
+                    .on_quick_type(on_quick_type)
+                    .on_copy_sql(on_copy)
+                    .on_open_in_console(on_console)
+                    .on_execute(on_exec)
+                    .on_cancel(on_cancel),
+                )
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         // Root layout
         v_flex()
             .id("crabstudio_root")
@@ -2212,7 +2719,11 @@ impl Render for CrabStudioApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &CloseDialog, _, cx| {
-                if this.sql_review_modal_open {
+                if this.create_table_modal_open {
+                    this.create_table_modal_open = false;
+                    this.create_table_error = None;
+                    cx.notify();
+                } else if this.sql_review_modal_open {
                     this.sql_review_modal_open = false;
                     this.sql_review_error = None;
                     cx.notify();
@@ -2246,5 +2757,6 @@ impl Render for CrabStudioApp {
             .child(status_bar)
             .children(dialog_overlay)
             .children(sql_review_overlay)
+            .children(create_table_overlay)
     }
 }

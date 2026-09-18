@@ -37,6 +37,7 @@ pub struct Sidebar {
     on_edit_connection: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
     on_duplicate_connection: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
     on_delete_connection: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
+    on_create_table: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
 }
 
 impl Sidebar {
@@ -65,11 +66,20 @@ impl Sidebar {
             on_edit_connection: None,
             on_duplicate_connection: None,
             on_delete_connection: None,
+            on_create_table: None,
         }
     }
 
     pub fn selected_table(mut self, table: Option<String>) -> Self {
         self.selected_table = table;
+        self
+    }
+
+    pub fn on_create_table<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&mut Window, &mut App) + 'static,
+    {
+        self.on_create_table = Some(Rc::new(handler));
         self
     }
 
@@ -601,6 +611,18 @@ impl RenderOnce for Sidebar {
             active_database.clone()
         };
 
+        let mut create_tbl_btn = Button::new("db_create_table_btn")
+            .ghost()
+            .xsmall()
+            .icon(IconName::Plus)
+            .tooltip("Create New Table");
+        if let Some(ref on_create) = self.on_create_table {
+            let on_create = on_create.clone();
+            create_tbl_btn = create_tbl_btn.on_click(move |_, window, cx| {
+                on_create(window, cx);
+            });
+        }
+
         let database_row = h_flex()
             .w_full()
             .px_3()
@@ -646,14 +668,20 @@ impl RenderOnce for Sidebar {
                     ),
             )
             .child(
-                div()
-                    .px_1()
-                    .py_0p5()
-                    .rounded_sm()
-                    .bg(ThemeColors::BG_SURFACE_HOVER)
-                    .text_size(px(10.0))
-                    .text_color(ThemeColors::TEXT_FAINT)
-                    .child(family_label(active_family)),
+                h_flex()
+                    .items_center()
+                    .gap_1()
+                    .child(create_tbl_btn)
+                    .child(
+                        div()
+                            .px_1()
+                            .py_0p5()
+                            .rounded_sm()
+                            .bg(ThemeColors::BG_SURFACE_HOVER)
+                            .text_size(px(10.0))
+                            .text_color(ThemeColors::TEXT_FAINT)
+                            .child(family_label(active_family)),
+                    ),
             );
 
         let search_row = h_flex()
@@ -700,7 +728,7 @@ impl RenderOnce for Sidebar {
                             ),
                     );
 
-                    tbl_list = tbl_list.child(group_header("TABLES", tables.len(), IconName::Table));
+                    tbl_list = tbl_list.child(group_header("TABLES", tables.len(), IconName::Table, self.on_create_table.clone()));
                     for tbl in &tables {
                         tbl_list = tbl_list.child(table_row(
                             tbl,
@@ -711,7 +739,7 @@ impl RenderOnce for Sidebar {
                         ));
                     }
 
-                    tbl_list = tbl_list.child(group_header("VIEWS", views.len(), IconName::Eye));
+                    tbl_list = tbl_list.child(group_header("VIEWS", views.len(), IconName::Eye, None));
                     if views.is_empty() {
                         tbl_list = tbl_list.child(empty_group_hint());
                     }
@@ -782,7 +810,24 @@ fn family_label(family: DatabaseFamily) -> &'static str {
     }
 }
 
-fn group_header(label: &'static str, count: usize, icon: IconName) -> impl IntoElement {
+fn group_header(
+    label: &'static str,
+    count: usize,
+    icon: IconName,
+    on_create_table: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
+) -> impl IntoElement {
+    let show_add = label == "TABLES" && on_create_table.is_some();
+    let mut add_btn = Button::new("tables_add_btn")
+        .ghost()
+        .xsmall()
+        .icon(IconName::Plus)
+        .tooltip("Create New Table");
+    if let Some(on_create) = on_create_table {
+        add_btn = add_btn.on_click(move |_, window, cx| {
+            on_create(window, cx);
+        });
+    }
+
     h_flex()
         .w_full()
         .px_2()
@@ -807,10 +852,16 @@ fn group_header(label: &'static str, count: usize, icon: IconName) -> impl IntoE
                 ),
         )
         .child(
-            div()
-                .text_xs()
-                .text_color(ThemeColors::TEXT_FAINT)
-                .child(count.to_string()),
+            h_flex()
+                .items_center()
+                .gap_1()
+                .when(show_add, |this| this.child(add_btn))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(ThemeColors::TEXT_FAINT)
+                        .child(count.to_string()),
+                ),
         )
 }
 
