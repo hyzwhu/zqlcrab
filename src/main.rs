@@ -6,7 +6,9 @@ pub mod ui;
 use gpui_kit::AppContext;
 use gpui_kit::component::{Root, Theme, ThemeMode, TitleBar};
 use gpui_kit::gpui::{Bounds, KeyBinding, WindowBounds, px, size};
-use ui::app::{CloseDialog, CrabStudioApp, ExplainQuery, FormatSql, RunQuery};
+use ui::app::{
+    CloseDialog, CrabStudioApp, DeleteGridRow, ExplainQuery, FormatSql, RunQuery, SaveGridChanges,
+};
 
 fn main() {
     // Initialize background Tokio runtime and set ambient context on main thread
@@ -24,6 +26,10 @@ fn main() {
                 KeyBinding::new("alt-shift-f", FormatSql, Some("CrabStudio")),
                 KeyBinding::new("cmd-shift-e", ExplainQuery, Some("CrabStudio")),
                 KeyBinding::new("ctrl-shift-e", ExplainQuery, Some("CrabStudio")),
+                KeyBinding::new("cmd-s", SaveGridChanges, Some("CrabStudio")),
+                KeyBinding::new("ctrl-s", SaveGridChanges, Some("CrabStudio")),
+                KeyBinding::new("cmd-backspace", DeleteGridRow, Some("CrabStudio")),
+                KeyBinding::new("ctrl-backspace", DeleteGridRow, Some("CrabStudio")),
                 KeyBinding::new("escape", CloseDialog, Some("CrabStudio")),
             ]);
 

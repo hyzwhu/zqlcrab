@@ -227,6 +227,14 @@ impl DatabaseAdapter for SqliteAdapter {
         }
     }
 
+    async fn execute_batch(&self, sql: &str) -> DbResult<()> {
+        let conn_arc = self.conn.as_ref().ok_or_else(|| DbError::connection("Not connected"))?;
+        let conn = conn_arc.lock().map_err(|e| DbError::PoolError(e.to_string()))?;
+        conn.execute_batch(sql)
+            .map_err(|e| DbError::query(format!("Batch execution failed: {e}")))?;
+        Ok(())
+    }
+
     async fn list_databases(&self) -> DbResult<Vec<DatabaseSchema>> {
         Ok(vec![DatabaseSchema {
             name: if self.config.database.is_empty() {
@@ -471,6 +479,55 @@ mod tests {
             "expected a scan node, got {:?}",
             plan.roots
         );
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_batch_execution_with_changeset() {
+        let config = ConnectionConfig::sqlite("test_batch", ":memory:");
+        let mut adapter = SqliteAdapter::new(config);
+        adapter.connect().await.expect("connect should succeed");
+
+        adapter
+            .execute_query("CREATE TABLE items (id INTEGER PRIMARY KEY, title TEXT, price REAL);")
+            .await
+            .expect("create table");
+
+        adapter
+            .execute_query("INSERT INTO items (id, title, price) VALUES (1, 'Book', 19.99), (2, 'Pen', 2.50);")
+            .await
+            .expect("insert items");
+
+        let initial = adapter.execute_query("SELECT id, title, price FROM items ORDER BY id;").await.expect("query items");
+        let cols = adapter.list_columns(None, None, "items").await.expect("list_columns");
+
+        let mut cs = crate::db::changeset::GridChangeset::new();
+        // Update row 0 title to 'Hardcover Book'
+        cs.stage_cell_update(0, 1, "title", initial.rows[0][1].clone(), QueryValue::String("Hardcover Book".into()));
+        // Delete row 1 (Pen)
+        cs.toggle_delete_row(1, &initial.rows[1]);
+
+        let plan = crate::db::sql_gen::generate_review_plan(
+            "items",
+            None,
+            crate::db::types::DatabaseFamily::Sqlite,
+            &cols,
+            &initial.columns,
+            &initial.rows,
+            &cs,
+        );
+
+        assert_eq!(plan.updates_count, 1);
+        assert_eq!(plan.deletes_count, 1);
+        assert!(plan.has_primary_key);
+
+        // Execute batch transaction
+        adapter.execute_batch(&plan.full_script).await.expect("execute_batch should succeed");
+
+        // Verify changes applied
+        let updated = adapter.execute_query("SELECT id, title, price FROM items ORDER BY id;").await.expect("query items after batch");
+        assert_eq!(updated.rows.len(), 1);
+        assert_eq!(updated.rows[0][0], QueryValue::Int(1));
+        assert_eq!(updated.rows[0][1], QueryValue::String("Hardcover Book".into()));
     }
 }
 

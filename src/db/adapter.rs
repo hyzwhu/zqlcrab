@@ -27,6 +27,9 @@ pub trait DatabaseAdapter: Send + Sync {
     /// Execute a SQL statement and return tabular rows or affected count.
     async fn execute_query(&self, sql: &str) -> DbResult<QueryResult>;
 
+    /// Execute a batch of SQL statements or a transaction script atomically.
+    async fn execute_batch(&self, sql: &str) -> DbResult<()>;
+
     /// List all databases available on the server.
     async fn list_databases(&self) -> DbResult<Vec<DatabaseSchema>> {
         Ok(Vec::new())

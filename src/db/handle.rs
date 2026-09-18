@@ -108,6 +108,20 @@ impl ActiveConnection {
         }).await
     }
 
+    pub async fn execute_batch(&self, sql: &str) -> DbResult<()> {
+        if self.config.is_read_only {
+            return Err(crate::db::error::DbError::query(
+                "Cannot execute batch modification on a read-only connection",
+            ));
+        }
+        let adapter = self.adapter.clone();
+        let sql = sql.to_string();
+        crate::db::runtime::run_on_tokio(async move {
+            let adapter = adapter.lock().await;
+            adapter.execute_batch(&sql).await
+        }).await
+    }
+
     pub async fn list_databases(&self) -> DbResult<Vec<DatabaseSchema>> {
         let adapter = self.adapter.clone();
         crate::db::runtime::run_on_tokio(async move {

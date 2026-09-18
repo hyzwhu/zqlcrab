@@ -1,6 +1,7 @@
 //! Database abstraction layer, connection pooling, and driver adapters.
 
 pub mod adapter;
+pub mod changeset;
 pub mod error;
 pub mod explain;
 pub mod export;
@@ -13,9 +14,11 @@ pub mod runtime;
 pub mod safety;
 pub mod sqlite;
 pub mod sql_format;
+pub mod sql_gen;
 pub mod types;
 
 pub use adapter::DatabaseAdapter;
+pub use changeset::{CellEdit, GridChangeset, RowDeletion};
 pub use error::{DbError, DbResult};
 pub use export::{export_result, ExportFormat, ExportOptions};
 pub use handle::ActiveConnection;
@@ -26,4 +29,5 @@ pub use postgres::PostgresAdapter;
 pub use runtime::{run_on_tokio, tokio_runtime};
 pub use safety::QuerySafetyValidator;
 pub use sqlite::SqliteAdapter;
+pub use sql_gen::{generate_review_plan, SqlReviewPlan};
 pub use types::*;

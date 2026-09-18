@@ -1,5 +1,6 @@
 //! Tabular data viewer component for displaying query results and table records.
 
+use crate::db::changeset::GridChangeset;
 use crate::db::export::ExportFormat;
 use crate::db::types::{QueryResult, QueryValue, SortDirection};
 use crate::ui::theme::ThemeColors;
@@ -8,11 +9,12 @@ use gpui_kit::base::{h_flex, v_flex};
 use gpui_kit::component::{
     Icon, Sizable as _,
     button::{Button, ButtonVariants as _},
+    input::{Input, InputState},
     scroll::{ScrollableElement as _, ScrollbarAxis},
     table::{Table, TableBody, TableCell, TableHead, TableHeader, TableRow},
 };
 use gpui_kit::gpui::{
-    App, ClipboardItem, ElementId, FontWeight, InteractiveElement as _, IntoElement, ParentElement,
+    App, ClipboardItem, ElementId, Entity, FontWeight, InteractiveElement as _, IntoElement, ParentElement,
     RenderOnce, ScrollHandle, StatefulInteractiveElement as _, Styled, Window, div, prelude::*, px,
     rgba,
 };
@@ -91,6 +93,9 @@ pub struct DataGrid {
     inspector_open: bool,
     modal_open: bool,
     json_pretty: bool,
+    changeset: GridChangeset,
+    is_read_only: bool,
+    cell_edit_input: Option<Entity<InputState>>,
     on_sort: Option<Rc<dyn Fn(usize, &mut Window, &mut App)>>,
     on_page_change: Option<Rc<dyn Fn(usize, &mut Window, &mut App)>>,
     on_export: Option<Rc<dyn Fn(ExportFormat, &mut Window, &mut App)>>,
@@ -101,6 +106,12 @@ pub struct DataGrid {
     on_copy_value: Option<Rc<dyn Fn(String, String, &mut Window, &mut App)>>, // (col_name, value)
     on_copy_row_json: Option<Rc<dyn Fn(usize, String, &mut Window, &mut App)>>, // (row_idx, json)
     on_copy_row_tsv: Option<Rc<dyn Fn(usize, String, &mut Window, &mut App)>>, // (row_idx, tsv)
+    on_apply_cell_edit: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
+    on_set_cell_null: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
+    on_revert_cell: Option<Rc<dyn Fn(usize, usize, &mut Window, &mut App)>>,
+    on_toggle_delete_row: Option<Rc<dyn Fn(usize, &mut Window, &mut App)>>,
+    on_discard_all_changes: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
+    on_save_changes: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
 }
 
 impl DataGrid {
@@ -117,6 +128,9 @@ impl DataGrid {
             inspector_open: false,
             modal_open: false,
             json_pretty: true,
+            changeset: GridChangeset::new(),
+            is_read_only: false,
+            cell_edit_input: None,
             on_sort: None,
             on_page_change: None,
             on_export: None,
@@ -127,6 +141,12 @@ impl DataGrid {
             on_copy_value: None,
             on_copy_row_json: None,
             on_copy_row_tsv: None,
+            on_apply_cell_edit: None,
+            on_set_cell_null: None,
+            on_revert_cell: None,
+            on_toggle_delete_row: None,
+            on_discard_all_changes: None,
+            on_save_changes: None,
         }
     }
 
@@ -253,6 +273,69 @@ impl DataGrid {
         F: Fn(usize, String, &mut Window, &mut App) + 'static,
     {
         self.on_copy_row_tsv = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn changeset(mut self, changeset: GridChangeset) -> Self {
+        self.changeset = changeset;
+        self
+    }
+
+    pub fn read_only(mut self, read_only: bool) -> Self {
+        self.is_read_only = read_only;
+        self
+    }
+
+    pub fn cell_edit_input(mut self, input: Option<Entity<InputState>>) -> Self {
+        self.cell_edit_input = input;
+        self
+    }
+
+    pub fn on_apply_cell_edit<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&mut Window, &mut App) + 'static,
+    {
+        self.on_apply_cell_edit = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_set_cell_null<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&mut Window, &mut App) + 'static,
+    {
+        self.on_set_cell_null = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_revert_cell<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(usize, usize, &mut Window, &mut App) + 'static,
+    {
+        self.on_revert_cell = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_toggle_delete_row<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(usize, &mut Window, &mut App) + 'static,
+    {
+        self.on_toggle_delete_row = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_discard_all_changes<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&mut Window, &mut App) + 'static,
+    {
+        self.on_discard_all_changes = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_save_changes<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&mut Window, &mut App) + 'static,
+    {
+        self.on_save_changes = Some(Rc::new(handler));
         self
     }
 }
@@ -506,10 +589,13 @@ impl RenderOnce for DataGrid {
         let selected_info_pill = if let Some((sel_row, sel_col)) = self.selected_cell {
             if sel_row < result.rows.len() && sel_col < result.columns.len() {
                 let col_name = &result.columns[sel_col];
-                let raw_val = result.rows[sel_row][sel_col].to_display_string();
+                let orig_val = &result.rows[sel_row][sel_col];
+                let effective_val = self.changeset.get_effective_cell_value(sel_row, sel_col, orig_val);
+                let raw_val = effective_val.to_display_string();
                 let on_cp = self.on_copy_value.clone();
                 let col_name_clone = col_name.clone();
                 let raw_val_clone = raw_val.clone();
+                let is_dirty = self.changeset.is_cell_dirty(sel_row, sel_col);
 
                 Some(
                     h_flex()
@@ -519,12 +605,13 @@ impl RenderOnce for DataGrid {
                         .py_0p5()
                         .rounded_md()
                         .bg(ThemeColors::BG_APP)
+                        .when(is_dirty, |this| this.bg(rgba(0xF59E0B1A)))
                         .border_1()
-                        .border_color(ThemeColors::BORDER)
+                        .border_color(if is_dirty { ThemeColors::WARNING } else { ThemeColors::BORDER })
                         .child(
                             div()
                                 .text_xs()
-                                .text_color(ThemeColors::TEXT_MUTED)
+                                .text_color(if is_dirty { ThemeColors::WARNING } else { ThemeColors::TEXT_MUTED })
                                 .child(format!("#{}/{}", sel_row + 1, col_name)),
                         )
                         .child(
@@ -546,6 +633,108 @@ impl RenderOnce for DataGrid {
             } else {
                 None
             }
+        } else {
+            None
+        };
+
+        // Row delete / restore toggle button in toolbar
+        let delete_restore_btn = if !self.is_read_only {
+            if let Some((sel_row, _)) = self.selected_cell {
+                let on_tog_del = self.on_toggle_delete_row.clone();
+                let is_del = self.changeset.is_row_deleted(sel_row);
+                Some(
+                    Button::new("tb_del_restore_btn")
+                        .ghost()
+                        .xsmall()
+                        .icon(if is_del { IconName::Undo } else { IconName::Trash })
+                        .label(if is_del { "Restore Row" } else { "Delete Row" })
+                        .tooltip(if is_del { "Restore row from deletion" } else { "Mark row for deletion (staged)" })
+                        .when_some(on_tog_del, move |btn, handler| {
+                            btn.on_click(move |_, window, cx| {
+                                handler(sel_row, window, cx);
+                            })
+                        }),
+                )
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Pending Changes Bar (staged updates & deletes)
+        let (effective_updates, deleted_rows) = self.changeset.change_summary();
+        let dirty_bar = if self.changeset.is_dirty() {
+            let on_discard = self.on_discard_all_changes.clone();
+            let on_save = self.on_save_changes.clone();
+
+            let discard_btn = Button::new("grid_discard_all_btn")
+                .ghost()
+                .xsmall()
+                .icon(IconName::Undo)
+                .label("Discard All")
+                .when_some(on_discard, |btn, handler| {
+                    btn.on_click(move |_, window, cx| handler(window, cx))
+                });
+
+            let save_btn = Button::new("grid_save_changes_btn")
+                .primary()
+                .xsmall()
+                .icon(IconName::Check)
+                .label("Review & Save (⌘S)")
+                .when_some(on_save, |btn, handler| {
+                    btn.on_click(move |_, window, cx| handler(window, cx))
+                });
+
+            Some(
+                h_flex()
+                    .w_full()
+                    .h(px(34.0))
+                    .px_3()
+                    .justify_between()
+                    .items_center()
+                    .bg(rgba(0xF59E0B14))
+                    .border_b_1()
+                    .border_color(rgba(0xF59E0B33))
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .w(px(8.0))
+                                    .h(px(8.0))
+                                    .rounded_full()
+                                    .bg(ThemeColors::WARNING),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(ThemeColors::WARNING)
+                                    .child(format!(
+                                        "Unsaved Staged Changes: {} update{}, {} deletion{}",
+                                        effective_updates,
+                                        if effective_updates != 1 { "s" } else { "" },
+                                        deleted_rows,
+                                        if deleted_rows != 1 { "s" } else { "" }
+                                    )),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(ThemeColors::TEXT_FAINT)
+                                    .child("· Staged in memory, review before executing"),
+                            ),
+                    )
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap_2()
+                            .child(discard_btn)
+                            .child(save_btn),
+                    ),
+            )
         } else {
             None
         };
@@ -595,7 +784,8 @@ impl RenderOnce for DataGrid {
                                 .child(format!("{ms} ms")),
                         )
                     })
-                    .children(selected_info_pill),
+                    .children(selected_info_pill)
+                    .children(delete_restore_btn),
             )
             .child(
                 h_flex()
@@ -659,8 +849,9 @@ impl RenderOnce for DataGrid {
 
             for &orig_idx in page_slice_indices.iter().take(50) {
                 if let Some(row) = result.rows.get(orig_idx) {
-                    if let Some(val) = row.get(i) {
-                        let s = val.to_display_string();
+                    if let Some(orig_val) = row.get(i) {
+                        let eff_val = self.changeset.get_effective_cell_value(orig_idx, i, orig_val);
+                        let s = eff_val.to_display_string();
                         let char_count = s.chars().count();
                         let ascii_count = s.bytes().filter(|b| *b < 128).count();
                         let cjk_count = char_count.saturating_sub(ascii_count);
@@ -858,6 +1049,7 @@ impl RenderOnce for DataGrid {
             let abs_idx = page_start + rel_idx + 1;
             let row_data = &result.rows[orig_row_idx];
             let is_row_selected = self.selected_cell.map(|(r, _)| r == orig_row_idx).unwrap_or(false);
+            let is_row_deleted = self.changeset.is_row_deleted(orig_row_idx);
 
             // Index column cell with row select handler
             let on_sel_row = self.on_select_cell.clone();
@@ -876,25 +1068,40 @@ impl RenderOnce for DataGrid {
                     }
                 })
                 .child(
-                    div()
-                        .text_xs()
-                        .font_weight(if is_row_selected {
-                            FontWeight::SEMIBOLD
-                        } else {
-                            FontWeight::NORMAL
-                        })
-                        .text_color(if is_row_selected {
-                            ThemeColors::PRIMARY_BORDER
-                        } else {
-                            ThemeColors::TEXT_FAINT
-                        })
-                        .child(abs_idx.to_string()),
+                    if is_row_deleted {
+                        div()
+                            .px_1()
+                            .py_0p5()
+                            .rounded_xs()
+                            .bg(rgba(0xEF444425))
+                            .border_1()
+                            .border_color(rgba(0xEF444450))
+                            .text_xs()
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(ThemeColors::ERROR)
+                            .child("DEL")
+                    } else {
+                        div()
+                            .text_xs()
+                            .font_weight(if is_row_selected {
+                                FontWeight::SEMIBOLD
+                            } else {
+                                FontWeight::NORMAL
+                            })
+                            .text_color(if is_row_selected {
+                                ThemeColors::PRIMARY_BORDER
+                            } else {
+                                ThemeColors::TEXT_FAINT
+                            })
+                            .child(abs_idx.to_string())
+                    },
                 );
 
             let mut row = TableRow::new()
                 .border_b_1()
                 .border_color(ThemeColors::BORDER.opacity(0.35))
-                .when(is_row_selected, |r| r.bg(ThemeColors::BG_SURFACE_ACTIVE))
+                .when(is_row_deleted, |r| r.bg(rgba(0xEF444412)))
+                .when(!is_row_deleted && is_row_selected, |r| r.bg(ThemeColors::BG_SURFACE_ACTIVE))
                 .child(
                     TableCell::new()
                         .h(px(32.0))
@@ -909,12 +1116,15 @@ impl RenderOnce for DataGrid {
                         .child(index_cell_btn),
                 );
 
-            for (col_idx, val) in row_data.iter().enumerate() {
+            for (col_idx, orig_val) in row_data.iter().enumerate() {
                 let col_w = col_widths.get(col_idx).copied().unwrap_or(120.0);
                 let is_cell_selected = self
                     .selected_cell
                     .map(|(r, c)| r == orig_row_idx && c == col_idx)
                     .unwrap_or(false);
+
+                let val = self.changeset.get_effective_cell_value(orig_row_idx, col_idx, orig_val);
+                let is_cell_dirty = self.changeset.is_cell_dirty(orig_row_idx, col_idx);
 
                 let display_raw = val.to_display_string();
                 // Replace carriage return and newlines with space for clean single-line table display
@@ -976,6 +1186,7 @@ impl RenderOnce for DataGrid {
                     .items_center()
                     .cursor_pointer()
                     .overflow_hidden()
+                    .relative()
                     .id(ElementId::NamedInteger(
                         "grid_cell_click".into(),
                         ((orig_row_idx as u64) << 24) | (col_idx as u64),
@@ -986,7 +1197,13 @@ impl RenderOnce for DataGrid {
                             .border_color(ThemeColors::PRIMARY)
                             .rounded_xs()
                     })
-                    .when(!is_cell_selected, |this| {
+                    .when(!is_cell_selected && is_cell_dirty, |this| {
+                        this.bg(rgba(0xF59E0B14))
+                            .border_1()
+                            .border_color(rgba(0xF59E0B50))
+                            .rounded_xs()
+                    })
+                    .when(!is_cell_selected && !is_cell_dirty, |this| {
                         this.hover(|s| s.bg(ThemeColors::BG_SURFACE_HOVER))
                     })
                     .on_click(move |event, window, cx| {
@@ -999,7 +1216,25 @@ impl RenderOnce for DataGrid {
                             }
                         }
                     })
-                    .child(cell_elem);
+                    .child(
+                        if is_row_deleted {
+                            div().w_full().opacity(0.4).child(cell_elem)
+                        } else {
+                            div().w_full().child(cell_elem)
+                        },
+                    )
+                    .when(is_cell_dirty, |this| {
+                        this.child(
+                            div()
+                                .absolute()
+                                .top(px(2.0))
+                                .right(px(2.0))
+                                .w(px(5.0))
+                                .h(px(5.0))
+                                .rounded_full()
+                                .bg(rgba(0xF59E0BFF)),
+                        )
+                    });
 
                 row = row.child(
                     TableCell::new()
@@ -1394,6 +1629,150 @@ impl RenderOnce for DataGrid {
                                             .justify_end()
                                             .child(copy_val_btn),
                                     )
+                                    // Live Cell Value Editor Section
+                                    .child(
+                                        if self.is_read_only {
+                                            div()
+                                                .p_2()
+                                                .rounded_md()
+                                                .bg(ThemeColors::BG_APP)
+                                                .border_1()
+                                                .border_color(ThemeColors::BORDER)
+                                                .child(
+                                                    h_flex()
+                                                        .items_center()
+                                                        .gap_2()
+                                                        .child(Icon::new(IconName::Lock).size(px(12.0)).text_color(ThemeColors::TEXT_FAINT))
+                                                        .child(
+                                                            div()
+                                                                .text_xs()
+                                                                .text_color(ThemeColors::TEXT_FAINT)
+                                                                .child("Read-only connection: cell editing disabled"),
+                                                        ),
+                                                )
+                                        } else {
+                                            let is_cell_dirty = self.changeset.is_cell_dirty(sel_row, sel_col);
+                                            let is_row_del = self.changeset.is_row_deleted(sel_row);
+                                            let on_app = self.on_apply_cell_edit.clone();
+                                            let on_nul = self.on_set_cell_null.clone();
+                                            let on_rev = self.on_revert_cell.clone();
+
+                                            let mut apply_btn = Button::new("insp_apply_edit_btn")
+                                                .primary()
+                                                .xsmall()
+                                                .icon(IconName::Check)
+                                                .label("Apply (↵)");
+                                            if let Some(ref h) = on_app {
+                                                let h = h.clone();
+                                                apply_btn = apply_btn.on_click(move |_, window, cx| {
+                                                    h(window, cx);
+                                                });
+                                            }
+
+                                            let mut null_btn = Button::new("insp_set_null_btn")
+                                                .outline()
+                                                .xsmall()
+                                                .label("Set NULL");
+                                            if let Some(ref h) = on_nul {
+                                                let h = h.clone();
+                                                null_btn = null_btn.on_click(move |_, window, cx| {
+                                                    h(window, cx);
+                                                });
+                                            }
+
+                                            let mut rev_btn = Button::new("insp_revert_cell_btn")
+                                                .ghost()
+                                                .xsmall()
+                                                .icon(IconName::Undo)
+                                                .label("Revert");
+                                            if is_cell_dirty {
+                                                if let Some(ref h) = on_rev {
+                                                    let h = h.clone();
+                                                    rev_btn = rev_btn.on_click(move |_, window, cx| {
+                                                        h(sel_row, sel_col, window, cx);
+                                                    });
+                                                }
+                                            }
+
+                                            div()
+                                                .p_2p5()
+                                                .rounded_md()
+                                                .bg(ThemeColors::BG_APP)
+                                                .border_1()
+                                                .border_color(if is_cell_dirty {
+                                                    ThemeColors::WARNING
+                                                } else {
+                                                    ThemeColors::BORDER
+                                                })
+                                                .child(
+                                                    v_flex()
+                                                        .gap_2()
+                                                        .child(
+                                                            h_flex()
+                                                                .justify_between()
+                                                                .items_center()
+                                                                .child(
+                                                                    h_flex()
+                                                                        .items_center()
+                                                                        .gap_2()
+                                                                        .child(
+                                                                            div()
+                                                                                .text_xs()
+                                                                                .font_weight(FontWeight::SEMIBOLD)
+                                                                                .text_color(ThemeColors::TEXT_PRIMARY)
+                                                                                .child("Edit Cell Value"),
+                                                                        )
+                                                                        .when(is_cell_dirty, |this| {
+                                                                            this.child(
+                                                                                div()
+                                                                                    .px_1p5()
+                                                                                    .py_0p5()
+                                                                                    .rounded_xs()
+                                                                                    .bg(rgba(0xF59E0B20))
+                                                                                    .border_1()
+                                                                                    .border_color(rgba(0xF59E0B40))
+                                                                                    .text_xs()
+                                                                                    .font_weight(FontWeight::MEDIUM)
+                                                                                    .text_color(ThemeColors::WARNING)
+                                                                                    .child("Modified"),
+                                                                            )
+                                                                        })
+                                                                        .when(is_row_del, |this| {
+                                                                            this.child(
+                                                                                div()
+                                                                                    .px_1p5()
+                                                                                    .py_0p5()
+                                                                                    .rounded_xs()
+                                                                                    .bg(rgba(0xEF444420))
+                                                                                    .border_1()
+                                                                                    .border_color(rgba(0xEF444440))
+                                                                                    .text_xs()
+                                                                                    .font_weight(FontWeight::MEDIUM)
+                                                                                    .text_color(ThemeColors::ERROR)
+                                                                                    .child("Pending Deletion"),
+                                                                            )
+                                                                        }),
+                                                                )
+                                                                .child(
+                                                                    h_flex()
+                                                                        .items_center()
+                                                                        .gap_1()
+                                                                        .child(null_btn)
+                                                                        .when(is_cell_dirty, |this| this.child(rev_btn)),
+                                                                ),
+                                                        )
+                                                        .when_some(self.cell_edit_input.clone(), |this, inp| {
+                                                            this.child(Input::new(&inp).small().w_full())
+                                                        })
+                                                        .child(
+                                                            h_flex()
+                                                                .justify_end()
+                                                                .items_center()
+                                                                .child(apply_btn),
+                                                        ),
+                                                )
+                                        },
+                                    )
                                     // Row Record Fields Section
                                     .child(
                                         v_flex()
@@ -1502,6 +1881,7 @@ impl RenderOnce for DataGrid {
             .size_full()
             .bg(ThemeColors::BG_APP)
             .child(toolbar)
+            .children(dirty_bar)
             .child(main_view);
 
         // Modal Detail Viewer overlay if modal_open is true

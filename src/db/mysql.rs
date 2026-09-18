@@ -233,6 +233,33 @@ impl DatabaseAdapter for MysqlAdapter {
         }
     }
 
+    async fn execute_batch(&self, sql: &str) -> DbResult<()> {
+        let pool = self.pool.as_ref().ok_or_else(|| DbError::connection("Not connected"))?;
+        let mut conn = pool.get_conn().await.map_err(|e| DbError::connection(e.to_string()))?;
+        let mut tx = conn
+            .start_transaction(mysql_async::TxOpts::default())
+            .await
+            .map_err(|e| DbError::query(format!("Failed to start MySQL transaction: {e}")))?;
+
+        for stmt in sql.split(';') {
+            let trimmed = stmt.trim();
+            if trimmed.is_empty()
+                || trimmed.eq_ignore_ascii_case("START TRANSACTION")
+                || trimmed.eq_ignore_ascii_case("BEGIN")
+                || trimmed.eq_ignore_ascii_case("COMMIT")
+            {
+                continue;
+            }
+            tx.query_drop(trimmed)
+                .await
+                .map_err(|e| DbError::query(format!("MySQL batch statement execution failed: {e}")))?;
+        }
+        tx.commit()
+            .await
+            .map_err(|e| DbError::query(format!("Failed to commit MySQL batch transaction: {e}")))?;
+        Ok(())
+    }
+
     async fn list_databases(&self) -> DbResult<Vec<DatabaseSchema>> {
         let pool = self.pool.as_ref().ok_or_else(|| DbError::connection("Not connected"))?;
         let mut conn = pool.get_conn().await.map_err(|e| DbError::connection(e.to_string()))?;

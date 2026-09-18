@@ -5,6 +5,7 @@ pub mod query_console;
 pub mod query_history;
 pub mod schema_viewer;
 pub mod sidebar;
+pub mod sql_review_modal;
 pub mod status_bar;
 
 pub use connection_dialog::ConnectionDialog;
@@ -14,4 +15,5 @@ pub use query_console::{ConsoleBottomTab, QueryConsole};
 pub use query_history::QueryHistoryView;
 pub use schema_viewer::SchemaViewer;
 pub use sidebar::Sidebar;
+pub use sql_review_modal::SqlReviewModal;
 pub use status_bar::AppStatusBar;

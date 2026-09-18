@@ -212,6 +212,16 @@ impl DatabaseAdapter for PostgresAdapter {
         }
     }
 
+    async fn execute_batch(&self, sql: &str) -> DbResult<()> {
+        let client_arc = self.client.as_ref().ok_or_else(|| DbError::connection("Not connected"))?;
+        let client = client_arc.lock().await;
+        client
+            .batch_execute(sql)
+            .await
+            .map_err(|e| DbError::query(format!("PostgreSQL batch execution failed: {e}")))?;
+        Ok(())
+    }
+
     async fn list_databases(&self) -> DbResult<Vec<DatabaseSchema>> {
         let client_arc = self.client.as_ref().ok_or_else(|| DbError::connection("Not connected"))?;
         let client = client_arc.lock().await;
