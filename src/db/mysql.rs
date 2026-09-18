@@ -99,19 +99,31 @@ impl DatabaseAdapter for MysqlAdapter {
         let opts: Opts = builder.into();
         let pool = Pool::new(opts);
 
-        // Verify connection
-        let mut conn = pool
-            .get_conn()
-            .await
-            .map_err(|e| DbError::connection(format!("Failed to connect to MySQL: {e}")))?;
+        let timeout_dur = std::time::Duration::from_secs(self.config.connect_timeout_secs.max(3));
+        let connect_fut = async {
+            let mut conn = pool
+                .get_conn()
+                .await
+                .map_err(|e| DbError::connection(format!("Failed to connect to MySQL: {e}")))?;
 
-        let _ = conn
-            .ping()
-            .await
-            .map_err(|e| DbError::connection(format!("Failed to ping MySQL: {e}")))?;
+            conn.ping()
+                .await
+                .map_err(|e| DbError::connection(format!("Failed to ping MySQL: {e}")))?;
 
-        self.pool = Some(pool);
-        Ok(())
+            Ok(())
+        };
+
+        match tokio::time::timeout(timeout_dur, connect_fut).await {
+            Ok(Ok(())) => {
+                self.pool = Some(pool);
+                Ok(())
+            }
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err(DbError::connection(format!(
+                "Connection to MySQL at {}:{} timed out after {}s",
+                self.config.host, self.config.port, timeout_dur.as_secs()
+            ))),
+        }
     }
 
     async fn disconnect(&mut self) -> DbResult<()> {

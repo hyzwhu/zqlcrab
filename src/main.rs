@@ -9,6 +9,9 @@ use gpui_kit::gpui::{Bounds, WindowBounds, WindowOptions, px, size};
 use ui::CrabStudioApp;
 
 fn main() {
+    // Initialize background Tokio runtime and set ambient context on main thread
+    let _tokio_guard = db::tokio_runtime().enter();
+
     gpui_kit::application()
         .with_assets(gpui_kit::assets::Assets)
         .run(|cx| {

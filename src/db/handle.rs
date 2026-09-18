@@ -43,58 +43,86 @@ impl ActiveConnection {
 
     /// Establishes and tests a connection for a given configuration.
     pub async fn connect_config(config: ConnectionConfig) -> DbResult<Self> {
-        let conn = Self::new(config);
-        conn.adapter.lock().await.connect().await?;
-        let status = conn.adapter.lock().await.test_connection().await.ok();
-        Ok(Self {
-            status,
-            ..conn
-        })
+        crate::db::runtime::run_on_tokio(async move {
+            let conn = Self::new(config);
+            conn.adapter.lock().await.connect().await?;
+            let status = conn.adapter.lock().await.test_connection().await.ok();
+            Ok(Self {
+                status,
+                ..conn
+            })
+        }).await
     }
 
     /// Tests a configuration without keeping an active handle open.
     pub async fn test_config(config: &ConnectionConfig) -> DbResult<ConnectionStatus> {
-        let conn = Self::new(config.clone());
-        conn.adapter.lock().await.connect().await?;
-        let status = conn.adapter.lock().await.test_connection().await;
-        let _ = conn.adapter.lock().await.disconnect().await;
-        status
+        let config = config.clone();
+        crate::db::runtime::run_on_tokio(async move {
+            let conn = Self::new(config);
+            conn.adapter.lock().await.connect().await?;
+            let status = conn.adapter.lock().await.test_connection().await;
+            let _ = conn.adapter.lock().await.disconnect().await;
+            status
+        }).await
     }
 
     pub async fn connect(&self) -> DbResult<()> {
-        let mut adapter = self.adapter.lock().await;
-        adapter.connect().await
+        let adapter = self.adapter.clone();
+        crate::db::runtime::run_on_tokio(async move {
+            let mut adapter = adapter.lock().await;
+            adapter.connect().await
+        }).await
     }
 
     pub async fn disconnect(&self) -> DbResult<()> {
-        let mut adapter = self.adapter.lock().await;
-        adapter.disconnect().await
+        let adapter = self.adapter.clone();
+        crate::db::runtime::run_on_tokio(async move {
+            let mut adapter = adapter.lock().await;
+            adapter.disconnect().await
+        }).await
     }
 
     pub async fn is_connected(&self) -> bool {
-        let adapter = self.adapter.lock().await;
-        adapter.is_connected()
+        let adapter = self.adapter.clone();
+        crate::db::runtime::run_on_tokio(async move {
+            let adapter = adapter.lock().await;
+            Ok(adapter.is_connected())
+        }).await.unwrap_or(false)
     }
 
     pub async fn test_connection(&self) -> DbResult<ConnectionStatus> {
-        let adapter = self.adapter.lock().await;
-        adapter.test_connection().await
+        let adapter = self.adapter.clone();
+        crate::db::runtime::run_on_tokio(async move {
+            let adapter = adapter.lock().await;
+            adapter.test_connection().await
+        }).await
     }
 
     pub async fn execute_query(&self, sql: &str) -> DbResult<QueryResult> {
         crate::db::safety::QuerySafetyValidator::validate_query(sql, self.config.is_read_only)?;
-        let adapter = self.adapter.lock().await;
-        adapter.execute_query(sql).await
+        let adapter = self.adapter.clone();
+        let sql = sql.to_string();
+        crate::db::runtime::run_on_tokio(async move {
+            let adapter = adapter.lock().await;
+            adapter.execute_query(&sql).await
+        }).await
     }
 
     pub async fn list_databases(&self) -> DbResult<Vec<DatabaseSchema>> {
-        let adapter = self.adapter.lock().await;
-        adapter.list_databases().await
+        let adapter = self.adapter.clone();
+        crate::db::runtime::run_on_tokio(async move {
+            let adapter = adapter.lock().await;
+            adapter.list_databases().await
+        }).await
     }
 
     pub async fn list_schemas(&self, database: Option<&str>) -> DbResult<Vec<String>> {
-        let adapter = self.adapter.lock().await;
-        adapter.list_schemas(database).await
+        let adapter = self.adapter.clone();
+        let database = database.map(|s| s.to_string());
+        crate::db::runtime::run_on_tokio(async move {
+            let adapter = adapter.lock().await;
+            adapter.list_schemas(database.as_deref()).await
+        }).await
     }
 
     pub async fn list_tables(
@@ -102,8 +130,13 @@ impl ActiveConnection {
         database: Option<&str>,
         schema: Option<&str>,
     ) -> DbResult<Vec<TableInfo>> {
-        let adapter = self.adapter.lock().await;
-        adapter.list_tables(database, schema).await
+        let adapter = self.adapter.clone();
+        let database = database.map(|s| s.to_string());
+        let schema = schema.map(|s| s.to_string());
+        crate::db::runtime::run_on_tokio(async move {
+            let adapter = adapter.lock().await;
+            adapter.list_tables(database.as_deref(), schema.as_deref()).await
+        }).await
     }
 
     pub async fn list_columns(
@@ -112,8 +145,14 @@ impl ActiveConnection {
         schema: Option<&str>,
         table: &str,
     ) -> DbResult<Vec<ColumnInfo>> {
-        let adapter = self.adapter.lock().await;
-        adapter.list_columns(database, schema, table).await
+        let adapter = self.adapter.clone();
+        let database = database.map(|s| s.to_string());
+        let schema = schema.map(|s| s.to_string());
+        let table = table.to_string();
+        crate::db::runtime::run_on_tokio(async move {
+            let adapter = adapter.lock().await;
+            adapter.list_columns(database.as_deref(), schema.as_deref(), &table).await
+        }).await
     }
 
     pub async fn list_indexes(
@@ -122,8 +161,14 @@ impl ActiveConnection {
         schema: Option<&str>,
         table: &str,
     ) -> DbResult<Vec<IndexInfo>> {
-        let adapter = self.adapter.lock().await;
-        adapter.list_indexes(database, schema, table).await
+        let adapter = self.adapter.clone();
+        let database = database.map(|s| s.to_string());
+        let schema = schema.map(|s| s.to_string());
+        let table = table.to_string();
+        crate::db::runtime::run_on_tokio(async move {
+            let adapter = adapter.lock().await;
+            adapter.list_indexes(database.as_deref(), schema.as_deref(), &table).await
+        }).await
     }
 
     pub async fn get_table_ddl(
@@ -132,7 +177,13 @@ impl ActiveConnection {
         schema: Option<&str>,
         table: &str,
     ) -> DbResult<Option<String>> {
-        let adapter = self.adapter.lock().await;
-        adapter.get_table_ddl(database, schema, table).await
+        let adapter = self.adapter.clone();
+        let database = database.map(|s| s.to_string());
+        let schema = schema.map(|s| s.to_string());
+        let table = table.to_string();
+        crate::db::runtime::run_on_tokio(async move {
+            let adapter = adapter.lock().await;
+            adapter.get_table_ddl(database.as_deref(), schema.as_deref(), &table).await
+        }).await
     }
 }
