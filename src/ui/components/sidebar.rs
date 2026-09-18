@@ -303,19 +303,21 @@ impl RenderOnce for Sidebar {
             conn_list = conn_list.child(conn_item);
         }
 
-        let mut add_conn_bottom = Button::new("add_conn_bottom")
-            .outline()
-            .xsmall()
-            .w_full()
-            .icon(IconName::Plus)
-            .label("Add Connection");
-        if let Some(ref on_new) = on_new_action {
-            let on_new = on_new.clone();
-            add_conn_bottom = add_conn_bottom.on_click(move |_, window, cx| {
-                on_new(window, cx);
-            });
+        if self.connections.is_empty() {
+            let mut add_conn_bottom = Button::new("add_conn_bottom")
+                .outline()
+                .xsmall()
+                .w_full()
+                .icon(IconName::Plus)
+                .label("Add Connection");
+            if let Some(ref on_new) = on_new_action {
+                let on_new = on_new.clone();
+                add_conn_bottom = add_conn_bottom.on_click(move |_, window, cx| {
+                    on_new(window, cx);
+                });
+            }
+            conn_list = conn_list.child(add_conn_bottom);
         }
-        conn_list = conn_list.child(add_conn_bottom);
 
         // Tables list when connected
         let filter = self.table_filter.trim().to_lowercase();
@@ -360,7 +362,7 @@ impl RenderOnce for Sidebar {
                     .gap_0p5()
                     .p_1();
 
-                for (idx, tbl) in filtered_tables.iter().enumerate() {
+                for tbl in filtered_tables.iter() {
                     let is_selected = self.selected_table.as_deref() == Some(&tbl.name);
                     let tbl_name = tbl.name.clone();
                     let on_tbl_select = self.on_select_table.clone();
@@ -378,7 +380,7 @@ impl RenderOnce for Sidebar {
                     };
 
                     let row = h_flex()
-                        .id(ElementId::NamedInteger("tbl_row".into(), idx as u64))
+                        .id(ElementId::Name(format!("tbl_row_{}", tbl.name).into()))
                         .w_full()
                         .py_1()
                         .px_2()
@@ -423,7 +425,7 @@ impl RenderOnce for Sidebar {
                                 .items_center()
                                 .gap_1()
                                 .child(
-                                    Button::new(ElementId::NamedInteger("quick_sel".into(), idx as u64))
+                                    Button::new(ElementId::Name(format!("quick_sel_{}", tbl.name).into()))
                                         .ghost()
                                         .xsmall()
                                         .icon(IconName::Play)
@@ -439,7 +441,7 @@ impl RenderOnce for Sidebar {
                                         }),
                                 )
                                 .child(
-                                    Button::new(ElementId::NamedInteger("quick_cnt".into(), idx as u64))
+                                    Button::new(ElementId::Name(format!("quick_cnt_{}", tbl.name).into()))
                                         .ghost()
                                         .xsmall()
                                         .tooltip("COUNT(*)")

@@ -250,9 +250,9 @@ impl RenderOnce for ConnectionDialog {
 
         // Protocol badge and category description
         let protocol_desc = match self.db_type.family() {
-            DatabaseFamily::Sqlite => "⚡ Native SQLite Engine (C-bindings) • Local file or in-memory",
-            DatabaseFamily::MySql => "⚡ MySQL Wire Protocol (mysql_async) • High performance async connection",
-            DatabaseFamily::Postgres => "⚡ PostgreSQL Wire Protocol (tokio-postgres) • Extended query protocol",
+            DatabaseFamily::Sqlite => "SQLite file or in-memory database",
+            DatabaseFamily::MySql => "MySQL wire protocol (MySQL, MariaDB, TiDB, and compatible engines)",
+            DatabaseFamily::Postgres => "PostgreSQL wire protocol (Postgres, CockroachDB, and compatible engines)",
         };
 
         let engine_selector = v_flex()

@@ -6,6 +6,21 @@ use crate::db::error::{DbError, DbResult};
 pub struct QuerySafetyValidator;
 
 impl QuerySafetyValidator {
+    /// True when the statement should be executed as a result-returning query
+    /// (SELECT / WITH / PRAGMA / EXPLAIN / SHOW / DESCRIBE), after comments.
+    pub fn is_result_set_query(sql: &str) -> bool {
+        let cleaned = Self::clean_sql(sql);
+        let first = cleaned
+            .split(|c: char| c.is_whitespace() || c == ';' || c == '(')
+            .find(|s| !s.is_empty())
+            .unwrap_or("")
+            .to_ascii_uppercase();
+        matches!(
+            first.as_str(),
+            "SELECT" | "WITH" | "PRAGMA" | "EXPLAIN" | "SHOW" | "DESCRIBE" | "DESC" | "VALUES"
+        )
+    }
+
     /// Strips leading/trailing whitespace and comments (-- line comments and /* block comments */).
     pub fn clean_sql(sql: &str) -> String {
         let mut result = String::with_capacity(sql.len());
@@ -120,6 +135,16 @@ mod tests {
         let sql = "-- header comment\nSELECT * FROM users; /* inline comment */";
         let cleaned = QuerySafetyValidator::clean_sql(sql);
         assert_eq!(cleaned, "SELECT * FROM users;");
+    }
+
+    #[test]
+    fn test_comment_prefixed_select_is_result_set() {
+        let sql = "-- CrabStudio SQL Workspace\n-- Type your SQL queries here\nSELECT 1 AS id, 'Welcome' AS message;";
+        assert!(QuerySafetyValidator::is_result_set_query(sql));
+        assert!(QuerySafetyValidator::is_result_set_query("WITH t AS (SELECT 1) SELECT * FROM t"));
+        assert!(QuerySafetyValidator::is_result_set_query("PRAGMA table_info(users)"));
+        assert!(!QuerySafetyValidator::is_result_set_query("INSERT INTO users(name) VALUES ('a')"));
+        assert!(!QuerySafetyValidator::is_result_set_query("-- only a comment"));
     }
 
     #[test]

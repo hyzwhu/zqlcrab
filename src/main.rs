@@ -4,9 +4,9 @@ pub mod db;
 pub mod ui;
 
 use gpui_kit::AppContext;
-use gpui_kit::component::{Root, TitleBar};
-use gpui_kit::gpui::{Bounds, WindowBounds, WindowOptions, px, size};
-use ui::CrabStudioApp;
+use gpui_kit::component::{Root, Theme, ThemeMode, TitleBar};
+use gpui_kit::gpui::{Bounds, KeyBinding, WindowBounds, px, size};
+use ui::app::{CloseDialog, CrabStudioApp, RunQuery};
 
 fn main() {
     // Initialize background Tokio runtime and set ambient context on main thread
@@ -16,12 +16,20 @@ fn main() {
         .with_assets(gpui_kit::assets::Assets)
         .run(|cx| {
             gpui_kit::init(cx);
+            Theme::change(ThemeMode::Dark, None, cx);
+
+            cx.bind_keys([
+                KeyBinding::new("cmd-enter", RunQuery, Some("CrabStudio")),
+                KeyBinding::new("ctrl-enter", RunQuery, Some("CrabStudio")),
+                KeyBinding::new("escape", CloseDialog, Some("CrabStudio")),
+            ]);
 
             let bounds = Bounds::centered(None, size(px(1200.0), px(800.0)), cx);
-            let window_options = WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(bounds)),
-                ..TitleBar::window_options()
-            };
+            let mut window_options = TitleBar::window_options();
+            window_options.window_bounds = Some(WindowBounds::Windowed(bounds));
+            if let Some(titlebar) = window_options.titlebar.as_mut() {
+                titlebar.title = Some("CrabStudio".into());
+            }
 
             cx.spawn(async move |cx| {
                 cx.open_window(window_options, |window, cx| {

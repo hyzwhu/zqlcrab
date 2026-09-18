@@ -169,12 +169,7 @@ impl DatabaseAdapter for MysqlAdapter {
             .await
             .map_err(|e| DbError::connection(e.to_string()))?;
 
-        let trimmed = sql.trim();
-        let is_select = trimmed.len() >= 6
-            && (trimmed[..6].eq_ignore_ascii_case("SELECT")
-                || trimmed[..4].eq_ignore_ascii_case("SHOW")
-                || trimmed[..4].eq_ignore_ascii_case("DESC")
-                || trimmed[..7].eq_ignore_ascii_case("EXPLAIN"));
+        let is_select = crate::db::safety::QuerySafetyValidator::is_result_set_query(sql);
 
         if is_select {
             let mut query_result = conn

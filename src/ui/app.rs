@@ -26,6 +26,8 @@ use gpui_kit::gpui::{
 };
 use uuid::Uuid;
 
+gpui_kit::actions!(zqlcrab, [RunQuery, CloseDialog]);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkspaceTab {
     QueryConsole,
@@ -99,7 +101,7 @@ impl CrabStudioApp {
 
         let query_editor = cx.new(|cx| {
             TextareaState::new(window, cx).default_value(
-                "-- CrabStudio SQL Workspace\n-- Type your SQL queries here and press ⌘↵ or Run\nSELECT 1 AS id, 'Welcome to CrabStudio' AS message;\n",
+                "-- Press ⌘↵ (Ctrl+Enter) to run\nSELECT 1 AS id, 'Welcome to CrabStudio' AS message;\n",
             )
         });
 
@@ -570,12 +572,6 @@ impl Render for CrabStudioApp {
                                 .font_weight(FontWeight::BOLD)
                                 .text_color(ThemeColors::TEXT_PRIMARY)
                                 .child("CrabStudio"),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(ThemeColors::TEXT_FAINT)
-                                .child("Desktop Database Client"),
                         ),
                 )
                 .child(
@@ -606,7 +602,7 @@ impl Render for CrabStudioApp {
                         .child({
                             let handle = app_handle.clone();
                             Button::new("title_new_conn")
-                                .primary()
+                                .outline()
                                 .xsmall()
                                 .icon(IconName::Plus)
                                 .label("New Connection")
@@ -677,7 +673,7 @@ impl Render for CrabStudioApp {
         });
 
         // Tabs navigation bar
-        let selected_tbl_label = self.selected_table.as_deref().unwrap_or("None");
+        let selected_tbl_label = self.selected_table.as_deref();
 
         let tabs_bar = h_flex()
             .h(px(38.0))
@@ -716,7 +712,10 @@ impl Render for CrabStudioApp {
                     .child({
                         let is_active = self.active_tab == WorkspaceTab::DataGrid;
                         let handle = app_handle.clone();
-                        let label = format!("Data ({selected_tbl_label})");
+                        let label = match selected_tbl_label {
+                            Some(name) => format!("Data · {name}"),
+                            None => "Data".to_string(),
+                        };
                         Button::new("tab_data")
                             .small()
                             .ghost()
@@ -738,7 +737,10 @@ impl Render for CrabStudioApp {
                     .child({
                         let is_active = self.active_tab == WorkspaceTab::Schema;
                         let handle = app_handle.clone();
-                        let label = format!("Schema ({selected_tbl_label})");
+                        let label = match selected_tbl_label {
+                            Some(name) => format!("Schema · {name}"),
+                            None => "Schema".to_string(),
+                        };
                         Button::new("tab_schema")
                             .small()
                             .ghost()
@@ -765,7 +767,7 @@ impl Render for CrabStudioApp {
                         Button::new("tab_history")
                             .small()
                             .ghost()
-                            .icon(IconName::RotateCw)
+                            .icon(IconName::Clock)
                             .label(label)
                             .border_b_2()
                             .border_color(if is_active {
@@ -870,7 +872,7 @@ impl Render for CrabStudioApp {
                                                     .text_xs()
                                                     .font_weight(FontWeight::SEMIBOLD)
                                                     .text_color(ThemeColors::TEXT_PRIMARY)
-                                                    .child("⚡ Ready to Connect: Select a database or create a new profile (supports 16 database systems)"),
+                                                    .child("Select a saved profile or create a new connection"),
                                             ),
                                     )
                                     .child(new_profile_btn),
@@ -1103,20 +1105,34 @@ impl Render for CrabStudioApp {
 
         // Root layout
         v_flex()
+            .id("crabstudio_root")
+            .key_context("CrabStudio")
+            .on_action(cx.listener(|this, _: &RunQuery, _, cx| {
+                this.run_query(cx);
+            }))
+            .on_action(cx.listener(|this, _: &CloseDialog, _, cx| {
+                if this.dialog_open {
+                    this.close_connection_dialog(cx);
+                }
+            }))
             .size_full()
             .bg(ThemeColors::BG_APP)
             .child(title_bar)
             .child(
                 h_flex()
+                    .items_stretch()
                     .flex_1()
                     .w_full()
+                    .min_h_0()
                     .child(sidebar)
                     .child(
                         v_flex()
                             .flex_1()
                             .h_full()
+                            .min_w_0()
+                            .min_h_0()
                             .child(tabs_bar)
-                            .child(div().flex_1().child(main_content)),
+                            .child(div().flex_1().min_h_0().child(main_content)),
                     ),
             )
             .child(status_bar)

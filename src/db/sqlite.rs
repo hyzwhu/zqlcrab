@@ -35,6 +35,52 @@ impl SqliteAdapter {
             ValueRef::Blob(b) => QueryValue::Bytes(b.to_vec()),
         }
     }
+
+    fn should_seed_demo(config: &ConnectionConfig) -> bool {
+        let path = config.database.trim();
+        (path.is_empty() || path == ":memory:") && config.name.contains("Sample")
+    }
+
+    fn seed_demo_schema(conn: &Connection) -> DbResult<()> {
+        let already_seeded: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('users', 'products')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        if already_seeded > 0 {
+            return Ok(());
+        }
+
+        conn.execute_batch(
+            r#"
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                email TEXT,
+                active INTEGER NOT NULL DEFAULT 1
+            );
+            INSERT INTO users (name, email, active) VALUES
+                ('Alice', 'alice@example.com', 1),
+                ('Bob', 'bob@example.com', 1),
+                ('Carol', 'carol@example.com', 0);
+
+            CREATE TABLE products (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                price REAL NOT NULL,
+                stock INTEGER NOT NULL DEFAULT 0
+            );
+            INSERT INTO products (name, price, stock) VALUES
+                ('Keyboard', 79.0, 12),
+                ('Mouse', 29.5, 40),
+                ('Monitor', 249.0, 8);
+            "#,
+        )
+        .map_err(|e| DbError::query(format!("Failed to seed sample SQLite schema: {e}")))?;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -75,6 +121,10 @@ impl DatabaseAdapter for SqliteAdapter {
             }
         }
 
+        if Self::should_seed_demo(&self.config) {
+            Self::seed_demo_schema(&conn)?;
+        }
+
         self.conn = Some(Arc::new(Mutex::new(conn)));
         Ok(())
     }
@@ -112,12 +162,7 @@ impl DatabaseAdapter for SqliteAdapter {
         let conn_arc = self.conn.as_ref().ok_or_else(|| DbError::connection("Not connected"))?;
         let conn = conn_arc.lock().map_err(|e| DbError::PoolError(e.to_string()))?;
 
-        let trimmed = sql.trim();
-        let is_select = trimmed.len() >= 6
-            && (trimmed[..6].eq_ignore_ascii_case("SELECT")
-                || trimmed[..6].eq_ignore_ascii_case("PRAGMA")
-                || trimmed[..6].eq_ignore_ascii_case("EXPLAIN")
-                || (trimmed.len() >= 4 && trimmed[..4].eq_ignore_ascii_case("WITH")));
+        let is_select = crate::db::safety::QuerySafetyValidator::is_result_set_query(sql);
 
         if is_select {
             let mut stmt = conn
@@ -346,6 +391,41 @@ mod tests {
         // Disconnect
         adapter.disconnect().await.expect("disconnect should succeed");
         assert!(!adapter.is_connected());
+    }
+
+    #[tokio::test]
+    async fn test_sample_memory_db_seeds_demo_tables() {
+        let config = ConnectionConfig::sqlite("Sample SQLite (In-Memory)", ":memory:");
+        let mut adapter = SqliteAdapter::new(config);
+        adapter.connect().await.expect("connect should succeed");
+
+        let tables = adapter.list_tables(None, None).await.expect("list_tables");
+        let names: Vec<_> = tables.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"users"), "expected users table, got {names:?}");
+        assert!(names.contains(&"products"), "expected products table, got {names:?}");
+
+        let users = adapter
+            .execute_query("SELECT COUNT(*) AS n FROM users")
+            .await
+            .expect("count users");
+        assert_eq!(users.rows[0][0], QueryValue::Int(3));
+    }
+
+    #[tokio::test]
+    async fn test_comment_prefixed_select_returns_rows() {
+        let config = ConnectionConfig::sqlite("test_comments", ":memory:");
+        let mut adapter = SqliteAdapter::new(config);
+        adapter.connect().await.expect("connect should succeed");
+
+        let sql = "-- CrabStudio SQL Workspace\n-- Type your SQL queries here and press ⌘↵ or Run\nSELECT 1 AS id, 'Welcome to CrabStudio' AS message;";
+        let result = adapter.execute_query(sql).await.expect("comment-prefixed SELECT should run");
+        assert_eq!(result.columns, vec!["id", "message"]);
+        assert_eq!(result.rows.len(), 1);
+        assert_eq!(result.rows[0][0], QueryValue::Int(1));
+        assert_eq!(
+            result.rows[0][1],
+            QueryValue::String("Welcome to CrabStudio".to_string())
+        );
     }
 }
 

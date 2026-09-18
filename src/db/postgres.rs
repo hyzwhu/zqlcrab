@@ -145,12 +145,7 @@ impl DatabaseAdapter for PostgresAdapter {
         let client_arc = self.client.as_ref().ok_or_else(|| DbError::connection("Not connected"))?;
         let client = client_arc.lock().await;
 
-        let trimmed = sql.trim();
-        let is_select = trimmed.len() >= 6
-            && (trimmed[..6].eq_ignore_ascii_case("SELECT")
-                || trimmed[..4].eq_ignore_ascii_case("WITH")
-                || trimmed[..4].eq_ignore_ascii_case("SHOW")
-                || trimmed[..7].eq_ignore_ascii_case("EXPLAIN"));
+        let is_select = crate::db::safety::QuerySafetyValidator::is_result_set_query(sql);
 
         if is_select {
             let rows = client

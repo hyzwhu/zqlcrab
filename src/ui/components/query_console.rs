@@ -6,7 +6,7 @@ use crate::ui::theme::ThemeColors;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::{h_flex, v_flex};
 use gpui_kit::component::{
-    Icon, Sizable as _,
+    Disableable as _, Icon, Sizable as _,
     button::{Button, ButtonVariants as _},
     input::{Textarea, TextareaState},
 };
@@ -76,7 +76,9 @@ impl RenderOnce for QueryConsole {
             .primary()
             .small()
             .icon(IconName::Play)
-            .label(if self.is_executing { "Executing..." } else { "Run (⌘↵)" });
+            .disabled(self.is_executing)
+            .tooltip("Run query (⌘↵ / Ctrl+Enter)")
+            .label(if self.is_executing { "Executing…" } else { "Run" });
 
         if let Some(on_run) = self.on_run {
             run_button = run_button.on_click(move |_, window, cx| {
@@ -161,7 +163,12 @@ impl RenderOnce for QueryConsole {
             .bg(ThemeColors::BG_APP)
             .border_b_1()
             .border_color(ThemeColors::BORDER)
-            .child(Textarea::new(&self.editor_state).h(px(114.0)));
+            .child(
+                Textarea::new(&self.editor_state)
+                    .h(px(114.0))
+                    .bg(ThemeColors::BG_APP)
+                    .text_color(ThemeColors::TEXT_PRIMARY),
+            );
 
         // Results region
         let results_pane = div()

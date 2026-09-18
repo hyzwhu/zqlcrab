@@ -133,12 +133,16 @@ impl RenderOnce for AppStatusBar {
                     )
                 })
                 .when_some(stat.ping_ms, |sub, ping| {
-                    sub.child(
-                        div()
-                            .text_xs()
-                            .text_color(ThemeColors::TEXT_MUTED)
-                            .child(format!("{ping}ms")),
-                    )
+                    if ping == 0 {
+                        sub
+                    } else {
+                        sub.child(
+                            div()
+                                .text_xs()
+                                .text_color(ThemeColors::TEXT_MUTED)
+                                .child(format!("{ping}ms")),
+                        )
+                    }
                 })
             });
 
