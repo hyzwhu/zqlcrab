@@ -1528,7 +1528,7 @@ impl Render for CrabStudioApp {
                             .min_w_0()
                             .min_h_0()
                             .child(tabs_bar)
-                            .child(div().flex_1().min_h_0().child(main_content)),
+                            .child(v_flex().flex_1().min_h_0().w_full().child(main_content)),
                     ),
             )
             .child(status_bar)

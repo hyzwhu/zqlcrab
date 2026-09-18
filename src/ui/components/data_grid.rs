@@ -8,12 +8,12 @@ use gpui_kit::base::{h_flex, v_flex};
 use gpui_kit::component::{
     Icon, Sizable as _,
     button::{Button, ButtonVariants as _},
-    scroll::ScrollableElement as _,
+    scroll::{ScrollableElement as _, ScrollbarAxis},
     table::{Table, TableBody, TableCell, TableHead, TableHeader, TableRow},
 };
 use gpui_kit::gpui::{
     App, ClipboardItem, ElementId, FontWeight, InteractiveElement as _, IntoElement, ParentElement,
-    RenderOnce, StatefulInteractiveElement as _, Styled, Window, div, prelude::*, px,
+    RenderOnce, ScrollHandle, StatefulInteractiveElement as _, Styled, Window, div, prelude::*, px,
     rgba,
 };
 use std::cmp::Ordering;
@@ -280,7 +280,7 @@ fn compare_query_values(a: &QueryValue, b: &QueryValue, dir: SortDirection) -> O
 }
 
 impl RenderOnce for DataGrid {
-    fn render(self, _: &mut Window, _cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let result = match &self.result {
             Some(res) => res,
             None => {
@@ -707,21 +707,34 @@ impl RenderOnce for DataGrid {
         let total_table_width: f32 = col_widths.iter().sum::<f32>() + index_col_width;
 
         // Table header row
-        let mut header_row = TableRow::new().child(
-            TableHead::new()
-                .w(px(index_col_width))
-                .min_w(px(index_col_width))
-                .flex_shrink_0()
-                .overflow_hidden()
-                .child(
-                    div()
-                        .w_full()
-                        .text_xs()
-                        .font_weight(FontWeight::BOLD)
-                        .text_color(ThemeColors::TEXT_FAINT)
-                        .child("#"),
-                ),
-        );
+        let mut header_row = TableRow::new()
+            .bg(ThemeColors::BG_SURFACE)
+            .border_b_1()
+            .border_color(ThemeColors::BORDER)
+            .child(
+                TableHead::new()
+                    .h(px(32.0))
+                    .w(px(index_col_width))
+                    .min_w(px(index_col_width))
+                    .px_0()
+                    .py_0()
+                    .flex_shrink_0()
+                    .overflow_hidden()
+                    .border_r_1()
+                    .border_color(ThemeColors::BORDER)
+                    .bg(ThemeColors::BG_SURFACE)
+                    .child(
+                        div()
+                            .size_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_xs()
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(ThemeColors::TEXT_FAINT)
+                            .child("#"),
+                    ),
+            );
 
         for (i, col_name) in result.columns.iter().enumerate() {
             let col_w = col_widths.get(i).copied().unwrap_or(120.0);
@@ -787,8 +800,10 @@ impl RenderOnce for DataGrid {
                 .items_center()
                 .justify_between()
                 .gap_1()
+                .px_2()
                 .cursor_pointer()
                 .overflow_hidden()
+                .hover(|s| s.bg(ThemeColors::BG_SURFACE_HOVER))
                 .id(ElementId::NamedInteger("sort_col".into(), i as u64))
                 .when_some(on_sort_click, |d, handler| {
                     d.on_click(move |_, window, cx| handler(i, window, cx))
@@ -796,10 +811,16 @@ impl RenderOnce for DataGrid {
                 .child(header_content);
 
             let head_cell = TableHead::new()
+                .h(px(32.0))
                 .w(px(col_w))
                 .min_w(px(col_w))
+                .px_0()
+                .py_0()
                 .flex_shrink_0()
                 .overflow_hidden()
+                .border_r_1()
+                .border_color(ThemeColors::BORDER)
+                .bg(ThemeColors::BG_SURFACE)
                 .child(header_div);
 
             header_row = header_row.child(head_cell);
@@ -845,14 +866,20 @@ impl RenderOnce for DataGrid {
                 );
 
             let mut row = TableRow::new()
+                .border_b_1()
+                .border_color(ThemeColors::BORDER.opacity(0.35))
                 .when(is_row_selected, |r| r.bg(ThemeColors::BG_SURFACE_ACTIVE))
                 .child(
                     TableCell::new()
                         .h(px(32.0))
                         .w(px(index_col_width))
                         .min_w(px(index_col_width))
+                        .px_0()
+                        .py_0()
                         .flex_shrink_0()
                         .overflow_hidden()
+                        .border_r_1()
+                        .border_color(ThemeColors::BORDER.opacity(0.35))
                         .child(index_cell_btn),
                 );
 
@@ -953,8 +980,12 @@ impl RenderOnce for DataGrid {
                         .h(px(32.0))
                         .w(px(col_w))
                         .min_w(px(col_w))
+                        .px_0()
+                        .py_0()
                         .flex_shrink_0()
                         .overflow_hidden()
+                        .border_r_1()
+                        .border_color(ThemeColors::BORDER.opacity(0.25))
                         .child(cell_container),
                 );
             }
@@ -964,16 +995,40 @@ impl RenderOnce for DataGrid {
         let table = Table::new()
             .small()
             .min_w(px(total_table_width))
-            .child(TableHeader::new().child(header_row))
+            .child(
+                TableHeader::new()
+                    .bg(ThemeColors::BG_SURFACE)
+                    .border_b_1()
+                    .border_color(ThemeColors::BORDER)
+                    .child(header_row),
+            )
             .child(body);
+
+        let scroll_handle = window
+            .use_keyed_state(
+                ElementId::Name("data_grid_table_scroll_handle".into()),
+                cx,
+                |_, _| ScrollHandle::default(),
+            )
+            .read(cx)
+            .clone();
+
+        let scroll_area = div()
+            .id("data_grid_table_scroll_area")
+            .size_full()
+            .overflow_x_scroll()
+            .overflow_y_scroll()
+            .track_scroll(&scroll_handle)
+            .child(table);
 
         let table_scroll_view = div()
             .id("data_grid_table_scroll")
             .flex_1()
             .min_w_0()
             .min_h_0()
-            .overflow_scrollbar()
-            .child(table);
+            .relative()
+            .child(scroll_area)
+            .scrollbar(&scroll_handle, ScrollbarAxis::Both);
 
         // Build Right Inspector Panel
         let inspector_panel = if self.inspector_open {
