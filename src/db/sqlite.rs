@@ -44,7 +44,7 @@ impl SqliteAdapter {
     fn seed_demo_schema(conn: &Connection) -> DbResult<()> {
         let already_seeded: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('users', 'products')",
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('users', 'products', 'reports')",
                 [],
                 |row| row.get(0),
             )
@@ -76,6 +76,18 @@ impl SqliteAdapter {
                 ('Keyboard', 79.0, 12),
                 ('Mouse', 29.5, 40),
                 ('Monitor', 249.0, 8);
+
+            CREATE TABLE reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                report_url TEXT NOT NULL,
+                create_time TEXT NOT NULL,
+                rsrcr_names TEXT NOT NULL,
+                title TEXT NOT NULL
+            );
+            INSERT INTO reports (report_url, create_time, rsrcr_names, title) VALUES
+                ('http://ecrm2.gf.com.cn/app/v2/api/att/downloadFtpReport?file_path=/ecrm/ecrm-att/2026/09/17/202609170008GH0024.pdf&client_name=ecrm2&file_name=202609170008GH0024.pdf', '2026-09-17 14:00:00', '【周绍南】202609170008GH0024', '【华泰资产配置】"924"两周年:来时路与再出发'),
+                ('http://ecrm2.gf.com.cn/app/v2/api/att/downloadFtpReport?file_path=/ecrm/ecrm-att/2026/09/16/202609160002GH0032.pdf&client_name=ecrm2&file_name=202609160002GH0032.pdf', '2026-09-16 10:30:00', '【刘伟】202609160002GH0032', '【宏观专题】全球制造业景气度跟踪与资产配置展望'),
+                ('http://ecrm2.gf.com.cn/app/v2/api/att/downloadFtpReport?file_path=/ecrm/ecrm-att/2026/09/15/202609150002GH0011.pdf&client_name=ecrm2&file_name=202609150002GH0011.pdf', '2026-09-15 09:15:00', '【张继强】202609150002GH0011', '【债券周报】流动性跟踪周报');
             "#,
         )
         .map_err(|e| DbError::query(format!("Failed to seed sample SQLite schema: {e}")))?;
