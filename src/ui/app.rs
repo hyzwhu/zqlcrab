@@ -81,6 +81,7 @@ pub struct CrabStudioApp {
 
     // Dialog state
     dialog_open: bool,
+    dialog_editing_id: Option<String>,
     dialog_db_type: DatabaseType,
     dialog_name_input: Entity<InputState>,
     dialog_host_input: Entity<InputState>,
@@ -185,6 +186,7 @@ impl CrabStudioApp {
             grid_json_pretty: true,
             sidebar_table_filter,
             dialog_open: false,
+            dialog_editing_id: None,
             dialog_db_type: DatabaseType::Sqlite,
             dialog_name_input,
             dialog_host_input,
@@ -509,6 +511,7 @@ impl CrabStudioApp {
     /// Open new connection dialog
     pub fn open_connection_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.dialog_open = true;
+        self.dialog_editing_id = None;
         self.dialog_db_type = DatabaseType::Sqlite;
         self.dialog_test_result = None;
         self.dialog_is_testing = false;
@@ -523,9 +526,93 @@ impl CrabStudioApp {
         cx.notify();
     }
 
+    /// Open dialog to edit an existing connection profile
+    pub fn open_edit_connection_dialog(&mut self, conn_id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(config) = self.manager.get_config(conn_id) else {
+            return;
+        };
+
+        self.dialog_open = true;
+        self.dialog_editing_id = Some(conn_id.to_string());
+        self.dialog_db_type = config.db_type;
+        self.dialog_test_result = None;
+        self.dialog_is_testing = false;
+        self.dialog_is_read_only = config.is_read_only;
+
+        let name = config.name.clone();
+        self.dialog_name_input.update(cx, |inp, cx| {
+            inp.set_value(&name, window, cx);
+        });
+
+        if config.db_type.is_file_based() {
+            let path = config.database.clone();
+            self.dialog_database_input.update(cx, |inp, cx| {
+                inp.set_value(&path, window, cx);
+            });
+        } else {
+            let host = config.host.clone();
+            let port = config.port.to_string();
+            let db = config.database.clone();
+            let user = config.username.clone();
+            let pass = config.password.clone().unwrap_or_default();
+
+            self.dialog_host_input.update(cx, |inp, cx| {
+                inp.set_value(&host, window, cx);
+            });
+            self.dialog_port_input.update(cx, |inp, cx| {
+                inp.set_value(&port, window, cx);
+            });
+            self.dialog_database_input.update(cx, |inp, cx| {
+                inp.set_value(&db, window, cx);
+            });
+            self.dialog_user_input.update(cx, |inp, cx| {
+                inp.set_value(&user, window, cx);
+            });
+            self.dialog_pass_input.update(cx, |inp, cx| {
+                inp.set_value(&pass, window, cx);
+            });
+        }
+        cx.notify();
+    }
+
+    /// Duplicate an existing connection profile
+    pub fn duplicate_connection(&mut self, conn_id: &str, cx: &mut Context<Self>) {
+        let Some(mut config) = self.manager.get_config(conn_id) else {
+            return;
+        };
+        config.id = Uuid::new_v4().to_string();
+        config.name = format!("{} (Copy)", config.name);
+        let name = config.name.clone();
+        if let Err(err) = self.manager.save_config(config) {
+            self.status_message = Some(format!("Failed to duplicate profile: {err}"));
+            cx.notify();
+            return;
+        }
+        self.saved_connections = self.manager.list_configs();
+        self.status_message = Some(format!("Duplicated profile '{name}'"));
+        cx.notify();
+    }
+
+    /// Delete an existing connection profile
+    pub fn delete_connection(&mut self, conn_id: &str, cx: &mut Context<Self>) {
+        if self.active_connection.as_ref().is_some_and(|c| c.config.id == conn_id) {
+            self.disconnect(cx);
+        }
+        let config_name = self.manager.get_config(conn_id).map(|c| c.name).unwrap_or_else(|| conn_id.to_string());
+        if let Err(err) = self.manager.delete_config(conn_id) {
+            self.status_message = Some(format!("Failed to delete profile: {err}"));
+            cx.notify();
+            return;
+        }
+        self.saved_connections = self.manager.list_configs();
+        self.status_message = Some(format!("Deleted profile '{config_name}'"));
+        cx.notify();
+    }
+
     /// Close connection dialog
     pub fn close_connection_dialog(&mut self, cx: &mut Context<Self>) {
         self.dialog_open = false;
+        self.dialog_editing_id = None;
         self.dialog_test_result = None;
         cx.notify();
     }
@@ -632,7 +719,11 @@ impl CrabStudioApp {
 
     /// Save connection configured in dialog and connect
     pub fn save_dialog_connection(&mut self, cx: &mut Context<Self>) {
-        let config = self.build_config_from_dialog(cx);
+        let mut config = self.build_config_from_dialog(cx);
+        let is_edit = self.dialog_editing_id.is_some();
+        if let Some(ref edit_id) = self.dialog_editing_id {
+            config.id = edit_id.clone();
+        }
         let id = config.id.clone();
         if let Err(err) = self.manager.save_config(config) {
             self.dialog_test_result = Some(Err(format!("Failed to save profile: {err}")));
@@ -642,7 +733,14 @@ impl CrabStudioApp {
 
         self.saved_connections = self.manager.list_configs();
         self.dialog_open = false;
-        self.select_connection(&id, cx);
+        self.dialog_editing_id = None;
+
+        if !is_edit {
+            self.select_connection(&id, cx);
+        } else {
+            self.status_message = Some("Connection profile updated".to_string());
+            cx.notify();
+        }
     }
 }
 
@@ -775,6 +873,30 @@ impl Render for CrabStudioApp {
             move |sql, window, cx| {
                 handle.update(cx, |this, cx| {
                     this.execute_custom_sql(&sql, window, cx);
+                });
+            }
+        })
+        .on_edit_connection({
+            let handle = app_handle.clone();
+            move |conn_id, window, cx| {
+                handle.update(cx, |this, cx| {
+                    this.open_edit_connection_dialog(&conn_id, window, cx);
+                });
+            }
+        })
+        .on_duplicate_connection({
+            let handle = app_handle.clone();
+            move |conn_id, _, cx| {
+                handle.update(cx, |this, cx| {
+                    this.duplicate_connection(&conn_id, cx);
+                });
+            }
+        })
+        .on_delete_connection({
+            let handle = app_handle.clone();
+            move |conn_id, _, cx| {
+                handle.update(cx, |this, cx| {
+                    this.delete_connection(&conn_id, cx);
                 });
             }
         });
@@ -1338,6 +1460,7 @@ impl Render for CrabStudioApp {
                     &self.dialog_user_input,
                     &self.dialog_pass_input,
                 )
+                .editing(self.dialog_editing_id.is_some())
                 .read_only(self.dialog_is_read_only)
                 .testing(self.dialog_is_testing)
                 .test_result(self.dialog_test_result.clone())

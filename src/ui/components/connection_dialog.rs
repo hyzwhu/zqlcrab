@@ -26,6 +26,7 @@ pub struct ConnectionDialog {
     pass_input: Entity<InputState>,
     is_read_only: bool,
     is_testing: bool,
+    is_editing: bool,
     test_result: Option<Result<String, String>>,
     on_select_type: Option<Rc<dyn Fn(DatabaseType, &mut Window, &mut App) + 'static>>,
     on_toggle_read_only: Option<Rc<dyn Fn(bool, &mut Window, &mut App) + 'static>>,
@@ -54,6 +55,7 @@ impl ConnectionDialog {
             pass_input: pass_input.clone(),
             is_read_only: false,
             is_testing: false,
+            is_editing: false,
             test_result: None,
             on_select_type: None,
             on_toggle_read_only: None,
@@ -61,6 +63,11 @@ impl ConnectionDialog {
             on_save: None,
             on_cancel: None,
         }
+    }
+
+    pub fn editing(mut self, is_editing: bool) -> Self {
+        self.is_editing = is_editing;
+        self
     }
 
     pub fn read_only(mut self, is_read_only: bool) -> Self {
@@ -159,7 +166,7 @@ impl RenderOnce for ConnectionDialog {
             .primary()
             .small()
             .icon(IconName::Check)
-            .label("Save & Connect");
+            .label(if self.is_editing { "Save Changes" } else { "Save & Connect" });
         if let Some(on_save) = self.on_save {
             save_btn = save_btn.on_click(move |_, window, cx| {
                 on_save(window, cx);
@@ -555,13 +562,21 @@ impl RenderOnce for ConnectionDialog {
                                             .text_sm()
                                             .font_weight(FontWeight::SEMIBOLD)
                                             .text_color(ThemeColors::TEXT_PRIMARY)
-                                            .child("New Database Connection"),
+                                            .child(if self.is_editing {
+                                                "Edit Connection Profile"
+                                            } else {
+                                                "New Database Connection"
+                                            }),
                                     )
                                     .child(
                                         div()
                                             .text_xs()
                                             .text_color(ThemeColors::TEXT_MUTED)
-                                            .child("Configure a new database profile to connect"),
+                                            .child(if self.is_editing {
+                                                "Modify connection settings and credentials"
+                                            } else {
+                                                "Configure a new database profile to connect"
+                                            }),
                                     ),
                             ),
                     )

@@ -8,9 +8,10 @@ use gpui_kit::component::{
     Icon, Sizable as _,
     button::{Button, ButtonVariants as _},
     input::{Input, InputState},
+    menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem},
 };
 use gpui_kit::gpui::{
-    App, ElementId, Entity, FontWeight, InteractiveElement as _, IntoElement, ParentElement,
+    Anchor, App, Context, ElementId, Entity, FontWeight, InteractiveElement as _, IntoElement, ParentElement,
     RenderOnce, StatefulInteractiveElement as _, Styled, Window, div, prelude::FluentBuilder as _,
     px,
 };
@@ -30,6 +31,9 @@ pub struct Sidebar {
     on_disconnect: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_refresh: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_quick_query: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
+    on_edit_connection: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
+    on_duplicate_connection: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
+    on_delete_connection: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
 }
 
 impl Sidebar {
@@ -51,6 +55,9 @@ impl Sidebar {
             on_disconnect: None,
             on_refresh: None,
             on_quick_query: None,
+            on_edit_connection: None,
+            on_duplicate_connection: None,
+            on_delete_connection: None,
         }
     }
 
@@ -106,11 +113,125 @@ impl Sidebar {
         self.on_quick_query = Some(Rc::new(handler));
         self
     }
+
+    pub fn on_edit_connection<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(String, &mut Window, &mut App) + 'static,
+    {
+        self.on_edit_connection = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_duplicate_connection<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(String, &mut Window, &mut App) + 'static,
+    {
+        self.on_duplicate_connection = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_delete_connection<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(String, &mut Window, &mut App) + 'static,
+    {
+        self.on_delete_connection = Some(Rc::new(handler));
+        self
+    }
+
+    fn render_connection_menu(
+        conn: &ConnectionConfig,
+        is_active: bool,
+        on_disconnect: &Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
+        on_select: &Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
+        on_edit: &Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
+        on_duplicate: &Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
+        on_delete: &Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
+        menu: PopupMenu,
+        _window: &mut Window,
+        _cx: &mut Context<PopupMenu>,
+    ) -> PopupMenu {
+        let mut menu = menu;
+        let conn_id = conn.id.clone();
+
+        if is_active {
+            let disc = on_disconnect.clone();
+            menu = menu.item(
+                PopupMenuItem::new("Close Connection")
+                    .icon(IconName::Power)
+                    .on_click(move |_, window, cx| {
+                        if let Some(ref handler) = disc {
+                            handler(window, cx);
+                        }
+                    }),
+            );
+        } else {
+            let sel = on_select.clone();
+            let cid = conn_id.clone();
+            menu = menu.item(
+                PopupMenuItem::new("Connect")
+                    .icon(IconName::Power)
+                    .on_click(move |_, window, cx| {
+                        if let Some(ref handler) = sel {
+                            handler(cid.clone(), window, cx);
+                        }
+                    }),
+            );
+        }
+
+        let edit = on_edit.clone();
+        let cid_edit = conn_id.clone();
+        menu = menu.item(
+            PopupMenuItem::new("Edit")
+                .icon(IconName::Pencil)
+                .on_click(move |_, window, cx| {
+                    if let Some(ref handler) = edit {
+                        handler(cid_edit.clone(), window, cx);
+                    }
+                }),
+        );
+
+        let dup = on_duplicate.clone();
+        let cid_dup = conn_id.clone();
+        menu = menu.item(
+            PopupMenuItem::new("Duplicate")
+                .icon(IconName::Copy)
+                .on_click(move |_, window, cx| {
+                    if let Some(ref handler) = dup {
+                        handler(cid_dup.clone(), window, cx);
+                    }
+                }),
+        );
+
+        menu = menu.separator();
+
+        let del = on_delete.clone();
+        let cid_del = conn_id.clone();
+        let del_icon = Icon::new(IconName::Trash).text_color(ThemeColors::ERROR);
+        menu = menu.item(
+            PopupMenuItem::element(|_, _| {
+                div().text_color(ThemeColors::ERROR).child("Delete")
+            })
+            .icon(del_icon)
+            .on_click(move |_, window, cx| {
+                if let Some(ref handler) = del {
+                    handler(cid_del.clone(), window, cx);
+                }
+            }),
+        );
+
+        menu
+    }
 }
 
 impl RenderOnce for Sidebar {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let on_new_action = self.on_new_connection.clone();
+        let on_disconnect_action = self.on_disconnect.clone();
+        let on_select_action = self.on_select_connection.clone();
+        let on_edit_action = self.on_edit_connection.clone();
+        let on_duplicate_action = self.on_duplicate_connection.clone();
+        let on_delete_action = self.on_delete_connection.clone();
+
         let mut new_btn = Button::new("new_conn")
             .primary()
             .xsmall()
@@ -143,7 +264,8 @@ impl RenderOnce for Sidebar {
             .icon(IconName::Unplug)
             .tooltip("Disconnect");
 
-        if let Some(on_disconnect) = self.on_disconnect {
+        if let Some(ref on_disconnect) = on_disconnect_action {
+            let on_disconnect = on_disconnect.clone();
             disconnect_btn = disconnect_btn.on_click(move |_, window, cx| {
                 on_disconnect(window, cx);
             });
@@ -193,8 +315,6 @@ impl RenderOnce for Sidebar {
 
         for conn in &self.connections {
             let is_active = self.active_connection_id.as_deref() == Some(&conn.id);
-            let conn_id = conn.id.clone();
-            let on_select = self.on_select_connection.clone();
 
             let engine_icon = match conn.db_type {
                 DatabaseType::Sqlite => IconName::Database,
@@ -213,83 +333,133 @@ impl RenderOnce for Sidebar {
                 DatabaseType::Greenplum => IconName::Layers,
             };
 
+            let conn_clone = conn.clone();
+            let is_conn_active = is_active;
+            let on_disc_clone = on_disconnect_action.clone();
+            let on_sel_clone = on_select_action.clone();
+            let on_edit_clone = on_edit_action.clone();
+            let on_dup_clone = on_duplicate_action.clone();
+            let on_del_clone = on_delete_action.clone();
+
+            let more_btn = Button::new(ElementId::Name(format!("conn_more_{}", conn.id).into()))
+                .ghost()
+                .xsmall()
+                .icon(IconName::Ellipsis)
+                .tooltip("Connection options")
+                .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, window, cx| {
+                    Self::render_connection_menu(
+                        &conn_clone,
+                        is_conn_active,
+                        &on_disc_clone,
+                        &on_sel_clone,
+                        &on_edit_clone,
+                        &on_dup_clone,
+                        &on_del_clone,
+                        menu,
+                        window,
+                        cx,
+                    )
+                });
+
+            let conn_id_click = conn.id.clone();
+            let on_select_click = on_select_action.clone();
+
+            let left_area = h_flex()
+                .id(ElementId::Name(format!("conn_left_{}", conn.id).into()))
+                .flex_1()
+                .min_w_0()
+                .items_center()
+                .gap_2()
+                .cursor_pointer()
+                .child(
+                    div()
+                        .w(px(6.0))
+                        .h(px(6.0))
+                        .rounded_full()
+                        .bg(if is_active {
+                            ThemeColors::SUCCESS
+                        } else {
+                            ThemeColors::TEXT_FAINT
+                        }),
+                )
+                .child(
+                    Icon::new(engine_icon)
+                        .size(px(13.0))
+                        .text_color(if is_active {
+                            ThemeColors::PRIMARY_BORDER
+                        } else {
+                            ThemeColors::TEXT_MUTED
+                        }),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(ThemeColors::TEXT_PRIMARY)
+                        .child(conn.name.clone()),
+                )
+                .when(conn.environment.is_production(), |this| {
+                    this.child(
+                        div()
+                            .px_1()
+                            .rounded_sm()
+                            .bg(ThemeColors::ERROR)
+                            .text_color(ThemeColors::TEXT_PRIMARY)
+                            .child("PROD"),
+                    )
+                })
+                .when(conn.is_read_only, |this| {
+                    this.child(
+                        div()
+                            .px_1()
+                            .rounded_sm()
+                            .bg(ThemeColors::WARNING)
+                            .text_color(ThemeColors::TEXT_PRIMARY)
+                            .child("RO"),
+                    )
+                })
+                .on_click(move |_, window, cx| {
+                    if let Some(ref handler) = on_select_click {
+                        handler(conn_id_click.clone(), window, cx);
+                    }
+                });
+
+            let conn_clone_ctx = conn.clone();
+            let on_disc_ctx = on_disconnect_action.clone();
+            let on_sel_ctx = on_select_action.clone();
+            let on_edit_ctx = on_edit_action.clone();
+            let on_dup_ctx = on_duplicate_action.clone();
+            let on_del_ctx = on_delete_action.clone();
+
             let conn_item = h_flex()
                 .id(ElementId::Name(format!("conn_item_{}", conn.id).into()))
                 .w_full()
                 .px_2()
-                .py_1()
+                .py_0p5()
                 .rounded_md()
                 .items_center()
                 .justify_between()
-                .cursor_pointer()
                 .bg(if is_active {
                     ThemeColors::BG_SURFACE_ACTIVE
                 } else {
                     ThemeColors::BG_SURFACE
                 })
                 .hover(|s| s.bg(ThemeColors::BG_SURFACE_HOVER))
-                .child(
-                    h_flex()
-                        .items_center()
-                        .gap_2()
-                        .min_w_0()
-                        .child(
-                            div()
-                                .w(px(6.0))
-                                .h(px(6.0))
-                                .rounded_full()
-                                .bg(if is_active {
-                                    ThemeColors::SUCCESS
-                                } else {
-                                    ThemeColors::TEXT_FAINT
-                                }),
-                        )
-                        .child(
-                            Icon::new(engine_icon)
-                                .size(px(13.0))
-                                .text_color(if is_active {
-                                    ThemeColors::PRIMARY_BORDER
-                                } else {
-                                    ThemeColors::TEXT_MUTED
-                                }),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(ThemeColors::TEXT_PRIMARY)
-                                .child(conn.name.clone()),
-                        )
-                        .when(conn.environment.is_production(), |this| {
-                            this.child(
-                                div()
-                                    .px_1()
-                                    .rounded_sm()
-                                    .bg(ThemeColors::ERROR)
-                                    .text_color(ThemeColors::TEXT_PRIMARY)
-                                    .child("PROD"),
-                            )
-                        })
-                        .when(conn.is_read_only, |this| {
-                            this.child(
-                                div()
-                                    .px_1()
-                                    .rounded_sm()
-                                    .bg(ThemeColors::WARNING)
-                                    .text_color(ThemeColors::TEXT_PRIMARY)
-                                    .child("RO"),
-                            )
-                        }),
-                )
-                .child(
-                    Icon::new(IconName::ChevronDown)
-                        .size(px(12.0))
-                        .text_color(ThemeColors::TEXT_FAINT),
-                )
-                .on_click(move |_, window, cx| {
-                    if let Some(ref handler) = on_select {
-                        handler(conn_id.clone(), window, cx);
-                    }
+                .child(left_area)
+                .child(more_btn)
+                .context_menu(move |menu, window, cx| {
+                    Self::render_connection_menu(
+                        &conn_clone_ctx,
+                        is_conn_active,
+                        &on_disc_ctx,
+                        &on_sel_ctx,
+                        &on_edit_ctx,
+                        &on_dup_ctx,
+                        &on_del_ctx,
+                        menu,
+                        window,
+                        cx,
+                    )
                 });
 
             conn_list = conn_list.child(conn_item);
