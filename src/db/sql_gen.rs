@@ -10,6 +10,7 @@ pub struct SqlReviewPlan {
     pub table_name: String,
     pub schema_name: Option<String>,
     pub database_family: DatabaseFamily,
+    pub inserts_count: usize,
     pub updates_count: usize,
     pub deletes_count: usize,
     pub has_primary_key: bool,
@@ -55,7 +56,57 @@ pub fn generate_review_plan(
         _ => quote_ident(table_name, family),
     };
 
-    // 2. Group cell updates by row index (skip rows that are also marked deleted)
+    // 2. Generate INSERT statements for uncommitted new rows
+    let mut inserts_count = 0;
+    for insertion in &changeset.inserted_rows {
+        let mut insert_cols = Vec::new();
+        let mut insert_vals = Vec::new();
+
+        for (col_idx, col_name) in grid_columns.iter().enumerate() {
+            let val = insertion.values.get(col_idx).unwrap_or(&QueryValue::Null);
+            let col_meta = columns.iter().find(|c| c.name.eq_ignore_ascii_case(col_name));
+
+            // Determine whether to omit an auto-increment or serial column when value is Null or <auto>
+            let is_auto = col_meta.map(|c| {
+                c.is_auto_increment
+                    || c.data_type.to_lowercase().contains("serial")
+                    || (c.is_primary_key && (c.data_type.to_lowercase().contains("int") || family == DatabaseFamily::Sqlite))
+            }).unwrap_or(false);
+
+            let is_auto_placeholder = match val {
+                QueryValue::Null => is_auto,
+                QueryValue::String(s) if s.trim().eq_ignore_ascii_case("<auto>") => true,
+                _ => false,
+            };
+
+            if is_auto_placeholder {
+                continue;
+            }
+
+            insert_cols.push(quote_ident(col_name, family));
+            insert_vals.push(format_query_value(val, family));
+        }
+
+        if insert_cols.is_empty() {
+            match family {
+                DatabaseFamily::MySql => {
+                    statements.push(format!("INSERT INTO {qualified_table} () VALUES ();"));
+                }
+                _ => {
+                    statements.push(format!("INSERT INTO {qualified_table} DEFAULT VALUES;"));
+                }
+            }
+        } else {
+            let cols_str = insert_cols.join(", ");
+            let vals_str = insert_vals.join(", ");
+            statements.push(format!(
+                "INSERT INTO {qualified_table} ({cols_str}) VALUES ({vals_str});"
+            ));
+        }
+        inserts_count += 1;
+    }
+
+    // 3. Group cell updates by row index (skip rows that are also marked deleted)
     let mut row_updates: BTreeMap<usize, Vec<(usize, String, QueryValue)>> = BTreeMap::new();
     for (&(r_idx, c_idx), edit) in &changeset.cell_updates {
         if changeset.is_row_deleted(r_idx) {
@@ -119,13 +170,14 @@ pub fn generate_review_plan(
         deletes_count += 1;
     }
 
-    // 5. Wrap inside an atomic transaction script
+    // 6. Wrap inside an atomic transaction script
     let full_script = build_transaction_script(family, &statements);
 
     SqlReviewPlan {
         table_name: table_name.to_string(),
         schema_name: schema_name.map(|s| s.to_string()),
         database_family: family,
+        inserts_count,
         updates_count,
         deletes_count,
         has_primary_key,
@@ -433,5 +485,78 @@ mod tests {
         assert!(script.contains("UPDATE `authors`"));
         assert!(script.contains("SET `name` = 'O\\'Reilly\\\\New'"));
         assert!(script.contains("WHERE `id` = 10;"));
+    }
+
+    #[test]
+    fn test_insert_into_generation_sqlite_and_auto_increment() {
+        let cols = sample_columns();
+        let grid_cols = vec!["id".to_string(), "name".to_string(), "email".to_string(), "age".to_string(), "active".to_string()];
+        let orig_rows = vec![];
+
+        let mut cs = GridChangeset::new();
+        // Row 1: id is Null (auto increment) -> should omit id
+        cs.add_inserted_row(vec![
+            QueryValue::Null,
+            QueryValue::String("David".into()),
+            QueryValue::String("david@example.com".into()),
+            QueryValue::Int(32),
+            QueryValue::Int(1),
+        ]);
+        // Row 2: id is explicitly specified -> should include id
+        cs.add_inserted_row(vec![
+            QueryValue::Int(99),
+            QueryValue::String("Eve".into()),
+            QueryValue::Null,
+            QueryValue::Null,
+            QueryValue::Int(0),
+        ]);
+
+        let plan = generate_review_plan(
+            "users",
+            None,
+            DatabaseFamily::Sqlite,
+            &cols,
+            &grid_cols,
+            &orig_rows,
+            &cs,
+        );
+
+        assert_eq!(plan.inserts_count, 2);
+        assert_eq!(plan.updates_count, 0);
+        assert_eq!(plan.deletes_count, 0);
+
+        let script = plan.full_script;
+        assert!(script.starts_with("BEGIN;"));
+        assert!(script.contains("INSERT INTO \"users\" (\"name\", \"email\", \"age\", \"active\") VALUES ('David', 'david@example.com', 32, 1);"));
+        assert!(script.contains("INSERT INTO \"users\" (\"id\", \"name\", \"email\", \"age\", \"active\") VALUES (99, 'Eve', NULL, NULL, 0);"));
+        assert!(script.ends_with("COMMIT;"));
+    }
+
+    #[test]
+    fn test_insert_into_generation_mysql_dialect() {
+        let cols = sample_columns();
+        let grid_cols = vec!["id".to_string(), "name".to_string()];
+        let orig_rows = vec![];
+
+        let mut cs = GridChangeset::new();
+        cs.add_inserted_row(vec![
+            QueryValue::String("<auto>".into()),
+            QueryValue::String("Frank's \"Gadgets\"".into()),
+        ]);
+
+        let plan = generate_review_plan(
+            "products",
+            Some("shop_db"),
+            DatabaseFamily::MySql,
+            &cols,
+            &grid_cols,
+            &orig_rows,
+            &cs,
+        );
+
+        assert_eq!(plan.inserts_count, 1);
+        let script = plan.full_script;
+        assert!(script.starts_with("START TRANSACTION;"));
+        assert!(script.contains("INSERT INTO `shop_db`.`products` (`name`) VALUES ('Frank\\'s \"Gadgets\"');"));
     }
 }

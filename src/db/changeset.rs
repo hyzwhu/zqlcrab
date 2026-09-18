@@ -20,13 +20,24 @@ pub struct RowDeletion {
     pub original_row: Vec<QueryValue>,
 }
 
-/// Tracks pending local modifications (cell edits & row deletions) for an active grid.
+/// Represents a newly inserted row not yet committed to the database.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RowInsertion {
+    pub temp_id: usize,
+    pub values: Vec<QueryValue>,
+}
+
+/// Tracks pending local modifications (cell edits, row deletions & new rows) for an active grid.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct GridChangeset {
     /// Maps (row_idx, col_idx) -> CellEdit
     pub cell_updates: HashMap<(usize, usize), CellEdit>,
     /// Maps row_idx -> RowDeletion
     pub deleted_rows: HashMap<usize, RowDeletion>,
+    /// List of uncommitted new rows
+    pub inserted_rows: Vec<RowInsertion>,
+    /// Counter for generating unique temporary IDs for inserted rows
+    pub next_insert_id: usize,
 }
 
 impl GridChangeset {
@@ -35,9 +46,9 @@ impl GridChangeset {
         Self::default()
     }
 
-    /// Returns true if there are any pending edits or deletions.
+    /// Returns true if there are any pending edits, deletions, or insertions.
     pub fn is_dirty(&self) -> bool {
-        !self.cell_updates.is_empty() || !self.deleted_rows.is_empty()
+        !self.cell_updates.is_empty() || !self.deleted_rows.is_empty() || !self.inserted_rows.is_empty()
     }
 
     /// Checks whether a specific cell has a pending edit.
@@ -48,6 +59,46 @@ impl GridChangeset {
     /// Gets the pending cell edit if one exists.
     pub fn get_cell_edit(&self, row_idx: usize, col_idx: usize) -> Option<&CellEdit> {
         self.cell_updates.get(&(row_idx, col_idx))
+    }
+
+    /// Adds a new inserted row with default values, returning its unique temp_id.
+    pub fn add_inserted_row(&mut self, default_values: Vec<QueryValue>) -> usize {
+        let id = self.next_insert_id;
+        self.next_insert_id += 1;
+        self.inserted_rows.push(RowInsertion {
+            temp_id: id,
+            values: default_values,
+        });
+        id
+    }
+
+    /// Removes an inserted row by its temp_id.
+    pub fn remove_inserted_row(&mut self, temp_id: usize) {
+        self.inserted_rows.retain(|r| r.temp_id != temp_id);
+    }
+
+    /// Removes an inserted row by its position/index in `inserted_rows`.
+    pub fn remove_inserted_row_by_index(&mut self, index: usize) {
+        if index < self.inserted_rows.len() {
+            self.inserted_rows.remove(index);
+        }
+    }
+
+    /// Updates a cell value in an uncommitted inserted row.
+    pub fn set_inserted_cell_value(&mut self, insert_idx: usize, col_idx: usize, value: QueryValue) {
+        if let Some(row) = self.inserted_rows.get_mut(insert_idx) {
+            if col_idx < row.values.len() {
+                row.values[col_idx] = value;
+            } else {
+                row.values.resize(col_idx + 1, QueryValue::Null);
+                row.values[col_idx] = value;
+            }
+        }
+    }
+
+    /// Gets a cell value from an uncommitted inserted row.
+    pub fn get_inserted_cell_value(&self, insert_idx: usize, col_idx: usize) -> Option<&QueryValue> {
+        self.inserted_rows.get(insert_idx).and_then(|r| r.values.get(col_idx))
     }
 
     /// Sets or updates a cell value. If the new value equals the original value,
@@ -155,24 +206,30 @@ impl GridChangeset {
         self.cell_updates.retain(|(r, _), _| *r != row_idx);
     }
 
-    /// Reverts all pending edits and deletions.
+    /// Reverts all pending edits, deletions, and insertions.
     pub fn revert_all(&mut self) {
         self.cell_updates.clear();
         self.deleted_rows.clear();
+        self.inserted_rows.clear();
+        self.next_insert_id = 0;
     }
 
-    /// Returns counts: (effective_cell_updates, deleted_rows_count).
+    /// Returns counts: (effective_cell_updates, deleted_rows_count, inserted_rows_count).
     /// Note: Cell updates on rows that are also marked for deletion are excluded from effective updates count.
-    pub fn change_summary(&self) -> (usize, usize) {
+    pub fn change_summary(&self) -> (usize, usize, usize) {
         let effective_updates = self
             .cell_updates
             .keys()
             .filter(|(r, _)| !self.deleted_rows.contains_key(r))
             .count();
-        (effective_updates, self.deleted_rows.len())
+        (
+            effective_updates,
+            self.deleted_rows.len(),
+            self.inserted_rows.len(),
+        )
     }
 
-    /// Total number of unique modified or deleted rows.
+    /// Total number of unique modified, deleted, or newly inserted rows.
     pub fn affected_rows_count(&self) -> usize {
         let mut affected = std::collections::HashSet::new();
         for (r, _) in self.cell_updates.keys() {
@@ -181,7 +238,7 @@ impl GridChangeset {
         for r in self.deleted_rows.keys() {
             affected.insert(*r);
         }
-        affected.len()
+        affected.len() + self.inserted_rows.len()
     }
 }
 
@@ -193,7 +250,7 @@ mod tests {
     fn test_grid_changeset_lifecycle() {
         let mut cs = GridChangeset::new();
         assert!(!cs.is_dirty());
-        assert_eq!(cs.change_summary(), (0, 0));
+        assert_eq!(cs.change_summary(), (0, 0, 0));
 
         // 1. Edit a cell
         cs.set_cell_value(
@@ -205,7 +262,7 @@ mod tests {
         );
         assert!(cs.is_dirty());
         assert!(cs.is_cell_dirty(0, 1));
-        assert_eq!(cs.change_summary(), (1, 0));
+        assert_eq!(cs.change_summary(), (1, 0, 0));
 
         let orig = QueryValue::String("Alice".into());
         assert_eq!(
@@ -229,7 +286,7 @@ mod tests {
         cs.toggle_delete_row(0, &row_vals);
         assert!(cs.is_dirty());
         assert!(cs.is_row_deleted(0));
-        assert_eq!(cs.change_summary(), (0, 1));
+        assert_eq!(cs.change_summary(), (0, 1, 0));
 
         // Toggle again restores it
         cs.toggle_delete_row(0, &row_vals);
@@ -245,10 +302,33 @@ mod tests {
             QueryValue::Int(11),
         );
         cs.mark_row_deleted(2, &[QueryValue::Int(10)]);
-        assert_eq!(cs.change_summary(), (0, 1));
+        assert_eq!(cs.change_summary(), (0, 1, 0));
         assert_eq!(cs.affected_rows_count(), 1);
+
+        // 5. Insert new row
+        let temp_id = cs.add_inserted_row(vec![
+            QueryValue::Null,
+            QueryValue::String("David".into()),
+            QueryValue::Int(28),
+        ]);
+        assert_eq!(temp_id, 0);
+        assert!(cs.is_dirty());
+        assert_eq!(cs.change_summary(), (0, 1, 1));
+        assert_eq!(cs.affected_rows_count(), 2);
+
+        // Update inserted row cell
+        cs.set_inserted_cell_value(0, 1, QueryValue::String("David Miller".into()));
+        assert_eq!(
+            cs.get_inserted_cell_value(0, 1),
+            Some(&QueryValue::String("David Miller".into()))
+        );
+
+        // Remove inserted row
+        cs.remove_inserted_row(temp_id);
+        assert_eq!(cs.change_summary(), (0, 1, 0));
 
         cs.revert_all();
         assert!(!cs.is_dirty());
+        assert_eq!(cs.change_summary(), (0, 0, 0));
     }
 }

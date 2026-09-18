@@ -529,5 +529,89 @@ mod tests {
         assert_eq!(updated.rows[0][0], QueryValue::Int(1));
         assert_eq!(updated.rows[0][1], QueryValue::String("Hardcover Book".into()));
     }
+
+    #[tokio::test]
+    async fn test_sqlite_batch_execution_with_new_row_insert() {
+        let config = ConnectionConfig::sqlite("test_insert_batch", ":memory:");
+        let mut adapter = SqliteAdapter::new(config);
+        adapter.connect().await.expect("connect should succeed");
+
+        adapter
+            .execute_query("CREATE TABLE contacts (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, email TEXT);")
+            .await
+            .expect("create contacts table");
+
+        adapter
+            .execute_query("INSERT INTO contacts (name, email) VALUES ('Alice', 'alice@old.com');")
+            .await
+            .expect("insert initial contact");
+
+        let initial = adapter
+            .execute_query("SELECT id, name, email FROM contacts ORDER BY id;")
+            .await
+            .expect("query initial contacts");
+        let cols = adapter.list_columns(None, None, "contacts").await.expect("list columns");
+
+        let mut cs = crate::db::changeset::GridChangeset::new();
+        // 1. Stage an update to Alice's email
+        cs.set_cell_value(
+            0,
+            2,
+            "email".to_string(),
+            QueryValue::String("alice@old.com".into()),
+            QueryValue::String("alice@newcorp.com".into()),
+        );
+
+        // 2. Stage a newly inserted row for Bob (leaving id as Null for auto-increment)
+        cs.add_inserted_row(vec![
+            QueryValue::Null,
+            QueryValue::String("Bob".into()),
+            QueryValue::String("bob@example.com".into()),
+        ]);
+
+        let (updates, deletes, inserts) = cs.change_summary();
+        assert_eq!(updates, 1);
+        assert_eq!(deletes, 0);
+        assert_eq!(inserts, 1);
+
+        let plan = crate::db::sql_gen::generate_review_plan(
+            "contacts",
+            None,
+            crate::db::types::DatabaseFamily::Sqlite,
+            &cols,
+            &initial.columns,
+            &initial.rows,
+            &cs,
+        );
+
+        assert_eq!(plan.inserts_count, 1);
+        assert_eq!(plan.updates_count, 1);
+        assert!(plan.has_primary_key);
+
+        // Verify that the generated INSERT statement omitted the auto-increment id column
+        assert!(plan.full_script.contains("INSERT INTO \"contacts\" (\"name\", \"email\") VALUES ('Bob', 'bob@example.com');"));
+        // Verify UPDATE is present
+        assert!(plan.full_script.contains("UPDATE \"contacts\""));
+        assert!(plan.full_script.contains("SET \"email\" = 'alice@newcorp.com'"));
+
+        // Execute batch transaction atomically
+        adapter.execute_batch(&plan.full_script).await.expect("execute_batch should succeed");
+
+        // Query contacts to verify both rows are present and accurate
+        let reloaded = adapter
+            .execute_query("SELECT id, name, email FROM contacts ORDER BY id ASC;")
+            .await
+            .expect("query contacts after commit");
+
+        assert_eq!(reloaded.rows.len(), 2);
+        // Alice
+        assert_eq!(reloaded.rows[0][0], QueryValue::Int(1));
+        assert_eq!(reloaded.rows[0][1], QueryValue::String("Alice".into()));
+        assert_eq!(reloaded.rows[0][2], QueryValue::String("alice@newcorp.com".into()));
+        // Bob
+        assert_eq!(reloaded.rows[1][0], QueryValue::Int(2));
+        assert_eq!(reloaded.rows[1][1], QueryValue::String("Bob".into()));
+        assert_eq!(reloaded.rows[1][2], QueryValue::String("bob@example.com".into()));
+    }
 }
 

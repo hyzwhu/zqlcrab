@@ -157,6 +157,7 @@ impl RenderOnce for SqlReviewModal {
         };
 
         // Stats badges
+        let inserts_count = self.plan.inserts_count;
         let updates_count = self.plan.updates_count;
         let deletes_count = self.plan.deletes_count;
 
@@ -264,11 +265,14 @@ impl RenderOnce for SqlReviewModal {
                 let is_keyword = line.starts_with("BEGIN")
                     || line.starts_with("COMMIT")
                     || line.starts_with("START TRANSACTION");
+                let is_insert = line.starts_with("INSERT INTO") || line.starts_with("INSERT");
 
                 let text_color = if is_comment {
                     ThemeColors::TEXT_MUTED
                 } else if is_keyword {
                     ThemeColors::PRIMARY_BORDER
+                } else if is_insert {
+                    ThemeColors::SUCCESS
                 } else if line.starts_with("UPDATE") || line.starts_with("DELETE") {
                     ThemeColors::PRIMARY_LIGHT
                 } else {
@@ -380,6 +384,21 @@ impl RenderOnce for SqlReviewModal {
                                 h_flex()
                                     .items_center()
                                     .gap_2()
+                                    .when(inserts_count > 0, |this| {
+                                        this.child(
+                                            div()
+                                                .px_2()
+                                                .py_0p5()
+                                                .rounded_md()
+                                                .bg(rgba(0x10B98120))
+                                                .border_1()
+                                                .border_color(rgba(0x10B98140))
+                                                .text_xs()
+                                                .font_weight(FontWeight::SEMIBOLD)
+                                                .text_color(ThemeColors::SUCCESS)
+                                                .child(format!("● {inserts_count} Insertion{}", if inserts_count > 1 { "s" } else { "" })),
+                                        )
+                                    })
                                     .when(updates_count > 0, |this| {
                                         this.child(
                                             div()

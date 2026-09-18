@@ -13,6 +13,7 @@ use crate::db::types::{
     QueryValue, SortDirection, TableInfo,
 };
 use crate::ui::components::{
+    data_grid::GridCellCoord,
     AppStatusBar, ConnectionDialog, ConsoleBottomTab, DataGrid, ExplainViewMode, QueryConsole,
     QueryHistoryView, SchemaViewer, Sidebar, SqlReviewModal,
 };
@@ -32,7 +33,7 @@ use gpui_kit::gpui::{
 };
 use uuid::Uuid;
 
-gpui_kit::actions!(zqlcrab, [RunQuery, CloseDialog, FormatSql, ExplainQuery, SaveGridChanges, DeleteGridRow]);
+gpui_kit::actions!(zqlcrab, [RunQuery, CloseDialog, FormatSql, ExplainQuery, SaveGridChanges, DeleteGridRow, AddNewRow]);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkspaceTab {
@@ -134,7 +135,7 @@ pub struct CrabStudioApp {
     grid_page: usize,
     grid_page_size: usize,
     grid_filter: String,
-    grid_selected_cell: Option<(usize, usize)>,
+    grid_selected_cell: Option<GridCellCoord>,
     grid_inspector_open: bool,
     grid_modal_open: bool,
     grid_json_pretty: bool,
@@ -599,26 +600,121 @@ impl CrabStudioApp {
     }
 
     /// Select a grid cell and sync inspector live editor input
-    pub fn select_grid_cell(&mut self, row_idx: usize, col_idx: usize, window: &mut Window, cx: &mut Context<Self>) {
-        self.grid_selected_cell = Some((row_idx, col_idx));
+    pub fn select_grid_cell(&mut self, coord: GridCellCoord, window: &mut Window, cx: &mut Context<Self>) {
+        self.grid_selected_cell = Some(coord);
         self.grid_inspector_open = true;
 
-        let res = self.table_data.as_ref().or(self.console_result.as_ref());
-        if let Some(res) = res {
-            if let Some(row) = res.rows.get(row_idx) {
-                if let Some(orig_val) = row.get(col_idx) {
-                    let eff_val = self.grid_changeset.get_effective_cell_value(row_idx, col_idx, orig_val);
-                    let display_str = if eff_val.is_null() {
-                        String::new()
-                    } else {
-                        eff_val.to_display_string()
-                    };
-                    self.grid_cell_edit_input.update(cx, |inp, cx| {
-                        inp.set_value(&display_str, window, cx);
-                    });
+        if coord.is_inserted {
+            if let Some(val) = self.grid_changeset.get_inserted_cell_value(coord.row_idx, coord.col_idx) {
+                let display_str = if val.is_null() {
+                    String::new()
+                } else {
+                    val.to_display_string()
+                };
+                self.grid_cell_edit_input.update(cx, |inp, cx| {
+                    inp.set_value(&display_str, window, cx);
+                });
+            }
+        } else {
+            let res = self.table_data.as_ref().or(self.console_result.as_ref());
+            if let Some(res) = res {
+                if let Some(row) = res.rows.get(coord.row_idx) {
+                    if let Some(orig_val) = row.get(coord.col_idx) {
+                        let eff_val = self.grid_changeset.get_effective_cell_value(coord.row_idx, coord.col_idx, orig_val);
+                        let display_str = if eff_val.is_null() {
+                            String::new()
+                        } else {
+                            eff_val.to_display_string()
+                        };
+                        self.grid_cell_edit_input.update(cx, |inp, cx| {
+                            inp.set_value(&display_str, window, cx);
+                        });
+                    }
                 }
             }
         }
+        cx.notify();
+    }
+
+    /// Add a new uncommitted row staged for insertion
+    pub fn add_new_grid_row(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.active_connection.as_ref().is_some_and(|c| c.config.is_read_only) {
+            self.status_message = Some("Cannot add row: Connection is in read-only mode".to_string());
+            cx.notify();
+            return;
+        }
+
+        let res = self.table_data.as_ref().or(self.console_result.as_ref());
+        let col_count = if let Some(r) = res {
+            r.columns.len()
+        } else if !self.schema_columns.is_empty() {
+            self.schema_columns.len()
+        } else {
+            1
+        };
+
+        let mut default_values = Vec::with_capacity(col_count);
+        for i in 0..col_count {
+            let col_name = res
+                .and_then(|r| r.columns.get(i))
+                .cloned()
+                .or_else(|| self.schema_columns.get(i).map(|c| c.name.clone()))
+                .unwrap_or_default();
+
+            let col_meta = self
+                .schema_columns
+                .iter()
+                .find(|c| c.name.eq_ignore_ascii_case(&col_name));
+
+            let is_auto = col_meta.map(|c| {
+                c.is_auto_increment
+                    || c.data_type.to_lowercase().contains("serial")
+                    || (c.is_primary_key && (c.data_type.to_lowercase().contains("int") || self.active_connection.as_ref().map(|conn| conn.config.db_type == DatabaseType::Sqlite).unwrap_or(false)))
+            }).unwrap_or(false);
+
+            if is_auto {
+                default_values.push(QueryValue::String("<auto>".to_string()));
+            } else if let Some(def) = col_meta.and_then(|c| c.default_value.as_ref()) {
+                default_values.push(QueryValue::String(def.clone()));
+            } else {
+                default_values.push(QueryValue::Null);
+            }
+        }
+
+        let insert_idx = self.grid_changeset.inserted_rows.len();
+        self.grid_changeset.add_inserted_row(default_values);
+        let new_coord = GridCellCoord::inserted(insert_idx, 0);
+        self.grid_selected_cell = Some(new_coord);
+        self.grid_inspector_open = true;
+
+        let cur_val = self.grid_changeset.get_inserted_cell_value(insert_idx, 0);
+        let display_str = cur_val.map(|v| if v.is_null() { String::new() } else { v.to_display_string() }).unwrap_or_default();
+        self.grid_cell_edit_input.update(cx, |inp, cx| {
+            inp.set_value(&display_str, window, cx);
+        });
+
+        let (updates, deletes, inserts) = self.grid_changeset.change_summary();
+        self.status_message = Some(format!(
+            "Added new row #{}. Staged: {inserts} new row(s), {updates} update(s), {deletes} deletion(s)",
+            insert_idx + 1
+        ));
+        cx.notify();
+    }
+
+    /// Discard an uncommitted inserted row
+    pub fn discard_inserted_row(&mut self, insert_idx: usize, cx: &mut Context<Self>) {
+        self.grid_changeset.remove_inserted_row_by_index(insert_idx);
+        if let Some(coord) = self.grid_selected_cell {
+            if coord.is_inserted && coord.row_idx == insert_idx {
+                self.grid_selected_cell = None;
+            } else if coord.is_inserted && coord.row_idx > insert_idx {
+                self.grid_selected_cell = Some(GridCellCoord::inserted(coord.row_idx - 1, coord.col_idx));
+            }
+        }
+        let (updates, deletes, inserts) = self.grid_changeset.change_summary();
+        self.status_message = Some(format!(
+            "Discarded uncommitted row. Staged: {inserts} new row(s), {updates} update(s), {deletes} deletion(s)"
+        ));
         cx.notify();
     }
 
@@ -630,23 +726,48 @@ impl CrabStudioApp {
             return;
         }
 
-        let Some((row_idx, col_idx)) = self.grid_selected_cell else {
+        let Some(coord) = self.grid_selected_cell else {
             return;
         };
         let new_text = self.grid_cell_edit_input.read(cx).value().to_string();
 
         let res = self.table_data.as_ref().or(self.console_result.as_ref());
+        let col_type = res
+            .and_then(|r| r.column_types.get(coord.col_idx))
+            .map(|s| s.as_str())
+            .or_else(|| self.schema_columns.get(coord.col_idx).map(|c| c.data_type.as_str()))
+            .unwrap_or("");
+
+        if coord.is_inserted {
+            let current_val = self
+                .grid_changeset
+                .get_inserted_cell_value(coord.row_idx, coord.col_idx)
+                .cloned()
+                .unwrap_or(QueryValue::Null);
+
+            let new_val = parse_edited_query_value(&new_text, &current_val, col_type);
+            self.grid_changeset
+                .set_inserted_cell_value(coord.row_idx, coord.col_idx, new_val);
+
+            let (updates, deletes, inserts) = self.grid_changeset.change_summary();
+            self.status_message = Some(format!(
+                "Updated new row #{} cell. Staged: {inserts} new row(s), {updates} update(s), {deletes} deletion(s)",
+                coord.row_idx + 1
+            ));
+            cx.notify();
+            return;
+        }
+
         let Some(res) = res else { return; };
-        let Some(row) = res.rows.get(row_idx) else { return; };
-        let Some(orig_val) = row.get(col_idx) else { return; };
-        let col_name = res.columns.get(col_idx).cloned().unwrap_or_else(|| format!("col_{col_idx}"));
-        let col_type = res.column_types.get(col_idx).map(|s| s.as_str()).unwrap_or("");
+        let Some(row) = res.rows.get(coord.row_idx) else { return; };
+        let Some(orig_val) = row.get(coord.col_idx) else { return; };
+        let col_name = res.columns.get(coord.col_idx).cloned().unwrap_or_else(|| format!("col_{}", coord.col_idx));
 
         let new_val = parse_edited_query_value(&new_text, orig_val, col_type);
 
-        self.grid_changeset.stage_cell_update(row_idx, col_idx, col_name, orig_val.clone(), new_val);
-        let (updates, deletes) = self.grid_changeset.change_summary();
-        self.status_message = Some(format!("Staged change: {updates} update(s), {deletes} deletion(s) pending"));
+        self.grid_changeset.stage_cell_update(coord.row_idx, coord.col_idx, col_name, orig_val.clone(), new_val);
+        let (updates, deletes, inserts) = self.grid_changeset.change_summary();
+        self.status_message = Some(format!("Staged change: {updates} update(s), {deletes} deletion(s), {inserts} new row(s) pending"));
         cx.notify();
     }
 
@@ -657,21 +778,36 @@ impl CrabStudioApp {
             cx.notify();
             return;
         }
-        let Some((row_idx, col_idx)) = self.grid_selected_cell else {
+        let Some(coord) = self.grid_selected_cell else {
             return;
         };
+
+        if coord.is_inserted {
+            self.grid_changeset.set_inserted_cell_value(coord.row_idx, coord.col_idx, QueryValue::Null);
+            self.grid_cell_edit_input.update(cx, |inp, cx| {
+                inp.set_value("", window, cx);
+            });
+            let (updates, deletes, inserts) = self.grid_changeset.change_summary();
+            self.status_message = Some(format!(
+                "Set new row #{} cell to NULL. Staged: {inserts} new row(s), {updates} update(s), {deletes} deletion(s)",
+                coord.row_idx + 1
+            ));
+            cx.notify();
+            return;
+        }
+
         let res = self.table_data.as_ref().or(self.console_result.as_ref());
         let Some(res) = res else { return; };
-        let Some(row) = res.rows.get(row_idx) else { return; };
-        let Some(orig_val) = row.get(col_idx) else { return; };
-        let col_name = res.columns.get(col_idx).cloned().unwrap_or_else(|| format!("col_{col_idx}"));
+        let Some(row) = res.rows.get(coord.row_idx) else { return; };
+        let Some(orig_val) = row.get(coord.col_idx) else { return; };
+        let col_name = res.columns.get(coord.col_idx).cloned().unwrap_or_else(|| format!("col_{}", coord.col_idx));
 
-        self.grid_changeset.stage_cell_update(row_idx, col_idx, col_name, orig_val.clone(), QueryValue::Null);
+        self.grid_changeset.stage_cell_update(coord.row_idx, coord.col_idx, col_name, orig_val.clone(), QueryValue::Null);
         self.grid_cell_edit_input.update(cx, |inp, cx| {
             inp.set_value("", window, cx);
         });
-        let (updates, deletes) = self.grid_changeset.change_summary();
-        self.status_message = Some(format!("Staged NULL: {updates} update(s), {deletes} deletion(s) pending"));
+        let (updates, deletes, inserts) = self.grid_changeset.change_summary();
+        self.status_message = Some(format!("Staged NULL: {updates} update(s), {deletes} deletion(s), {inserts} new row(s) pending"));
         cx.notify();
     }
 
@@ -693,8 +829,8 @@ impl CrabStudioApp {
                 }
             }
         }
-        let (updates, deletes) = self.grid_changeset.change_summary();
-        self.status_message = Some(format!("Reverted cell. {updates} update(s), {deletes} deletion(s) pending"));
+        let (updates, deletes, inserts) = self.grid_changeset.change_summary();
+        self.status_message = Some(format!("Reverted cell. {updates} update(s), {deletes} deletion(s), {inserts} new row(s) pending"));
         cx.notify();
     }
 
@@ -710,15 +846,15 @@ impl CrabStudioApp {
         let Some(row) = res.rows.get(row_idx) else { return; };
 
         let now_deleted = self.grid_changeset.toggle_delete_row(row_idx, row);
-        let (updates, deletes) = self.grid_changeset.change_summary();
+        let (updates, deletes, inserts) = self.grid_changeset.change_summary();
         if now_deleted {
             self.status_message = Some(format!(
-                "Marked row #{} for deletion. Total: {updates} update(s), {deletes} deletion(s)",
+                "Marked row #{} for deletion. Total: {updates} update(s), {deletes} deletion(s), {inserts} new row(s)",
                 row_idx + 1
             ));
         } else {
             self.status_message = Some(format!(
-                "Restored row #{}. Total: {updates} update(s), {deletes} deletion(s)",
+                "Restored row #{}. Total: {updates} update(s), {deletes} deletion(s), {inserts} new row(s)",
                 row_idx + 1
             ));
         }
@@ -730,19 +866,26 @@ impl CrabStudioApp {
         self.grid_changeset.clear();
         self.sql_review_modal_open = false;
         self.sql_review_plan = None;
-        if let Some((r, c)) = self.grid_selected_cell {
-            let res = self.table_data.as_ref().or(self.console_result.as_ref());
-            if let Some(res) = res {
-                if let Some(row) = res.rows.get(r) {
-                    if let Some(orig_val) = row.get(c) {
-                        let display_str = if orig_val.is_null() {
-                            String::new()
-                        } else {
-                            orig_val.to_display_string()
-                        };
-                        self.grid_cell_edit_input.update(cx, |inp, cx| {
-                            inp.set_value(&display_str, window, cx);
-                        });
+        if let Some(coord) = self.grid_selected_cell {
+            if coord.is_inserted {
+                self.grid_selected_cell = None;
+                self.grid_cell_edit_input.update(cx, |inp, cx| {
+                    inp.set_value("", window, cx);
+                });
+            } else {
+                let res = self.table_data.as_ref().or(self.console_result.as_ref());
+                if let Some(res) = res {
+                    if let Some(row) = res.rows.get(coord.row_idx) {
+                        if let Some(orig_val) = row.get(coord.col_idx) {
+                            let display_str = if orig_val.is_null() {
+                                String::new()
+                            } else {
+                                orig_val.to_display_string()
+                            };
+                            self.grid_cell_edit_input.update(cx, |inp, cx| {
+                                inp.set_value(&display_str, window, cx);
+                            });
+                        }
                     }
                 }
             }
@@ -825,6 +968,7 @@ impl CrabStudioApp {
         let table_name = self.selected_table.clone();
         let schema_name = self.active_tables.iter().find(|t| Some(&t.name) == table_name.as_ref()).and_then(|t| t.schema.clone());
         let full_script = plan.full_script.clone();
+        let inserts_count = plan.inserts_count;
         let updates_count = plan.updates_count;
         let deletes_count = plan.deletes_count;
 
@@ -859,7 +1003,7 @@ impl CrabStudioApp {
                             }
                         }
                         app.status_message = Some(format!(
-                            "Successfully applied {updates_count} update(s) and {deletes_count} deletion(s)"
+                            "Successfully applied {inserts_count} insertion(s), {updates_count} update(s), and {deletes_count} deletion(s)"
                         ));
                         cx.notify();
                     }).ok();
@@ -1597,9 +1741,27 @@ impl Render for CrabStudioApp {
 
                 let on_select_cell = {
                     let handle = app_handle.clone();
-                    move |row_idx: usize, col_idx: usize, window: &mut Window, cx: &mut App| {
+                    move |coord: GridCellCoord, window: &mut Window, cx: &mut App| {
                         handle.update(cx, |this, cx| {
-                            this.select_grid_cell(row_idx, col_idx, window, cx);
+                            this.select_grid_cell(coord, window, cx);
+                        });
+                    }
+                };
+
+                let on_add_row = {
+                    let handle = app_handle.clone();
+                    move |window: &mut Window, cx: &mut App| {
+                        handle.update(cx, |this, cx| {
+                            this.add_new_grid_row(window, cx);
+                        });
+                    }
+                };
+
+                let on_discard_inserted_row = {
+                    let handle = app_handle.clone();
+                    move |insert_idx: usize, _: &mut Window, cx: &mut App| {
+                        handle.update(cx, |this, cx| {
+                            this.discard_inserted_row(insert_idx, cx);
                         });
                     }
                 };
@@ -1753,6 +1915,8 @@ impl Render for CrabStudioApp {
                     .on_set_cell_null(on_set_cell_null)
                     .on_revert_cell(on_revert_cell)
                     .on_toggle_delete_row(on_toggle_del_row)
+                    .on_add_row(on_add_row)
+                    .on_discard_inserted_row(on_discard_inserted_row)
                     .on_discard_all_changes(on_discard_all)
                     .on_save_changes(on_save_changes)
                     .into_any_element()
@@ -1984,10 +2148,19 @@ impl Render for CrabStudioApp {
                     this.open_sql_review_modal(cx);
                 }
             }))
+            .on_action(cx.listener(|this, _: &AddNewRow, window, cx| {
+                if this.active_tab == WorkspaceTab::DataGrid {
+                    this.add_new_grid_row(window, cx);
+                }
+            }))
             .on_action(cx.listener(|this, _: &DeleteGridRow, _, cx| {
                 if this.active_tab == WorkspaceTab::DataGrid {
-                    if let Some((sel_row, _)) = this.grid_selected_cell {
-                        this.toggle_delete_grid_row(sel_row, cx);
+                    if let Some(coord) = this.grid_selected_cell {
+                        if coord.is_inserted {
+                            this.discard_inserted_row(coord.row_idx, cx);
+                        } else {
+                            this.toggle_delete_grid_row(coord.row_idx, cx);
+                        }
                     }
                 }
             }))

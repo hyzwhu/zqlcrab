@@ -80,6 +80,32 @@ pub fn format_inspector_value(raw: &str, pretty_json: bool) -> (String, bool, us
     (raw.to_string(), false, char_count, line_count)
 }
 
+/// Unified coordinate identifying a cell in either an existing table row or an uncommitted new row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GridCellCoord {
+    pub is_inserted: bool,
+    pub row_idx: usize,
+    pub col_idx: usize,
+}
+
+impl GridCellCoord {
+    pub fn existing(row_idx: usize, col_idx: usize) -> Self {
+        Self {
+            is_inserted: false,
+            row_idx,
+            col_idx,
+        }
+    }
+
+    pub fn inserted(insert_idx: usize, col_idx: usize) -> Self {
+        Self {
+            is_inserted: true,
+            row_idx: insert_idx,
+            col_idx,
+        }
+    }
+}
+
 #[derive(IntoElement)]
 pub struct DataGrid {
     result: Option<QueryResult>,
@@ -89,7 +115,7 @@ pub struct DataGrid {
     sort_column: Option<usize>,
     sort_direction: Option<SortDirection>,
     filter_keyword: String,
-    selected_cell: Option<(usize, usize)>, // (row_idx in result.rows, col_idx)
+    selected_cell: Option<GridCellCoord>,
     inspector_open: bool,
     modal_open: bool,
     json_pretty: bool,
@@ -99,7 +125,7 @@ pub struct DataGrid {
     on_sort: Option<Rc<dyn Fn(usize, &mut Window, &mut App)>>,
     on_page_change: Option<Rc<dyn Fn(usize, &mut Window, &mut App)>>,
     on_export: Option<Rc<dyn Fn(ExportFormat, &mut Window, &mut App)>>,
-    on_select_cell: Option<Rc<dyn Fn(usize, usize, &mut Window, &mut App)>>,
+    on_select_cell: Option<Rc<dyn Fn(GridCellCoord, &mut Window, &mut App)>>,
     on_toggle_inspector: Option<Rc<dyn Fn(bool, &mut Window, &mut App)>>,
     on_toggle_modal: Option<Rc<dyn Fn(bool, &mut Window, &mut App)>>,
     on_toggle_json_pretty: Option<Rc<dyn Fn(bool, &mut Window, &mut App)>>,
@@ -110,6 +136,8 @@ pub struct DataGrid {
     on_set_cell_null: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
     on_revert_cell: Option<Rc<dyn Fn(usize, usize, &mut Window, &mut App)>>,
     on_toggle_delete_row: Option<Rc<dyn Fn(usize, &mut Window, &mut App)>>,
+    on_add_row: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
+    on_discard_inserted_row: Option<Rc<dyn Fn(usize, &mut Window, &mut App)>>,
     on_discard_all_changes: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
     on_save_changes: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
 }
@@ -145,6 +173,8 @@ impl DataGrid {
             on_set_cell_null: None,
             on_revert_cell: None,
             on_toggle_delete_row: None,
+            on_add_row: None,
+            on_discard_inserted_row: None,
             on_discard_all_changes: None,
             on_save_changes: None,
         }
@@ -176,7 +206,7 @@ impl DataGrid {
         self
     }
 
-    pub fn selected_cell(mut self, cell: Option<(usize, usize)>) -> Self {
+    pub fn selected_cell(mut self, cell: Option<GridCellCoord>) -> Self {
         self.selected_cell = cell;
         self
     }
@@ -222,9 +252,25 @@ impl DataGrid {
 
     pub fn on_select_cell<F>(mut self, handler: F) -> Self
     where
-        F: Fn(usize, usize, &mut Window, &mut App) + 'static,
+        F: Fn(GridCellCoord, &mut Window, &mut App) + 'static,
     {
         self.on_select_cell = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_add_row<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&mut Window, &mut App) + 'static,
+    {
+        self.on_add_row = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_discard_inserted_row<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(usize, &mut Window, &mut App) + 'static,
+    {
+        self.on_discard_inserted_row = Some(Rc::new(handler));
         self
     }
 
@@ -586,8 +632,68 @@ impl RenderOnce for DataGrid {
         };
 
         // Quick copy selected cell button in toolbar if a cell is selected
-        let selected_info_pill = if let Some((sel_row, sel_col)) = self.selected_cell {
-            if sel_row < result.rows.len() && sel_col < result.columns.len() {
+        let selected_info_pill = if let Some(coord) = self.selected_cell {
+            if coord.is_inserted {
+                if let Some(ins_row) = self.changeset.inserted_rows.get(coord.row_idx) {
+                    let col_name = result.columns.get(coord.col_idx).cloned().unwrap_or_else(|| format!("col_{}", coord.col_idx));
+                    let cur_val = ins_row.values.get(coord.col_idx).unwrap_or(&QueryValue::Null);
+                    let raw_val = cur_val.to_display_string();
+                    let on_cp = self.on_copy_value.clone();
+                    let col_name_clone = col_name.clone();
+                    let raw_val_clone = raw_val.clone();
+
+                    Some(
+                        h_flex()
+                            .items_center()
+                            .gap_1p5()
+                            .px_2()
+                            .py_0p5()
+                            .rounded_md()
+                            .bg(rgba(0x10B9811C))
+                            .border_1()
+                            .border_color(rgba(0x10B98150))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(ThemeColors::SUCCESS)
+                                    .child(format!("New Row #{}", coord.row_idx + 1)),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(ThemeColors::TEXT_FAINT)
+                                    .child("·"),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(ThemeColors::TEXT_PRIMARY)
+                                    .child(col_name),
+                            )
+                            .child(
+                                Button::new("quick_copy_toolbar_btn")
+                                    .ghost()
+                                    .xsmall()
+                                    .icon(IconName::Copy)
+                                    .label("Copy")
+                                    .tooltip("Copy selected cell value")
+                                    .on_click(move |_, window, cx| {
+                                        if let Some(ref h) = on_cp {
+                                            h(col_name_clone.clone(), raw_val_clone.clone(), window, cx);
+                                        } else {
+                                            cx.write_to_clipboard(ClipboardItem::new_string(raw_val_clone.clone()));
+                                        }
+                                    }),
+                            ),
+                    )
+                } else {
+                    None
+                }
+            } else if coord.row_idx < result.rows.len() && coord.col_idx < result.columns.len() {
+                let sel_row = coord.row_idx;
+                let sel_col = coord.col_idx;
                 let col_name = &result.columns[sel_col];
                 let orig_val = &result.rows[sel_row][sel_col];
                 let effective_val = self.changeset.get_effective_cell_value(sel_row, sel_col, orig_val);
@@ -637,24 +743,63 @@ impl RenderOnce for DataGrid {
             None
         };
 
-        // Row delete / restore toggle button in toolbar
+        // Add New Row button
+        let add_new_row_btn = if !self.is_read_only {
+            let on_add = self.on_add_row.clone();
+            Some(
+                Button::new("grid_add_new_row_btn")
+                    .outline()
+                    .xsmall()
+                    .icon(IconName::Plus)
+                    .label("New Row")
+                    .tooltip("Add a new uncommitted row (⌘N)")
+                    .when_some(on_add, |btn, handler| {
+                        btn.on_click(move |_, window, cx| {
+                            handler(window, cx);
+                        })
+                    }),
+            )
+        } else {
+            None
+        };
+
+        // Row delete / restore / discard toggle button in toolbar
         let delete_restore_btn = if !self.is_read_only {
-            if let Some((sel_row, _)) = self.selected_cell {
-                let on_tog_del = self.on_toggle_delete_row.clone();
-                let is_del = self.changeset.is_row_deleted(sel_row);
-                Some(
-                    Button::new("tb_del_restore_btn")
-                        .ghost()
-                        .xsmall()
-                        .icon(if is_del { IconName::Undo } else { IconName::Trash })
-                        .label(if is_del { "Restore Row" } else { "Delete Row" })
-                        .tooltip(if is_del { "Restore row from deletion" } else { "Mark row for deletion (staged)" })
-                        .when_some(on_tog_del, move |btn, handler| {
-                            btn.on_click(move |_, window, cx| {
-                                handler(sel_row, window, cx);
-                            })
-                        }),
-                )
+            if let Some(coord) = self.selected_cell {
+                if coord.is_inserted {
+                    let on_discard = self.on_discard_inserted_row.clone();
+                    let ins_idx = coord.row_idx;
+                    Some(
+                        Button::new("tb_discard_row_btn")
+                            .outline()
+                            .xsmall()
+                            .icon(IconName::Trash)
+                            .label("Discard Row")
+                            .tooltip("Discard this uncommitted new row")
+                            .when_some(on_discard, move |btn, handler| {
+                                btn.on_click(move |_, window, cx| {
+                                    handler(ins_idx, window, cx);
+                                })
+                            }),
+                    )
+                } else {
+                    let sel_row = coord.row_idx;
+                    let on_tog_del = self.on_toggle_delete_row.clone();
+                    let is_del = self.changeset.is_row_deleted(sel_row);
+                    Some(
+                        Button::new("tb_del_restore_btn")
+                            .ghost()
+                            .xsmall()
+                            .icon(if is_del { IconName::Undo } else { IconName::Trash })
+                            .label(if is_del { "Restore Row" } else { "Delete Row" })
+                            .tooltip(if is_del { "Restore row from deletion" } else { "Mark row for deletion (staged)" })
+                            .when_some(on_tog_del, move |btn, handler| {
+                                btn.on_click(move |_, window, cx| {
+                                    handler(sel_row, window, cx);
+                                })
+                            }),
+                    )
+                }
             } else {
                 None
             }
@@ -662,8 +807,8 @@ impl RenderOnce for DataGrid {
             None
         };
 
-        // Pending Changes Bar (staged updates & deletes)
-        let (effective_updates, deleted_rows) = self.changeset.change_summary();
+        // Pending Changes Bar (staged updates, deletes, and inserts)
+        let (effective_updates, deleted_rows, inserted_rows) = self.changeset.change_summary();
         let dirty_bar = if self.changeset.is_dirty() {
             let on_discard = self.on_discard_all_changes.clone();
             let on_save = self.on_save_changes.clone();
@@ -685,6 +830,18 @@ impl RenderOnce for DataGrid {
                 .when_some(on_save, |btn, handler| {
                     btn.on_click(move |_, window, cx| handler(window, cx))
                 });
+
+            let mut summary_parts = Vec::new();
+            if inserted_rows > 0 {
+                summary_parts.push(format!("{inserted_rows} new row{}", if inserted_rows != 1 { "s" } else { "" }));
+            }
+            if effective_updates > 0 {
+                summary_parts.push(format!("{effective_updates} update{}", if effective_updates != 1 { "s" } else { "" }));
+            }
+            if deleted_rows > 0 {
+                summary_parts.push(format!("{deleted_rows} deletion{}", if deleted_rows != 1 { "s" } else { "" }));
+            }
+            let summary_text = summary_parts.join(", ");
 
             Some(
                 h_flex()
@@ -712,13 +869,7 @@ impl RenderOnce for DataGrid {
                                     .text_xs()
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(ThemeColors::WARNING)
-                                    .child(format!(
-                                        "Unsaved Staged Changes: {} update{}, {} deletion{}",
-                                        effective_updates,
-                                        if effective_updates != 1 { "s" } else { "" },
-                                        deleted_rows,
-                                        if deleted_rows != 1 { "s" } else { "" }
-                                    )),
+                                    .child(format!("Unsaved Staged Changes: {summary_text}")),
                             )
                             .child(
                                 div()
@@ -784,6 +935,7 @@ impl RenderOnce for DataGrid {
                                 .child(format!("{ms} ms")),
                         )
                     })
+                    .children(add_new_row_btn)
                     .children(selected_info_pill)
                     .children(delete_restore_btn),
             )
@@ -1045,10 +1197,180 @@ impl RenderOnce for DataGrid {
 
         // Table body rows
         let mut body = TableBody::new();
+
+        // 1. Render uncommitted inserted rows at the top of the table
+        for (ins_idx, insertion) in self.changeset.inserted_rows.iter().enumerate() {
+            let is_row_selected = self
+                .selected_cell
+                .map(|c| c.is_inserted && c.row_idx == ins_idx)
+                .unwrap_or(false);
+            let on_sel_row = self.on_select_cell.clone();
+
+            let index_cell_btn = div()
+                .size_full()
+                .h(px(32.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_pointer()
+                .id(ElementId::NamedInteger("grid_ins_row_idx".into(), ins_idx as u64))
+                .on_click(move |_, window, cx| {
+                    if let Some(ref h) = on_sel_row {
+                        h(GridCellCoord::inserted(ins_idx, 0), window, cx);
+                    }
+                })
+                .child(
+                    div()
+                        .px_1p5()
+                        .py_0p5()
+                        .rounded_xs()
+                        .bg(rgba(0x10B98122))
+                        .border_1()
+                        .border_color(rgba(0x10B98160))
+                        .text_xs()
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(ThemeColors::SUCCESS)
+                        .child("+ NEW"),
+                );
+
+            let mut row = TableRow::new()
+                .border_b_1()
+                .border_color(rgba(0x10B98140))
+                .bg(if is_row_selected {
+                    rgba(0x10B98125)
+                } else {
+                    rgba(0x10B9810E)
+                })
+                .child(
+                    TableCell::new()
+                        .h(px(32.0))
+                        .w(px(index_col_width))
+                        .min_w(px(index_col_width))
+                        .px_0()
+                        .py_0()
+                        .flex_shrink_0()
+                        .overflow_hidden()
+                        .border_r_1()
+                        .border_color(rgba(0x10B98140))
+                        .child(index_cell_btn),
+                );
+
+            for (col_idx, _col_name) in result.columns.iter().enumerate() {
+                let col_w = col_widths.get(col_idx).copied().unwrap_or(120.0);
+                let is_cell_selected = self
+                    .selected_cell
+                    .map(|c| c.is_inserted && c.row_idx == ins_idx && c.col_idx == col_idx)
+                    .unwrap_or(false);
+                let cur_val = insertion.values.get(col_idx).unwrap_or(&QueryValue::Null);
+
+                let val_element = match cur_val {
+                    QueryValue::Null => div()
+                        .w_full()
+                        .min_w_0()
+                        .truncate()
+                        .text_xs()
+                        .italic()
+                        .text_color(ThemeColors::TEXT_FAINT)
+                        .child("NULL"),
+                    QueryValue::Bool(b) => div()
+                        .w_full()
+                        .min_w_0()
+                        .truncate()
+                        .text_xs()
+                        .text_color(if *b {
+                            ThemeColors::SUCCESS
+                        } else {
+                            ThemeColors::WARNING
+                        })
+                        .child(if *b { "true" } else { "false" }),
+                    QueryValue::Int(i) => div()
+                        .w_full()
+                        .min_w_0()
+                        .truncate()
+                        .text_xs()
+                        .font_family("JetBrains Mono")
+                        .text_color(ThemeColors::TEXT_PRIMARY)
+                        .child(i.to_string()),
+                    QueryValue::Float(f) => div()
+                        .w_full()
+                        .min_w_0()
+                        .truncate()
+                        .text_xs()
+                        .font_family("JetBrains Mono")
+                        .text_color(ThemeColors::PRIMARY_BORDER)
+                        .child(format!("{f:.4}")),
+                    _ => div()
+                        .w_full()
+                        .min_w_0()
+                        .truncate()
+                        .text_xs()
+                        .font_family("JetBrains Mono")
+                        .text_color(ThemeColors::TEXT_PRIMARY)
+                        .child(cur_val.to_display_string().replace(['\r', '\n'], " ")),
+                };
+
+                let on_sel_cell = self.on_select_cell.clone();
+                let on_tog_modal = self.on_toggle_modal.clone();
+                let cell_container = div()
+                    .size_full()
+                    .h(px(32.0))
+                    .px_2()
+                    .flex()
+                    .items_center()
+                    .cursor_pointer()
+                    .overflow_hidden()
+                    .relative()
+                    .id(ElementId::NamedInteger(
+                        format!("grid_ins_cell_{ins_idx}").into(),
+                        col_idx as u64,
+                    ))
+                    .when(is_cell_selected, |this| {
+                        this.bg(ThemeColors::PRIMARY_BG)
+                            .border_2()
+                            .border_color(ThemeColors::PRIMARY_BORDER)
+                            .rounded_xs()
+                    })
+                    .when(!is_cell_selected, |this| {
+                        this.hover(|s| s.bg(rgba(0x10B98118)))
+                    })
+                    .on_click(move |event, window, cx| {
+                        if let Some(ref h) = on_sel_cell {
+                            h(GridCellCoord::inserted(ins_idx, col_idx), window, cx);
+                        }
+                        if event.click_count() >= 2 {
+                            if let Some(ref h_m) = on_tog_modal {
+                                h_m(true, window, cx);
+                            }
+                        }
+                    })
+                    .child(val_element);
+
+                row = row.child(
+                    TableCell::new()
+                        .h(px(32.0))
+                        .w(px(col_w))
+                        .min_w(px(col_w))
+                        .px_0()
+                        .py_0()
+                        .flex_shrink_0()
+                        .overflow_hidden()
+                        .border_r_1()
+                        .border_color(rgba(0x10B98130))
+                        .child(cell_container),
+                );
+            }
+
+            body = body.child(row);
+        }
+
+        // 2. Render existing rows
         for (rel_idx, &orig_row_idx) in page_slice_indices.iter().enumerate() {
             let abs_idx = page_start + rel_idx + 1;
             let row_data = &result.rows[orig_row_idx];
-            let is_row_selected = self.selected_cell.map(|(r, _)| r == orig_row_idx).unwrap_or(false);
+            let is_row_selected = self
+                .selected_cell
+                .map(|c| !c.is_inserted && c.row_idx == orig_row_idx)
+                .unwrap_or(false);
             let is_row_deleted = self.changeset.is_row_deleted(orig_row_idx);
 
             // Index column cell with row select handler
@@ -1064,7 +1386,7 @@ impl RenderOnce for DataGrid {
                 .hover(|s| s.bg(ThemeColors::BG_SURFACE_HOVER))
                 .on_click(move |_, window, cx| {
                     if let Some(ref h) = on_sel_row {
-                        h(orig_row_idx, 0, window, cx);
+                        h(GridCellCoord::existing(orig_row_idx, 0), window, cx);
                     }
                 })
                 .child(
@@ -1120,7 +1442,7 @@ impl RenderOnce for DataGrid {
                 let col_w = col_widths.get(col_idx).copied().unwrap_or(120.0);
                 let is_cell_selected = self
                     .selected_cell
-                    .map(|(r, c)| r == orig_row_idx && c == col_idx)
+                    .map(|coord| !coord.is_inserted && coord.row_idx == orig_row_idx && coord.col_idx == col_idx)
                     .unwrap_or(false);
 
                 let val = self.changeset.get_effective_cell_value(orig_row_idx, col_idx, orig_val);
@@ -1208,7 +1530,7 @@ impl RenderOnce for DataGrid {
                     })
                     .on_click(move |event, window, cx| {
                         if let Some(ref h) = on_sel_cell {
-                            h(orig_row_idx, col_idx, window, cx);
+                            h(GridCellCoord::existing(orig_row_idx, col_idx), window, cx);
                         }
                         if event.click_count() >= 2 {
                             if let Some(ref h_m) = on_tog_modal {
@@ -1303,14 +1625,24 @@ impl RenderOnce for DataGrid {
 
         // Build Right Inspector Panel
         let inspector_panel = if self.inspector_open {
-            if let Some((sel_row, sel_col)) = self.selected_cell {
-                if sel_row < result.rows.len() && sel_col < result.columns.len() {
+            if let Some(coord) = self.selected_cell {
+                let sel_row = coord.row_idx;
+                let sel_col = coord.col_idx;
+                let is_inserted = coord.is_inserted;
+
+                let row_vals_opt: Option<Vec<QueryValue>> = if is_inserted {
+                    self.changeset.inserted_rows.get(sel_row).map(|r| r.values.clone())
+                } else {
+                    result.rows.get(sel_row).cloned()
+                };
+
+                if let Some(row_vals) = row_vals_opt.filter(|_| sel_col < result.columns.len()) {
                     let col_name = &result.columns[sel_col];
-                    let col_type = result.column_types.get(sel_col).map(|s| s.as_str()).unwrap_or("TEXT");
-                    let current_val = &result.rows[sel_row][sel_col];
-                    let raw_val_str = current_val.to_display_string();
-                    let (display_val_str, is_json, char_count, line_count) =
-                        format_inspector_value(&raw_val_str, self.json_pretty);
+                        let col_type = result.column_types.get(sel_col).map(|s| s.as_str()).unwrap_or("TEXT");
+                        let current_val = row_vals.get(sel_col).unwrap_or(&QueryValue::Null);
+                        let raw_val_str = current_val.to_display_string();
+                        let (display_val_str, is_json, char_count, line_count) =
+                            format_inspector_value(&raw_val_str, self.json_pretty);
 
                     // Copy Value button
                     let on_cp_val = self.on_copy_value.clone();
@@ -1379,7 +1711,7 @@ impl RenderOnce for DataGrid {
 
                     // Copy row as JSON button
                     let on_cp_row_json = self.on_copy_row_json.clone();
-                    let row_json_str = row_to_json(&result.columns, &result.rows[sel_row]);
+                    let row_json_str = row_to_json(&result.columns, &row_vals);
                     let copy_row_json_btn = Button::new("insp_copy_row_json_btn")
                         .ghost()
                         .xsmall()
@@ -1387,16 +1719,18 @@ impl RenderOnce for DataGrid {
                         .label("Row JSON")
                         .tooltip("Copy entire row as JSON object")
                         .on_click(move |_, window, cx| {
-                            if let Some(ref h) = on_cp_row_json {
-                                h(sel_row, row_json_str.clone(), window, cx);
-                            } else {
-                                cx.write_to_clipboard(ClipboardItem::new_string(row_json_str.clone()));
+                            if !is_inserted {
+                                if let Some(ref h) = on_cp_row_json {
+                                    h(sel_row, row_json_str.clone(), window, cx);
+                                    return;
+                                }
                             }
+                            cx.write_to_clipboard(ClipboardItem::new_string(row_json_str.clone()));
                         });
 
                     // Copy row as TSV button
                     let on_cp_row_tsv = self.on_copy_row_tsv.clone();
-                    let row_tsv_str = row_to_tsv(&result.rows[sel_row]);
+                    let row_tsv_str = row_to_tsv(&row_vals);
                     let copy_row_tsv_btn = Button::new("insp_copy_row_tsv_btn")
                         .ghost()
                         .xsmall()
@@ -1404,18 +1738,20 @@ impl RenderOnce for DataGrid {
                         .label("Row TSV")
                         .tooltip("Copy entire row as TSV for spreadsheets")
                         .on_click(move |_, window, cx| {
-                            if let Some(ref h) = on_cp_row_tsv {
-                                h(sel_row, row_tsv_str.clone(), window, cx);
-                            } else {
-                                cx.write_to_clipboard(ClipboardItem::new_string(row_tsv_str.clone()));
+                            if !is_inserted {
+                                if let Some(ref h) = on_cp_row_tsv {
+                                    h(sel_row, row_tsv_str.clone(), window, cx);
+                                    return;
+                                }
                             }
+                            cx.write_to_clipboard(ClipboardItem::new_string(row_tsv_str.clone()));
                         });
 
                     // Row columns overview list
                     let mut record_fields_list = v_flex().gap_1();
                     for (c_idx, c_name) in result.columns.iter().enumerate() {
                         let is_active_col = c_idx == sel_col;
-                        let field_val = &result.rows[sel_row][c_idx];
+                        let field_val = row_vals.get(c_idx).unwrap_or(&QueryValue::Null);
                         let field_str = field_val.to_display_string().replace(['\r', '\n'], " ");
                         let field_raw_val = field_val.to_display_string();
 
@@ -1443,7 +1779,12 @@ impl RenderOnce for DataGrid {
                             })
                             .on_click(move |_, window, cx| {
                                 if let Some(ref h) = on_sel {
-                                    h(sel_row, c_idx, window, cx);
+                                    let coord = if is_inserted {
+                                        GridCellCoord::inserted(sel_row, c_idx)
+                                    } else {
+                                        GridCellCoord::existing(sel_row, c_idx)
+                                    };
+                                    h(coord, window, cx);
                                 }
                             })
                             .child(
@@ -1524,10 +1865,15 @@ impl RenderOnce for DataGrid {
                                                     .px_1p5()
                                                     .py_0p5()
                                                     .rounded_sm()
-                                                    .bg(ThemeColors::BG_APP)
+                                                    .bg(if is_inserted { rgba(0x10B98122).into() } else { ThemeColors::BG_APP })
                                                     .text_xs()
-                                                    .text_color(ThemeColors::TEXT_FAINT)
-                                                    .child(format!("Row #{}", sel_row + 1)),
+                                                    .font_weight(if is_inserted { FontWeight::BOLD } else { FontWeight::NORMAL })
+                                                    .text_color(if is_inserted { ThemeColors::SUCCESS } else { ThemeColors::TEXT_FAINT })
+                                                    .child(if is_inserted {
+                                                        format!("New Row #{}", sel_row + 1)
+                                                    } else {
+                                                        format!("Row #{}", sel_row + 1)
+                                                    }),
                                             ),
                                     )
                                     .child(
@@ -1651,8 +1997,16 @@ impl RenderOnce for DataGrid {
                                                         ),
                                                 )
                                         } else {
-                                            let is_cell_dirty = self.changeset.is_cell_dirty(sel_row, sel_col);
-                                            let is_row_del = self.changeset.is_row_deleted(sel_row);
+                                            let is_cell_dirty = if is_inserted {
+                                                true
+                                            } else {
+                                                self.changeset.is_cell_dirty(sel_row, sel_col)
+                                            };
+                                            let is_row_del = if is_inserted {
+                                                false
+                                            } else {
+                                                self.changeset.is_row_deleted(sel_row)
+                                            };
                                             let on_app = self.on_apply_cell_edit.clone();
                                             let on_nul = self.on_set_cell_null.clone();
                                             let on_rev = self.on_revert_cell.clone();
@@ -1685,7 +2039,7 @@ impl RenderOnce for DataGrid {
                                                 .xsmall()
                                                 .icon(IconName::Undo)
                                                 .label("Revert");
-                                            if is_cell_dirty {
+                                            if !is_inserted && is_cell_dirty {
                                                 if let Some(ref h) = on_rev {
                                                     let h = h.clone();
                                                     rev_btn = rev_btn.on_click(move |_, window, cx| {
@@ -1699,7 +2053,9 @@ impl RenderOnce for DataGrid {
                                                 .rounded_md()
                                                 .bg(ThemeColors::BG_APP)
                                                 .border_1()
-                                                .border_color(if is_cell_dirty {
+                                                .border_color(if is_inserted {
+                                                    rgba(0x10B98180).into()
+                                                } else if is_cell_dirty {
                                                     ThemeColors::WARNING
                                                 } else {
                                                     ThemeColors::BORDER
@@ -1722,7 +2078,22 @@ impl RenderOnce for DataGrid {
                                                                                 .text_color(ThemeColors::TEXT_PRIMARY)
                                                                                 .child("Edit Cell Value"),
                                                                         )
-                                                                        .when(is_cell_dirty, |this| {
+                                                                        .when(is_inserted, |this| {
+                                                                            this.child(
+                                                                                div()
+                                                                                    .px_1p5()
+                                                                                    .py_0p5()
+                                                                                    .rounded_xs()
+                                                                                    .bg(rgba(0x10B98120))
+                                                                                    .border_1()
+                                                                                    .border_color(rgba(0x10B98140))
+                                                                                    .text_xs()
+                                                                                    .font_weight(FontWeight::MEDIUM)
+                                                                                    .text_color(ThemeColors::SUCCESS)
+                                                                                    .child("New Row"),
+                                                                            )
+                                                                        })
+                                                                        .when(!is_inserted && is_cell_dirty, |this| {
                                                                             this.child(
                                                                                 div()
                                                                                     .px_1p5()
@@ -1737,7 +2108,7 @@ impl RenderOnce for DataGrid {
                                                                                     .child("Modified"),
                                                                             )
                                                                         })
-                                                                        .when(is_row_del, |this| {
+                                                                        .when(!is_inserted && is_row_del, |this| {
                                                                             this.child(
                                                                                 div()
                                                                                     .px_1p5()
@@ -1758,7 +2129,7 @@ impl RenderOnce for DataGrid {
                                                                         .items_center()
                                                                         .gap_1()
                                                                         .child(null_btn)
-                                                                        .when(is_cell_dirty, |this| this.child(rev_btn)),
+                                                                        .when(!is_inserted && is_cell_dirty, |this| this.child(rev_btn)),
                                                                 ),
                                                         )
                                                         .when_some(self.cell_edit_input.clone(), |this, inp| {
@@ -1789,7 +2160,11 @@ impl RenderOnce for DataGrid {
                                                             .text_xs()
                                                             .font_weight(FontWeight::SEMIBOLD)
                                                             .text_color(ThemeColors::TEXT_MUTED)
-                                                            .child(format!("Row #{} Columns", sel_row + 1)),
+                                                            .child(if is_inserted {
+                                                                format!("New Row #{} Columns", sel_row + 1)
+                                                            } else {
+                                                                format!("Row #{} Columns", sel_row + 1)
+                                                            }),
                                                     )
                                                     .child(
                                                         h_flex()
@@ -1886,66 +2261,76 @@ impl RenderOnce for DataGrid {
 
         // Modal Detail Viewer overlay if modal_open is true
         if self.modal_open {
-            if let Some((sel_row, sel_col)) = self.selected_cell {
-                if sel_row < result.rows.len() && sel_col < result.columns.len() {
+            if let Some(coord) = self.selected_cell {
+                let sel_row = coord.row_idx;
+                let sel_col = coord.col_idx;
+                let is_inserted = coord.is_inserted;
+
+                let row_vals_opt: Option<Vec<QueryValue>> = if is_inserted {
+                    self.changeset.inserted_rows.get(sel_row).map(|r| r.values.clone())
+                } else {
+                    result.rows.get(sel_row).cloned()
+                };
+
+                if let Some(row_vals) = row_vals_opt.filter(|_| sel_col < result.columns.len()) {
                     let col_name = &result.columns[sel_col];
-                    let col_type = result.column_types.get(sel_col).map(|s| s.as_str()).unwrap_or("TEXT");
-                    let current_val = &result.rows[sel_row][sel_col];
-                    let raw_val_str = current_val.to_display_string();
-                    let (display_val_str, is_json, char_count, line_count) =
-                        format_inspector_value(&raw_val_str, self.json_pretty);
+                        let col_type = result.column_types.get(sel_col).map(|s| s.as_str()).unwrap_or("TEXT");
+                        let current_val = row_vals.get(sel_col).unwrap_or(&QueryValue::Null);
+                        let raw_val_str = current_val.to_display_string();
+                        let (display_val_str, is_json, char_count, line_count) =
+                            format_inspector_value(&raw_val_str, self.json_pretty);
 
-                    let on_cp_val = self.on_copy_value.clone();
-                    let col_name_cp = col_name.clone();
-                    let val_cp = raw_val_str.clone();
+                        let on_cp_val = self.on_copy_value.clone();
+                        let col_name_cp = col_name.clone();
+                        let val_cp = raw_val_str.clone();
 
-                    let on_tog_modal = self.on_toggle_modal.clone();
-                    let on_tog_pretty = self.on_toggle_json_pretty.clone();
-                    let is_pretty = self.json_pretty;
+                        let on_tog_modal = self.on_toggle_modal.clone();
+                        let on_tog_pretty = self.on_toggle_json_pretty.clone();
+                        let is_pretty = self.json_pretty;
 
-                    let modal_dialog = v_flex()
-                        .w(px(800.0))
-                        .h(px(560.0))
-                        .bg(ThemeColors::BG_SURFACE)
-                        .rounded_xl()
-                        .border_1()
-                        .border_color(ThemeColors::BORDER)
-                        .shadow_lg()
-                        .child(
-                            // Modal Header
-                            h_flex()
-                                .w_full()
-                                .p_4()
-                                .justify_between()
-                                .items_center()
-                                .border_b_1()
-                                .border_color(ThemeColors::BORDER)
-                                .child(
-                                    h_flex()
-                                        .items_center()
-                                        .gap_3()
-                                        .child(
-                                            Icon::new(IconName::Table)
-                                                .size(px(20.0))
-                                                .text_color(ThemeColors::PRIMARY_BORDER),
-                                        )
-                                        .child(
-                                            v_flex()
-                                                .child(
-                                                    div()
-                                                        .text_sm()
-                                                        .font_weight(FontWeight::BOLD)
-                                                        .text_color(ThemeColors::TEXT_PRIMARY)
-                                                        .child(format!("Detail Viewer: {col_name}")),
-                                                )
-                                                .child(
-                                                    div()
-                                                        .text_xs()
-                                                        .text_color(ThemeColors::TEXT_MUTED)
-                                                        .child(format!("{col_type} · Row #{}", sel_row + 1)),
-                                                ),
-                                        ),
-                                )
+                        let modal_dialog = v_flex()
+                            .w(px(800.0))
+                            .h(px(560.0))
+                            .bg(ThemeColors::BG_SURFACE)
+                            .rounded_xl()
+                            .border_1()
+                            .border_color(ThemeColors::BORDER)
+                            .shadow_lg()
+                            .child(
+                                // Modal Header
+                                h_flex()
+                                    .w_full()
+                                    .p_4()
+                                    .justify_between()
+                                    .items_center()
+                                    .border_b_1()
+                                    .border_color(ThemeColors::BORDER)
+                                    .child(
+                                        h_flex()
+                                            .items_center()
+                                            .gap_3()
+                                            .child(
+                                                Icon::new(IconName::Table)
+                                                    .size(px(20.0))
+                                                    .text_color(ThemeColors::PRIMARY_BORDER),
+                                            )
+                                            .child(
+                                                v_flex()
+                                                    .child(
+                                                        div()
+                                                            .text_sm()
+                                                            .font_weight(FontWeight::BOLD)
+                                                            .text_color(ThemeColors::TEXT_PRIMARY)
+                                                            .child(format!("Detail Viewer: {col_name}")),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .text_xs()
+                                                            .text_color(ThemeColors::TEXT_MUTED)
+                                                            .child(format!("{col_type} · {}", if is_inserted { format!("New Row #{}", sel_row + 1) } else { format!("Row #{}", sel_row + 1) })),
+                                                    ),
+                                            ),
+                                    )
                                 .child(
                                     h_flex()
                                         .items_center()

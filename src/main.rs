@@ -7,7 +7,8 @@ use gpui_kit::AppContext;
 use gpui_kit::component::{Root, Theme, ThemeMode, TitleBar};
 use gpui_kit::gpui::{Bounds, KeyBinding, WindowBounds, px, size};
 use ui::app::{
-    CloseDialog, CrabStudioApp, DeleteGridRow, ExplainQuery, FormatSql, RunQuery, SaveGridChanges,
+    AddNewRow, CloseDialog, CrabStudioApp, DeleteGridRow, ExplainQuery, FormatSql, RunQuery,
+    SaveGridChanges,
 };
 
 fn main() {
@@ -28,6 +29,8 @@ fn main() {
                 KeyBinding::new("ctrl-shift-e", ExplainQuery, Some("CrabStudio")),
                 KeyBinding::new("cmd-s", SaveGridChanges, Some("CrabStudio")),
                 KeyBinding::new("ctrl-s", SaveGridChanges, Some("CrabStudio")),
+                KeyBinding::new("cmd-n", AddNewRow, Some("CrabStudio")),
+                KeyBinding::new("ctrl-n", AddNewRow, Some("CrabStudio")),
                 KeyBinding::new("cmd-backspace", DeleteGridRow, Some("CrabStudio")),
                 KeyBinding::new("ctrl-backspace", DeleteGridRow, Some("CrabStudio")),
                 KeyBinding::new("escape", CloseDialog, Some("CrabStudio")),
