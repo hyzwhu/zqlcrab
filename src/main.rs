@@ -1,3 +1,6 @@
+pub mod db;
+
 fn main() {
-    println!("Hello, world!");
+    println!("Hello, zqlcrab!");
 }
+
