@@ -1,15 +1,18 @@
 //! Main desktop application workspace coordinating navigation, query console, and data inspection.
 
+use crate::db::explain::{parse_explain_result, wrap_explain_sql, ExplainPlan};
 use crate::db::export::{export_result, ExportFormat, ExportOptions};
 use crate::db::handle::ActiveConnection;
 use crate::db::history::{QueryHistoryItem, QueryHistoryManager, QueryHistoryStatus};
 use crate::db::manager::ConnectionManager;
+use crate::db::sql_format::format_sql;
 use crate::db::types::{
     ColumnInfo, ConnectionConfig, DatabaseFamily, DatabaseType, IndexInfo, QueryResult,
     SortDirection, TableInfo,
 };
 use crate::ui::components::{
-    AppStatusBar, ConnectionDialog, DataGrid, QueryConsole, QueryHistoryView, SchemaViewer, Sidebar,
+    AppStatusBar, ConnectionDialog, ConsoleBottomTab, DataGrid, ExplainViewMode, QueryConsole,
+    QueryHistoryView, SchemaViewer, Sidebar,
 };
 use crate::ui::theme::ThemeColors;
 use chrono::Utc;
@@ -18,7 +21,8 @@ use gpui_kit::base::{h_flex, v_flex};
 use gpui_kit::component::{
     Icon, Sizable as _, TitleBar,
     button::{Button, ButtonVariants as _},
-    input::{InputState, TextareaState},
+    input::{InputEvent, InputState, TextareaState},
+    resizable::ResizableState,
 };
 use gpui_kit::gpui::{
     App, AsyncApp, ClipboardItem, Context, ElementId, Entity, FontWeight, IntoElement, ParentElement, Render,
@@ -26,7 +30,7 @@ use gpui_kit::gpui::{
 };
 use uuid::Uuid;
 
-gpui_kit::actions!(zqlcrab, [RunQuery, CloseDialog]);
+gpui_kit::actions!(zqlcrab, [RunQuery, CloseDialog, FormatSql, ExplainQuery]);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkspaceTab {
@@ -50,9 +54,15 @@ pub struct CrabStudioApp {
 
     // Query console state
     query_editor: Entity<TextareaState>,
+    console_split: Entity<ResizableState>,
     console_result: Option<QueryResult>,
     console_error: Option<String>,
+    explain_plan: Option<ExplainPlan>,
+    explain_error: Option<String>,
     is_executing_query: bool,
+    is_explaining: bool,
+    console_bottom_tab: ConsoleBottomTab,
+    explain_view: ExplainViewMode,
     status_message: Option<String>,
 
     // History & DataGrid state
@@ -63,7 +73,7 @@ pub struct CrabStudioApp {
     grid_page: usize,
     grid_page_size: usize,
     grid_filter: String,
-    sidebar_table_filter: String,
+    sidebar_table_filter: Entity<InputState>,
 
     // Dialog state
     dialog_open: bool,
@@ -101,9 +111,19 @@ impl CrabStudioApp {
 
         let query_editor = cx.new(|cx| {
             TextareaState::new(window, cx).default_value(
-                "-- Press ⌘↵ (Ctrl+Enter) to run\nSELECT 1 AS id, 'Welcome to CrabStudio' AS message;\n",
+                "-- Press ⌘↵ (Ctrl+Enter) to run · Shift+Alt+F formats SQL\nSELECT 1 AS id, 'Welcome to CrabStudio' AS message;\n",
             )
         });
+        let console_split = cx.new(|_cx| ResizableState::default());
+        let sidebar_table_filter = cx.new(|cx| {
+            InputState::new(window, cx).placeholder("Search tables, views…")
+        });
+        cx.subscribe(&sidebar_table_filter, |_, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
+        })
+        .detach();
 
         let dialog_name_input = cx.new(|cx| {
             InputState::new(window, cx).placeholder("My Database")
@@ -138,9 +158,15 @@ impl CrabStudioApp {
             schema_ddl: None,
             active_tab: WorkspaceTab::QueryConsole,
             query_editor,
+            console_split,
             console_result: None,
             console_error: None,
+            explain_plan: None,
+            explain_error: None,
             is_executing_query: false,
+            is_explaining: false,
+            console_bottom_tab: ConsoleBottomTab::Results,
+            explain_view: ExplainViewMode::Tree,
             status_message: Some("Ready".to_string()),
             history_manager,
             history_filter: String::new(),
@@ -149,7 +175,7 @@ impl CrabStudioApp {
             grid_page: 0,
             grid_page_size: 50,
             grid_filter: String::new(),
-            sidebar_table_filter: String::new(),
+            sidebar_table_filter,
             dialog_open: false,
             dialog_db_type: DatabaseType::Sqlite,
             dialog_name_input,
@@ -203,24 +229,27 @@ impl CrabStudioApp {
     }
 
     /// Select a table from the sidebar
-    pub fn select_table(&mut self, table_name: &str, cx: &mut Context<Self>) {
-        self.selected_table = Some(table_name.to_string());
+    pub fn select_table(&mut self, table: TableInfo, cx: &mut Context<Self>) {
+        self.selected_table = Some(table.name.clone());
         self.grid_page = 0;
         self.grid_sort_col = None;
         self.grid_sort_dir = None;
-        self.status_message = Some(format!("Loading table {table_name}..."));
+        self.status_message = Some(format!("Loading table {}...", table.name));
         cx.notify();
 
-        let tbl = table_name.to_string();
+        let tbl = table.name.clone();
+        let schema = table.schema.clone();
         let Some(conn) = self.active_connection.clone() else {
             return;
         };
+        let family = conn.config.db_type.family();
+        let qualified = table.qualified_name(family);
 
         cx.spawn(async move |this, cx: &mut AsyncApp| {
-            let data_res = conn.execute_query(&format!("SELECT * FROM \"{tbl}\" LIMIT 100")).await;
-            let cols = conn.list_columns(None, None, &tbl).await.unwrap_or_default();
-            let idxs = conn.list_indexes(None, None, &tbl).await.unwrap_or_default();
-            let ddl = conn.get_table_ddl(None, None, &tbl).await.ok().flatten();
+            let data_res = conn.execute_query(&format!("SELECT * FROM {qualified} LIMIT 100")).await;
+            let cols = conn.list_columns(None, schema.as_deref(), &tbl).await.unwrap_or_default();
+            let idxs = conn.list_indexes(None, schema.as_deref(), &tbl).await.unwrap_or_default();
+            let ddl = conn.get_table_ddl(None, schema.as_deref(), &tbl).await.ok().flatten();
 
             this.update(cx, |app, cx| {
                 app.table_data = data_res.ok();
@@ -293,6 +322,7 @@ impl CrabStudioApp {
 
         self.is_executing_query = true;
         self.console_error = None;
+        self.console_bottom_tab = ConsoleBottomTab::Results;
         self.status_message = Some("Executing query...".to_string());
         cx.notify();
 
@@ -342,6 +372,71 @@ impl CrabStudioApp {
                 cx.notify();
             }).ok();
         }).detach();
+    }
+
+    /// Format the SQL currently in the editor.
+    pub fn format_editor_sql(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let sql = self.query_editor.read(cx).value().to_string();
+        if sql.trim().is_empty() {
+            return;
+        }
+        let formatted = format_sql(&sql);
+        self.query_editor.update(cx, |editor, cx| {
+            editor.set_value(&formatted, window, cx);
+        });
+        self.status_message = Some("Formatted SQL".to_string());
+        cx.notify();
+    }
+
+    /// Run EXPLAIN on the editor SQL and show the plan panel.
+    pub fn run_explain(&mut self, cx: &mut Context<Self>) {
+        let sql = self.query_editor.read(cx).value().to_string();
+        if sql.trim().is_empty() {
+            return;
+        }
+
+        let Some(conn) = self.active_connection.clone() else {
+            self.explain_error = Some("No active database connection. Please select or create a connection first.".to_string());
+            self.console_bottom_tab = ConsoleBottomTab::Explain;
+            cx.notify();
+            return;
+        };
+
+        let family = conn.config.db_type.family();
+        let explain_sql = wrap_explain_sql(&sql, family);
+        if explain_sql.is_empty() {
+            return;
+        }
+
+        self.is_explaining = true;
+        self.explain_error = None;
+        self.console_bottom_tab = ConsoleBottomTab::Explain;
+        self.status_message = Some("Running EXPLAIN…".to_string());
+        cx.notify();
+
+        cx.spawn(async move |this, cx: &mut AsyncApp| {
+            let res = conn.execute_query(&explain_sql).await;
+            this.update(cx, |app, cx| {
+                app.is_explaining = false;
+                match res {
+                    Ok(qr) => {
+                        let plan = parse_explain_result(family, &qr);
+                        let nodes = plan.node_count();
+                        app.explain_plan = Some(plan);
+                        app.explain_error = None;
+                        app.status_message = Some(format!("Explain completed: {nodes} nodes"));
+                    }
+                    Err(err) => {
+                        app.explain_plan = None;
+                        app.explain_error = Some(err.to_string());
+                        app.status_message = Some("Explain failed".to_string());
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// Execute a custom query from quick actions, history replay, or schema inspector
@@ -396,6 +491,8 @@ impl CrabStudioApp {
         });
         self.console_result = None;
         self.console_error = None;
+        self.explain_plan = None;
+        self.explain_error = None;
         cx.notify();
     }
 
@@ -620,8 +717,8 @@ impl Render for CrabStudioApp {
             self.saved_connections.clone(),
             active_conn_id,
             self.active_tables.clone(),
+            &self.sidebar_table_filter,
         )
-        .table_filter(self.sidebar_table_filter.clone())
         .selected_table(self.selected_table.clone())
         .on_new_connection({
             let handle = app_handle.clone();
@@ -641,9 +738,9 @@ impl Render for CrabStudioApp {
         })
         .on_select_table({
             let handle = app_handle.clone();
-            move |tbl_name, _, cx| {
+            move |table, _, cx| {
                 handle.update(cx, |this, cx| {
-                    this.select_table(&tbl_name, cx);
+                    this.select_table(table, cx);
                 });
             }
         })
@@ -803,13 +900,66 @@ impl Render for CrabStudioApp {
                         });
                     }
                 };
+                let on_format = {
+                    let handle = app_handle.clone();
+                    move |window: &mut Window, cx: &mut App| {
+                        handle.update(cx, |this, cx| {
+                            this.format_editor_sql(window, cx);
+                        });
+                    }
+                };
+                let on_explain = {
+                    let handle = app_handle.clone();
+                    move |_: &mut Window, cx: &mut App| {
+                        handle.update(cx, |this, cx| {
+                            this.run_explain(cx);
+                        });
+                    }
+                };
+                let on_bottom_tab = {
+                    let handle = app_handle.clone();
+                    move |tab: ConsoleBottomTab, _: &mut Window, cx: &mut App| {
+                        handle.update(cx, |this, cx| {
+                            this.console_bottom_tab = tab;
+                            cx.notify();
+                        });
+                    }
+                };
+                let on_explain_view = {
+                    let handle = app_handle.clone();
+                    move |view: ExplainViewMode, _: &mut Window, cx: &mut App| {
+                        handle.update(cx, |this, cx| {
+                            this.explain_view = view;
+                            cx.notify();
+                        });
+                    }
+                };
 
-                let console = QueryConsole::new(&self.query_editor)
+                let connection_label = match (
+                    self.active_connection.as_ref().map(|c| c.config.name.clone()),
+                    self.active_connection.as_ref().map(|c| c.config.database.clone()),
+                ) {
+                    (Some(name), Some(db)) if !db.is_empty() => Some(format!("{name} / {db}")),
+                    (Some(name), _) => Some(name),
+                    _ => None,
+                };
+
+                let console = QueryConsole::new(&self.query_editor, &self.console_split)
                     .result(self.console_result.clone())
                     .error(self.console_error.clone())
+                    .explain_plan(self.explain_plan.clone())
+                    .explain_error(self.explain_error.clone())
                     .executing(self.is_executing_query)
+                    .explaining(self.is_explaining)
+                    .bottom_tab(self.console_bottom_tab)
+                    .explain_view(self.explain_view)
+                    .connection_label(connection_label)
                     .on_run(on_run)
-                    .on_clear(on_clear);
+                    .on_clear(on_clear)
+                    .on_format(on_format)
+                    .on_explain(on_explain)
+                    .on_bottom_tab(on_bottom_tab)
+                    .on_explain_view(on_explain_view);
 
                 let quick_connect_banner = if !is_connected {
                     let mut conn_chips = h_flex().gap_2().items_center();
@@ -886,7 +1036,7 @@ impl Render for CrabStudioApp {
                 v_flex()
                     .size_full()
                     .children(quick_connect_banner)
-                    .child(div().flex_1().child(console))
+                    .child(div().flex_1().min_h_0().child(console))
                     .into_any_element()
             }
             WorkspaceTab::DataGrid => {
@@ -1109,6 +1259,12 @@ impl Render for CrabStudioApp {
             .key_context("CrabStudio")
             .on_action(cx.listener(|this, _: &RunQuery, _, cx| {
                 this.run_query(cx);
+            }))
+            .on_action(cx.listener(|this, _: &FormatSql, window, cx| {
+                this.format_editor_sql(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ExplainQuery, _, cx| {
+                this.run_explain(cx);
             }))
             .on_action(cx.listener(|this, _: &CloseDialog, _, cx| {
                 if this.dialog_open {

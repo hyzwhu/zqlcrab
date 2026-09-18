@@ -2,6 +2,7 @@
 
 pub mod adapter;
 pub mod error;
+pub mod explain;
 pub mod export;
 pub mod handle;
 pub mod history;
@@ -11,6 +12,7 @@ pub mod postgres;
 pub mod runtime;
 pub mod safety;
 pub mod sqlite;
+pub mod sql_format;
 pub mod types;
 
 pub use adapter::DatabaseAdapter;

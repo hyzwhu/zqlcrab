@@ -427,5 +427,38 @@ mod tests {
             QueryValue::String("Welcome to CrabStudio".to_string())
         );
     }
+
+    #[tokio::test]
+    async fn test_explain_query_plan_parses_scan() {
+        let config = ConnectionConfig::sqlite("test_explain", ":memory:");
+        let mut adapter = SqliteAdapter::new(config);
+        adapter.connect().await.expect("connect should succeed");
+        adapter
+            .execute_query("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);")
+            .await
+            .expect("create table");
+
+        let sql = crate::db::explain::wrap_explain_sql(
+            "SELECT * FROM users LIMIT 100",
+            crate::db::types::DatabaseFamily::Sqlite,
+        );
+        let result = adapter.execute_query(&sql).await.expect("explain should run");
+        let plan = crate::db::explain::parse_explain_result(
+            crate::db::types::DatabaseFamily::Sqlite,
+            &result,
+        );
+        assert!(
+            plan.node_count() >= 1,
+            "expected at least one plan node, raw={}",
+            plan.raw
+        );
+        assert!(
+            plan.flatten()
+                .iter()
+                .any(|(_, n)| n.node_type.contains("Scan") || n.details.to_uppercase().contains("SCAN")),
+            "expected a scan node, got {:?}",
+            plan.roots
+        );
+    }
 }
 

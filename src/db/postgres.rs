@@ -63,11 +63,20 @@ impl PostgresAdapter {
             if let Ok(val) = row.try_get::<_, String>(idx) {
                 return QueryValue::String(val);
             }
+        } else if *col_type == Type::JSON || *col_type == Type::JSONB {
+            if let Ok(val) = row.try_get::<_, serde_json::Value>(idx) {
+                return QueryValue::String(val.to_string());
+            }
+            if let Ok(val) = row.try_get::<_, String>(idx) {
+                return QueryValue::String(val);
+            }
         }
 
         // Generic fallback to text / string representation
         if let Ok(s) = row.try_get::<_, String>(idx) {
             QueryValue::String(s)
+        } else if let Ok(val) = row.try_get::<_, serde_json::Value>(idx) {
+            QueryValue::String(val.to_string())
         } else {
             QueryValue::Null
         }
@@ -254,20 +263,31 @@ impl DatabaseAdapter for PostgresAdapter {
         let client_arc = self.client.as_ref().ok_or_else(|| DbError::connection("Not connected"))?;
         let client = client_arc.lock().await;
 
-        let schema_name = schema.unwrap_or("public");
-        let sql = "SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = $1 ORDER BY table_name;";
-        let rows = client
-            .query(sql, &[&schema_name])
-            .await
-            .map_err(|e| DbError::query(e.to_string()))?;
+        let rows = if let Some(schema_name) = schema {
+            client
+                .query(
+                    "SELECT table_schema, table_name, table_type FROM information_schema.tables WHERE table_schema = $1 ORDER BY table_name;",
+                    &[&schema_name],
+                )
+                .await
+        } else {
+            client
+                .query(
+                    "SELECT table_schema, table_name, table_type FROM information_schema.tables WHERE table_schema NOT LIKE 'pg_%' AND table_schema != 'information_schema' ORDER BY table_schema, table_name;",
+                    &[],
+                )
+                .await
+        }
+        .map_err(|e| DbError::query(e.to_string()))?;
 
         let mut tables = Vec::new();
         for row in rows {
-            let name: String = row.get(0);
-            let raw_type: String = row.get(1);
+            let schema_name: String = row.get(0);
+            let name: String = row.get(1);
+            let raw_type: String = row.get(2);
             tables.push(TableInfo {
                 name,
-                schema: Some(schema_name.to_string()),
+                schema: Some(schema_name),
                 table_type: if raw_type.contains("VIEW") {
                     "VIEW".to_string()
                 } else {

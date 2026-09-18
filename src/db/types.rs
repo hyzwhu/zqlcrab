@@ -561,6 +561,36 @@ pub struct TableInfo {
     pub row_count_estimate: Option<u64>,
 }
 
+impl TableInfo {
+    pub fn is_view(&self) -> bool {
+        self.table_type.to_ascii_uppercase().contains("VIEW")
+    }
+
+    /// Dialect-quoted identifier, optionally schema-qualified.
+    pub fn qualified_name(&self, family: DatabaseFamily) -> String {
+        match self.schema.as_deref() {
+            Some(schema) if !schema.is_empty() => {
+                format!(
+                    "{}.{}",
+                    quote_ident(schema, family),
+                    quote_ident(&self.name, family)
+                )
+            }
+            _ => quote_ident(&self.name, family),
+        }
+    }
+}
+
+/// Quote an identifier for the given SQL dialect.
+pub fn quote_ident(name: &str, family: DatabaseFamily) -> String {
+    match family {
+        DatabaseFamily::MySql => format!("`{}`", name.replace('`', "``")),
+        DatabaseFamily::Postgres | DatabaseFamily::Sqlite => {
+            format!("\"{}\"", name.replace('"', "\"\""))
+        }
+    }
+}
+
 /// Database schema entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DatabaseSchema {
@@ -626,6 +656,22 @@ mod tests {
         assert_eq!(DatabaseType::CockroachDB.default_port(), 26257);
         assert_eq!(DatabaseType::Redshift.default_port(), 5439);
         assert_eq!(DatabaseType::OpenGauss.default_port(), 5432);
+
+        let table = TableInfo {
+            name: "ecrm_yb".into(),
+            schema: Some("public".into()),
+            table_type: "TABLE".into(),
+            comment: None,
+            row_count_estimate: None,
+        };
+        assert_eq!(
+            table.qualified_name(DatabaseFamily::Postgres),
+            "\"public\".\"ecrm_yb\""
+        );
+        assert_eq!(
+            table.qualified_name(DatabaseFamily::MySql),
+            "`public`.`ecrm_yb`"
+        );
 
         // All supported count
         assert_eq!(DatabaseType::all().len(), 16);

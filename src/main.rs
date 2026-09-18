@@ -6,7 +6,7 @@ pub mod ui;
 use gpui_kit::AppContext;
 use gpui_kit::component::{Root, Theme, ThemeMode, TitleBar};
 use gpui_kit::gpui::{Bounds, KeyBinding, WindowBounds, px, size};
-use ui::app::{CloseDialog, CrabStudioApp, RunQuery};
+use ui::app::{CloseDialog, CrabStudioApp, ExplainQuery, FormatSql, RunQuery};
 
 fn main() {
     // Initialize background Tokio runtime and set ambient context on main thread
@@ -21,6 +21,9 @@ fn main() {
             cx.bind_keys([
                 KeyBinding::new("cmd-enter", RunQuery, Some("CrabStudio")),
                 KeyBinding::new("ctrl-enter", RunQuery, Some("CrabStudio")),
+                KeyBinding::new("alt-shift-f", FormatSql, Some("CrabStudio")),
+                KeyBinding::new("cmd-shift-e", ExplainQuery, Some("CrabStudio")),
+                KeyBinding::new("ctrl-shift-e", ExplainQuery, Some("CrabStudio")),
                 KeyBinding::new("escape", CloseDialog, Some("CrabStudio")),
             ]);
 
