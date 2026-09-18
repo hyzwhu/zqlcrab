@@ -99,9 +99,26 @@ pub fn generate_review_plan(
         } else {
             let cols_str = insert_cols.join(", ");
             let vals_str = insert_vals.join(", ");
-            statements.push(format!(
-                "INSERT INTO {qualified_table} ({cols_str}) VALUES ({vals_str});"
-            ));
+            // Multi-line formatting if wide or many columns to avoid modal viewport horizontal sprawl
+            if cols_str.len() + vals_str.len() > 80 || insert_cols.len() > 5 {
+                let indented_cols = insert_cols
+                    .iter()
+                    .map(|c| format!("    {c}"))
+                    .collect::<Vec<_>>()
+                    .join(",\n");
+                let indented_vals = insert_vals
+                    .iter()
+                    .map(|v| format!("    {v}"))
+                    .collect::<Vec<_>>()
+                    .join(",\n");
+                statements.push(format!(
+                    "INSERT INTO {qualified_table} (\n{indented_cols}\n) VALUES (\n{indented_vals}\n);"
+                ));
+            } else {
+                statements.push(format!(
+                    "INSERT INTO {qualified_table} ({cols_str}) VALUES ({vals_str});"
+                ));
+            }
         }
         inserts_count += 1;
     }
@@ -310,6 +327,87 @@ fn build_transaction_script(family: DatabaseFamily, statements: &[String]) -> St
             )
         }
     }
+}
+
+/// Extracts the target table name (and optional schema name) from a SQL query string.
+/// Supports SELECT ... FROM, INSERT INTO, UPDATE, and DELETE FROM queries across dialects.
+pub fn extract_table_from_sql(sql: &str) -> Option<(Option<String>, String)> {
+    let cleaned = crate::db::safety::QuerySafetyValidator::clean_sql(sql);
+    if cleaned.is_empty() {
+        return None;
+    }
+
+    let words: Vec<&str> = cleaned.split_whitespace().collect();
+    if words.is_empty() {
+        return None;
+    }
+
+    let mut target_token: Option<&str> = None;
+
+    for (i, &word) in words.iter().enumerate() {
+        let upper = word.to_ascii_uppercase();
+        let stripped_upper = upper.trim_matches(|c: char| !c.is_alphanumeric());
+
+        if stripped_upper == "FROM" || stripped_upper == "INTO" || stripped_upper == "UPDATE" {
+            let mut next_idx = i + 1;
+            // Skip optional keywords like ONLY (Postgres: SELECT * FROM ONLY users)
+            if next_idx < words.len() && words[next_idx].eq_ignore_ascii_case("ONLY") {
+                next_idx += 1;
+            }
+            if next_idx < words.len() {
+                target_token = Some(words[next_idx]);
+                break;
+            }
+        }
+    }
+
+    let raw_target = target_token?;
+    let trimmed = raw_target.trim_matches(|c| c == ';' || c == ',' || c == ')' || c == '(').trim();
+    if trimmed.is_empty() || trimmed.starts_with('(') {
+        return None;
+    }
+
+    parse_qualified_identifier(trimmed)
+}
+
+fn parse_qualified_identifier(ident: &str) -> Option<(Option<String>, String)> {
+    let clean_ident = ident.trim();
+    if clean_ident.is_empty() {
+        return None;
+    }
+
+    // Split on '.' while handling quotes around parts
+    let parts: Vec<&str> = clean_ident.split('.').collect();
+    if parts.len() == 1 {
+        let tbl = strip_identifier_quotes(parts[0]);
+        if tbl.is_empty() {
+            None
+        } else {
+            Some((None, tbl))
+        }
+    } else if parts.len() == 2 {
+        let schema = strip_identifier_quotes(parts[0]);
+        let tbl = strip_identifier_quotes(parts[1]);
+        if tbl.is_empty() {
+            None
+        } else {
+            Some((if schema.is_empty() { None } else { Some(schema) }, tbl))
+        }
+    } else {
+        let schema = strip_identifier_quotes(parts[parts.len() - 2]);
+        let tbl = strip_identifier_quotes(parts[parts.len() - 1]);
+        if tbl.is_empty() {
+            None
+        } else {
+            Some((if schema.is_empty() { None } else { Some(schema) }, tbl))
+        }
+    }
+}
+
+fn strip_identifier_quotes(s: &str) -> String {
+    s.trim()
+        .trim_matches(|c| c == '`' || c == '"' || c == '\'' || c == '[' || c == ']')
+        .to_string()
 }
 
 #[cfg(test)]
@@ -558,5 +656,85 @@ mod tests {
         let script = plan.full_script;
         assert!(script.starts_with("START TRANSACTION;"));
         assert!(script.contains("INSERT INTO `shop_db`.`products` (`name`) VALUES ('Frank\\'s \"Gadgets\"');"));
+    }
+
+    #[test]
+    fn test_multiline_insert_formatting_for_wide_tables() {
+        let cols: Vec<ColumnInfo> = (1..=10)
+            .map(|i| ColumnInfo {
+                name: format!("col_{i}"),
+                data_type: "VARCHAR(255)".into(),
+                is_nullable: true,
+                is_primary_key: i == 1,
+                is_auto_increment: false,
+                default_value: None,
+                description: None,
+            })
+            .collect();
+        let grid_cols: Vec<String> = (1..=10).map(|i| format!("col_{i}")).collect();
+        let mut cs = GridChangeset::new();
+        cs.add_inserted_row(vec![
+            QueryValue::Int(1),
+            QueryValue::String("very long descriptive text title".into()),
+            QueryValue::String("detailed information content goes here".into()),
+            QueryValue::String("value_4".into()),
+            QueryValue::String("value_5".into()),
+            QueryValue::String("value_6".into()),
+            QueryValue::String("value_7".into()),
+            QueryValue::String("value_8".into()),
+            QueryValue::String("value_9".into()),
+            QueryValue::String("value_10".into()),
+        ]);
+
+        let plan = generate_review_plan(
+            "test_case",
+            Some("skill_up_web"),
+            DatabaseFamily::MySql,
+            &cols,
+            &grid_cols,
+            &[],
+            &cs,
+        );
+
+        let script = plan.full_script;
+        assert!(script.contains("INSERT INTO `skill_up_web`.`test_case` ("));
+        // Check that columns and values are indented across multiple lines
+        assert!(script.contains("    `col_1`,\n    `col_2`,"));
+        assert!(script.contains("    1,\n    'very long descriptive text title',"));
+    }
+
+    #[test]
+    fn test_extract_table_from_sql_queries() {
+        // MySQL with schema
+        let res = extract_table_from_sql("SELECT * FROM `skill_up_web`.`test_case` LIMIT 100;");
+        assert_eq!(res, Some((Some("skill_up_web".into()), "test_case".into())));
+
+        // Postgres with double quotes
+        let res = extract_table_from_sql("SELECT id, name FROM \"public\".\"users\" WHERE active = true;");
+        assert_eq!(res, Some((Some("public".into()), "users".into())));
+
+        // SQLite simple table
+        let res = extract_table_from_sql("SELECT * FROM test_case;");
+        assert_eq!(res, Some((None, "test_case".into())));
+
+        // MS SQL brackets
+        let res = extract_table_from_sql("SELECT * FROM [dbo].[Customers]");
+        assert_eq!(res, Some((Some("dbo".into()), "Customers".into())));
+
+        // Lowercase and whitespace
+        let res = extract_table_from_sql("   select  id  from   accounts   where id = 10 ");
+        assert_eq!(res, Some((None, "accounts".into())));
+
+        // INSERT statement
+        let res = extract_table_from_sql("INSERT INTO `orders` (id, amount) VALUES (1, 99.9);");
+        assert_eq!(res, Some((None, "orders".into())));
+
+        // UPDATE statement
+        let res = extract_table_from_sql("UPDATE `mydb`.`items` SET status = 'done';");
+        assert_eq!(res, Some((Some("mydb".into()), "items".into())));
+
+        // Non-table queries
+        assert_eq!(extract_table_from_sql("SELECT 1 + 1;"), None);
+        assert_eq!(extract_table_from_sql("SHOW DATABASES;"), None);
     }
 }

@@ -901,7 +901,12 @@ fn table_row(
                         .icon(IconName::Play)
                         .tooltip("SELECT * LIMIT 100")
                         .when_some(on_quick_select, |btn, handler| {
+                            let on_sel_quick = on_select.clone();
+                            let info_quick = info.clone();
                             btn.on_click(move |_, window, cx| {
+                                if let Some(ref sel_h) = on_sel_quick {
+                                    sel_h(info_quick.clone(), window, cx);
+                                }
                                 handler(
                                     format!("SELECT * FROM {qualified} LIMIT 100;"),
                                     window,

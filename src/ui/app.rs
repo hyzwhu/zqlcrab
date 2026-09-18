@@ -7,7 +7,7 @@ use crate::db::handle::ActiveConnection;
 use crate::db::history::{QueryHistoryItem, QueryHistoryManager, QueryHistoryStatus};
 use crate::db::manager::ConnectionManager;
 use crate::db::sql_format::format_sql;
-use crate::db::sql_gen::{generate_review_plan, SqlReviewPlan};
+use crate::db::sql_gen::{extract_table_from_sql, generate_review_plan, SqlReviewPlan};
 use crate::db::types::{
     ColumnInfo, ConnectionConfig, DatabaseFamily, DatabaseType, IndexInfo, QueryResult,
     QueryValue, SortDirection, TableInfo,
@@ -429,6 +429,34 @@ impl CrabStudioApp {
             cx.notify();
             return;
         };
+
+        // Automatically detect and select target table from query
+        if let Some((schema_opt, tbl_name)) = extract_table_from_sql(&sql) {
+            self.selected_table = Some(tbl_name.clone());
+            let conn_meta = conn.clone();
+            let tbl_for_cols = tbl_name.clone();
+            let schema_for_cols = schema_opt.or_else(|| {
+                self.active_tables
+                    .iter()
+                    .find(|t| t.name.eq_ignore_ascii_case(&tbl_for_cols))
+                    .and_then(|t| t.schema.clone())
+            });
+
+            cx.spawn(async move |this, cx: &mut AsyncApp| {
+                let cols = conn_meta.list_columns(None, schema_for_cols.as_deref(), &tbl_for_cols).await.unwrap_or_default();
+                let idxs = conn_meta.list_indexes(None, schema_for_cols.as_deref(), &tbl_for_cols).await.unwrap_or_default();
+                let ddl = conn_meta.get_table_ddl(None, schema_for_cols.as_deref(), &tbl_for_cols).await.ok().flatten();
+
+                this.update(cx, |app, cx| {
+                    if app.selected_table.as_deref() == Some(&tbl_for_cols) {
+                        app.schema_columns = cols;
+                        app.schema_indexes = idxs;
+                        app.schema_ddl = ddl;
+                        cx.notify();
+                    }
+                }).ok();
+            }).detach();
+        }
 
         let conn_id = Some(conn.config.id.clone());
         let conn_name = Some(conn.config.name.clone());
@@ -914,8 +942,27 @@ impl CrabStudioApp {
             return;
         }
 
-        let table_name = self.selected_table.clone().unwrap_or_else(|| "target_table".to_string());
-        let schema_name = self.active_tables.iter().find(|t| t.name == table_name).and_then(|t| t.schema.clone());
+        let mut table_name = self.selected_table.clone();
+        let mut schema_name = None;
+
+        if table_name.is_none() {
+            let sql = self.query_editor.read(cx).value().to_string();
+            if let Some((sch, tbl)) = extract_table_from_sql(&sql) {
+                schema_name = sch;
+                table_name = Some(tbl);
+            }
+        }
+
+        let Some(table_name) = table_name else {
+            self.status_message = Some("Cannot determine target table for pending changes. Please select a table from the sidebar.".to_string());
+            cx.notify();
+            return;
+        };
+
+        if schema_name.is_none() {
+            schema_name = self.active_tables.iter().find(|t| t.name.eq_ignore_ascii_case(&table_name)).and_then(|t| t.schema.clone());
+        }
+
         let family = conn.config.db_type.family();
 
         let empty_cols = Vec::new();
@@ -965,8 +1012,8 @@ impl CrabStudioApp {
         self.sql_review_error = None;
         cx.notify();
 
-        let table_name = self.selected_table.clone();
-        let schema_name = self.active_tables.iter().find(|t| Some(&t.name) == table_name.as_ref()).and_then(|t| t.schema.clone());
+        let table_name = Some(plan.table_name.clone());
+        let schema_name = plan.schema_name.clone();
         let full_script = plan.full_script.clone();
         let inserts_count = plan.inserts_count;
         let updates_count = plan.updates_count;

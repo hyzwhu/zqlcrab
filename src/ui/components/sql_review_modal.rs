@@ -280,12 +280,14 @@ impl RenderOnce for SqlReviewModal {
                 };
 
                 h_flex()
-                    .w_full()
+                    .min_w_full()
+                    .w_auto()
                     .items_start()
                     .gap_3()
                     .child(
                         div()
                             .w(px(28.0))
+                            .flex_none()
                             .text_right()
                             .text_xs()
                             .font_family(".AppleSystemUIFontMonospaced")
@@ -304,7 +306,8 @@ impl RenderOnce for SqlReviewModal {
 
         // Modal container
         let modal = v_flex()
-            .w(px(720.0))
+            .w(px(860.0))
+            .max_w(px(960.0))
             .max_h(px(640.0))
             .bg(ThemeColors::BG_APP)
             .rounded_xl()
@@ -441,18 +444,24 @@ impl RenderOnce for SqlReviewModal {
                     .child(pk_banner)
                     .children(error_banner)
                     .child(
-                        // SQL Script viewport
+                        // SQL Script viewport with dual-axis scrollbar to prevent horizontal clipping
                         div()
                             .id("sql_review_code_scroll")
                             .w_full()
-                            .max_h(px(320.0))
+                            .max_h(px(340.0))
+                            .overflow_x_scroll()
                             .overflow_y_scroll()
                             .p_3()
                             .rounded_md()
                             .bg(rgba(0x0B1120FF))
                             .border_1()
                             .border_color(ThemeColors::BORDER)
-                            .child(code_lines),
+                            .child(
+                                div()
+                                    .min_w_full()
+                                    .w_auto()
+                                    .child(code_lines),
+                            ),
                     ),
             )
             .child(
