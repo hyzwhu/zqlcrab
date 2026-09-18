@@ -5,7 +5,8 @@ use crate::db::handle::ActiveConnection;
 use crate::db::history::{QueryHistoryItem, QueryHistoryManager, QueryHistoryStatus};
 use crate::db::manager::ConnectionManager;
 use crate::db::types::{
-    ColumnInfo, ConnectionConfig, DatabaseType, IndexInfo, QueryResult, SortDirection, TableInfo,
+    ColumnInfo, ConnectionConfig, DatabaseFamily, DatabaseType, IndexInfo, QueryResult,
+    SortDirection, TableInfo,
 };
 use crate::ui::components::{
     AppStatusBar, ConnectionDialog, DataGrid, QueryConsole, QueryHistoryView, SchemaViewer, Sidebar,
@@ -417,34 +418,24 @@ impl CrabStudioApp {
         self.dialog_db_type = db_type;
         self.dialog_test_result = None;
 
-        match db_type {
-            DatabaseType::Sqlite => {
-                self.dialog_database_input.update(cx, |inp, cx| {
-                    inp.set_value(":memory:", window, cx);
-                });
-            }
-            DatabaseType::Postgres => {
-                self.dialog_port_input.update(cx, |inp, cx| {
-                    inp.set_value("5432", window, cx);
-                });
-                self.dialog_database_input.update(cx, |inp, cx| {
-                    inp.set_value("postgres", window, cx);
-                });
-                self.dialog_user_input.update(cx, |inp, cx| {
-                    inp.set_value("postgres", window, cx);
-                });
-            }
-            DatabaseType::Mysql => {
-                self.dialog_port_input.update(cx, |inp, cx| {
-                    inp.set_value("3306", window, cx);
-                });
-                self.dialog_database_input.update(cx, |inp, cx| {
-                    inp.set_value("mysql", window, cx);
-                });
-                self.dialog_user_input.update(cx, |inp, cx| {
-                    inp.set_value("root", window, cx);
-                });
-            }
+        let default_port = db_type.default_port().to_string();
+        let default_db = db_type.default_database();
+        let default_user = db_type.default_user();
+
+        if db_type.is_file_based() {
+            self.dialog_database_input.update(cx, |inp, cx| {
+                inp.set_value(default_db, window, cx);
+            });
+        } else {
+            self.dialog_port_input.update(cx, |inp, cx| {
+                inp.set_value(&default_port, window, cx);
+            });
+            self.dialog_database_input.update(cx, |inp, cx| {
+                inp.set_value(default_db, window, cx);
+            });
+            self.dialog_user_input.update(cx, |inp, cx| {
+                inp.set_value(default_user, window, cx);
+            });
         }
         cx.notify();
     }
@@ -452,33 +443,43 @@ impl CrabStudioApp {
     /// Collect form values from dialog inputs
     fn build_config_from_dialog(&self, cx: &Context<Self>) -> ConnectionConfig {
         let name = self.dialog_name_input.read(cx).value().to_string();
-        let name = if name.trim().is_empty() { "Untitled Connection".to_string() } else { name };
+        let name = if name.trim().is_empty() {
+            format!("New {}", self.dialog_db_type.display_name())
+        } else {
+            name
+        };
 
-        let mut cfg = match self.dialog_db_type {
-            DatabaseType::Sqlite => {
+        let mut cfg = match self.dialog_db_type.family() {
+            DatabaseFamily::Sqlite => {
                 let db_path = self.dialog_database_input.read(cx).value().to_string();
                 let path = if db_path.trim().is_empty() { ":memory:".to_string() } else { db_path };
-                ConnectionConfig::sqlite(name, path)
+                let mut c = ConnectionConfig::sqlite(name, path);
+                c.db_type = self.dialog_db_type;
+                c
             }
-            DatabaseType::Postgres => {
+            DatabaseFamily::Postgres => {
                 let host = self.dialog_host_input.read(cx).value().to_string();
                 let port_str = self.dialog_port_input.read(cx).value().to_string();
-                let port = port_str.trim().parse::<u16>().unwrap_or(5432);
+                let port = port_str.trim().parse::<u16>().unwrap_or_else(|_| self.dialog_db_type.default_port());
                 let db = self.dialog_database_input.read(cx).value().to_string();
                 let user = self.dialog_user_input.read(cx).value().to_string();
                 let pass_str = self.dialog_pass_input.read(cx).value().to_string();
                 let pass = if pass_str.is_empty() { None } else { Some(pass_str) };
-                ConnectionConfig::postgres(name, host, port, db, user, pass)
+                let mut c = ConnectionConfig::postgres(name, host, port, db, user, pass);
+                c.db_type = self.dialog_db_type;
+                c
             }
-            DatabaseType::Mysql => {
+            DatabaseFamily::MySql => {
                 let host = self.dialog_host_input.read(cx).value().to_string();
                 let port_str = self.dialog_port_input.read(cx).value().to_string();
-                let port = port_str.trim().parse::<u16>().unwrap_or(3306);
+                let port = port_str.trim().parse::<u16>().unwrap_or_else(|_| self.dialog_db_type.default_port());
                 let db = self.dialog_database_input.read(cx).value().to_string();
                 let user = self.dialog_user_input.read(cx).value().to_string();
                 let pass_str = self.dialog_pass_input.read(cx).value().to_string();
                 let pass = if pass_str.is_empty() { None } else { Some(pass_str) };
-                ConnectionConfig::mysql(name, host, port, db, user, pass)
+                let mut c = ConnectionConfig::mysql(name, host, port, db, user, pass);
+                c.db_type = self.dialog_db_type;
+                c
             }
         };
 

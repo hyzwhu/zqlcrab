@@ -1,6 +1,6 @@
 //! Connection profile modal dialog for creating and configuring database connections.
 
-use crate::db::types::DatabaseType;
+use crate::db::types::{DatabaseFamily, DatabaseType};
 use crate::ui::theme::ThemeColors;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::{h_flex, v_flex};
@@ -166,25 +166,37 @@ impl RenderOnce for ConnectionDialog {
             });
         }
 
-        // Database engine type selection cards
-        let engines = [
+        // Popular database engine selector grid
+        let popular_engines = [
             (DatabaseType::Sqlite, "SQLite", IconName::Database),
-            (DatabaseType::Postgres, "PostgreSQL", IconName::Layers),
             (DatabaseType::Mysql, "MySQL", IconName::Cpu),
+            (DatabaseType::Postgres, "PostgreSQL", IconName::Layers),
+            (DatabaseType::MariaDB, "MariaDB", IconName::Server),
+            (DatabaseType::TiDB, "TiDB", IconName::Layers),
+            (DatabaseType::OceanBase, "OceanBase", IconName::HardDrive),
+            (DatabaseType::StarRocks, "StarRocks", IconName::Activity),
+            (DatabaseType::Doris, "Doris", IconName::Activity),
+            (DatabaseType::CockroachDB, "Cockroach", IconName::Cpu),
+            (DatabaseType::TimescaleDB, "Timescale", IconName::Activity),
+            (DatabaseType::OpenGauss, "openGauss", IconName::Server),
+            (DatabaseType::Redshift, "Redshift", IconName::Layers),
         ];
 
-        let mut engine_selector = h_flex().gap_2().w_full();
-        for (dtype, name, icon) in engines {
+        let mut row1 = h_flex().gap_1p5().w_full();
+        let mut row2 = h_flex().gap_1p5().w_full();
+
+        for (idx, (dtype, name, icon)) in popular_engines.into_iter().enumerate() {
             let is_selected = self.db_type == dtype;
             let on_select = self.on_select_type.clone();
 
             let card = h_flex()
                 .id(ElementId::Name(format!("engine_{:?}", dtype).into()))
                 .flex_1()
-                .p_2p5()
+                .py_1p5()
+                .px_2()
                 .items_center()
                 .justify_center()
-                .gap_2()
+                .gap_1p5()
                 .rounded_md()
                 .border_1()
                 .cursor_pointer()
@@ -201,7 +213,7 @@ impl RenderOnce for ConnectionDialog {
                 .hover(|s| s.bg(ThemeColors::BG_SURFACE_HOVER))
                 .child(
                     Icon::new(icon)
-                        .size(px(16.0))
+                        .size(px(14.0))
                         .text_color(if is_selected {
                             ThemeColors::PRIMARY_BORDER
                         } else {
@@ -229,138 +241,175 @@ impl RenderOnce for ConnectionDialog {
                     }
                 });
 
-            engine_selector = engine_selector.child(card);
+            if idx < 6 {
+                row1 = row1.child(card);
+            } else {
+                row2 = row2.child(card);
+            }
         }
 
+        // Protocol badge and category description
+        let protocol_desc = match self.db_type.family() {
+            DatabaseFamily::Sqlite => "⚡ Native SQLite Engine (C-bindings) • Local file or in-memory",
+            DatabaseFamily::MySql => "⚡ MySQL Wire Protocol (mysql_async) • High performance async connection",
+            DatabaseFamily::Postgres => "⚡ PostgreSQL Wire Protocol (tokio-postgres) • Extended query protocol",
+        };
+
+        let engine_selector = v_flex()
+            .gap_1p5()
+            .w_full()
+            .child(row1)
+            .child(row2)
+            .child(
+                h_flex()
+                    .w_full()
+                    .justify_between()
+                    .items_center()
+                    .px_1()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(ThemeColors::TEXT_FAINT)
+                            .child(protocol_desc),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(ThemeColors::PRIMARY_BORDER)
+                            .child(self.db_type.category().display_name()),
+                    ),
+            );
+
         // Form fields depending on database type
-        let form_fields = match self.db_type {
-            DatabaseType::Sqlite => {
-                v_flex()
-                    .gap_3()
-                    .w_full()
-                    .child(
-                        v_flex()
-                            .gap_1()
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(ThemeColors::TEXT_MUTED)
-                                    .child("Connection Name"),
-                            )
-                            .child(Input::new(&self.name_input).id("conn_name").w_full()),
-                    )
-                    .child(
-                        v_flex()
-                            .gap_1()
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(ThemeColors::TEXT_MUTED)
-                                    .child("Database File Path (or ':memory:')"),
-                            )
-                            .child(Input::new(&self.database_input).id("db_path").w_full())
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(ThemeColors::TEXT_FAINT)
-                                    .child("Tip: Use ':memory:' for an in-memory SQLite database, or a local file path."),
-                            ),
-                    )
-            }
-            DatabaseType::Postgres | DatabaseType::Mysql => {
-                let default_port = if self.db_type == DatabaseType::Postgres { "5432" } else { "3306" };
-                v_flex()
-                    .gap_3()
-                    .w_full()
-                    .child(
-                        v_flex()
-                            .gap_1()
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(ThemeColors::TEXT_MUTED)
-                                    .child("Connection Name"),
-                            )
-                            .child(Input::new(&self.name_input).id("conn_name").w_full()),
-                    )
-                    .child(
-                        h_flex()
-                            .gap_2()
-                            .w_full()
-                            .child(
-                                v_flex()
-                                    .flex_1()
-                                    .gap_1()
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_color(ThemeColors::TEXT_MUTED)
-                                            .child("Host"),
-                                    )
-                                    .child(Input::new(&self.host_input).id("conn_host").w_full()),
-                            )
-                            .child(
-                                v_flex()
-                                    .w(px(100.0))
-                                    .gap_1()
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_color(ThemeColors::TEXT_MUTED)
-                                            .child(format!("Port ({default_port})")),
-                                    )
-                                    .child(Input::new(&self.port_input).id("conn_port").w_full()),
-                            ),
-                    )
-                    .child(
-                        v_flex()
-                            .gap_1()
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(ThemeColors::TEXT_MUTED)
-                                    .child("Database Name"),
-                            )
-                            .child(Input::new(&self.database_input).id("conn_db").w_full()),
-                    )
-                    .child(
-                        h_flex()
-                            .gap_2()
-                            .w_full()
-                            .child(
-                                v_flex()
-                                    .flex_1()
-                                    .gap_1()
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_color(ThemeColors::TEXT_MUTED)
-                                            .child("Username"),
-                                    )
-                                    .child(Input::new(&self.user_input).id("conn_user").w_full()),
-                            )
-                            .child(
-                                v_flex()
-                                    .flex_1()
-                                    .gap_1()
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_color(ThemeColors::TEXT_MUTED)
-                                            .child("Password"),
-                                    )
-                                    .child(Input::new(&self.pass_input).id("conn_pass").w_full()),
-                            ),
-                    )
-            }
+        let form_fields = if self.db_type.is_file_based() {
+            v_flex()
+                .gap_3()
+                .w_full()
+                .child(
+                    v_flex()
+                        .gap_1()
+                        .child(
+                            div()
+                                .text_xs()
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(ThemeColors::TEXT_MUTED)
+                                .child("Connection Name"),
+                        )
+                        .child(Input::new(&self.name_input).id("conn_name").w_full()),
+                )
+                .child(
+                    v_flex()
+                        .gap_1()
+                        .child(
+                            div()
+                                .text_xs()
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(ThemeColors::TEXT_MUTED)
+                                .child("Database File Path (or ':memory:')"),
+                        )
+                        .child(Input::new(&self.database_input).id("db_path").w_full())
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(ThemeColors::TEXT_FAINT)
+                                .child("Tip: Use ':memory:' for an in-memory SQLite database, or a local file path."),
+                        ),
+                )
+        } else {
+            let default_port = self.db_type.default_port().to_string();
+            let default_user = self.db_type.default_user();
+            let default_db = self.db_type.default_database();
+
+            v_flex()
+                .gap_3()
+                .w_full()
+                .child(
+                    v_flex()
+                        .gap_1()
+                        .child(
+                            div()
+                                .text_xs()
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(ThemeColors::TEXT_MUTED)
+                                .child("Connection Name"),
+                        )
+                        .child(Input::new(&self.name_input).id("conn_name").w_full()),
+                )
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .w_full()
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(ThemeColors::TEXT_MUTED)
+                                        .child("Host"),
+                                )
+                                .child(Input::new(&self.host_input).id("conn_host").w_full()),
+                        )
+                        .child(
+                            v_flex()
+                                .w(px(110.0))
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(ThemeColors::TEXT_MUTED)
+                                        .child(format!("Port ({default_port})")),
+                                )
+                                .child(Input::new(&self.port_input).id("conn_port").w_full()),
+                        ),
+                )
+                .child(
+                    v_flex()
+                        .gap_1()
+                        .child(
+                            div()
+                                .text_xs()
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(ThemeColors::TEXT_MUTED)
+                                .child(format!("Database Name ({default_db})")),
+                        )
+                        .child(Input::new(&self.database_input).id("conn_db").w_full()),
+                )
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .w_full()
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(ThemeColors::TEXT_MUTED)
+                                        .child(format!("Username ({default_user})")),
+                                )
+                                .child(Input::new(&self.user_input).id("conn_user").w_full()),
+                        )
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(ThemeColors::TEXT_MUTED)
+                                        .child("Password"),
+                                )
+                                .child(Input::new(&self.pass_input).id("conn_pass").w_full()),
+                        ),
+                )
         };
 
         // Test status notification
@@ -474,7 +523,7 @@ impl RenderOnce for ConnectionDialog {
 
         // Dialog container modal
         let modal = v_flex()
-            .w(px(500.0))
+            .w(px(560.0))
             .bg(ThemeColors::BG_APP)
             .rounded_xl()
             .border_1()

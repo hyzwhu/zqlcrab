@@ -3,22 +3,117 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// Supported database types.
+/// Underlying engine driver family.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DatabaseFamily {
+    Sqlite,
+    Postgres,
+    MySql,
+}
+
+/// Categorization of database systems.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DatabaseCategory {
+    Relational,
+    Analytical,
+    Distributed,
+    Embedded,
+}
+
+impl DatabaseCategory {
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::Relational => "Relational (OLTP)",
+            Self::Analytical => "Analytical (OLAP)",
+            Self::Distributed => "Distributed SQL",
+            Self::Embedded => "Embedded / Local",
+        }
+    }
+}
+
+/// Supported database types including wire-compatible ecosystems.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DatabaseType {
+    // Embedded
     Sqlite,
-    Postgres,
+
+    // MySQL Protocol Ecosystem
     Mysql,
+    MariaDB,
+    TiDB,
+    OceanBase,
+    StarRocks,
+    Doris,
+    PolarDB,
+
+    // PostgreSQL Protocol Ecosystem
+    Postgres,
+    CockroachDB,
+    TimescaleDB,
+    Redshift,
+    YugabyteDB,
+    OpenGauss,
+    Kingbase,
+    Greenplum,
 }
 
 impl DatabaseType {
+    /// Underlying protocol driver family.
+    pub fn family(&self) -> DatabaseFamily {
+        match self {
+            Self::Sqlite => DatabaseFamily::Sqlite,
+
+            Self::Mysql
+            | Self::MariaDB
+            | Self::TiDB
+            | Self::OceanBase
+            | Self::StarRocks
+            | Self::Doris
+            | Self::PolarDB => DatabaseFamily::MySql,
+
+            Self::Postgres
+            | Self::CockroachDB
+            | Self::TimescaleDB
+            | Self::Redshift
+            | Self::YugabyteDB
+            | Self::OpenGauss
+            | Self::Kingbase
+            | Self::Greenplum => DatabaseFamily::Postgres,
+        }
+    }
+
+    /// System category.
+    pub fn category(&self) -> DatabaseCategory {
+        match self {
+            Self::Sqlite => DatabaseCategory::Embedded,
+            Self::Mysql | Self::MariaDB | Self::Postgres | Self::Kingbase => DatabaseCategory::Relational,
+            Self::TiDB | Self::OceanBase | Self::CockroachDB | Self::YugabyteDB | Self::OpenGauss | Self::PolarDB => {
+                DatabaseCategory::Distributed
+            }
+            Self::StarRocks | Self::Doris | Self::TimescaleDB | Self::Redshift | Self::Greenplum => {
+                DatabaseCategory::Analytical
+            }
+        }
+    }
+
     /// Default network port for the database system.
     pub fn default_port(&self) -> u16 {
         match self {
             Self::Sqlite => 0,
-            Self::Postgres => 5432,
-            Self::Mysql => 3306,
+            Self::Mysql | Self::MariaDB | Self::PolarDB => 3306,
+            Self::TiDB => 4000,
+            Self::OceanBase => 2881,
+            Self::StarRocks => 9030,
+            Self::Doris => 9030,
+            Self::Postgres | Self::TimescaleDB | Self::Greenplum => 5432,
+            Self::CockroachDB => 26257,
+            Self::Redshift => 5439,
+            Self::YugabyteDB => 5433,
+            Self::OpenGauss => 5432,
+            Self::Kingbase => 54321,
         }
     }
 
@@ -26,18 +121,73 @@ impl DatabaseType {
     pub fn display_name(&self) -> &'static str {
         match self {
             Self::Sqlite => "SQLite",
-            Self::Postgres => "PostgreSQL",
             Self::Mysql => "MySQL",
+            Self::MariaDB => "MariaDB",
+            Self::TiDB => "TiDB",
+            Self::OceanBase => "OceanBase",
+            Self::StarRocks => "StarRocks",
+            Self::Doris => "Apache Doris",
+            Self::PolarDB => "PolarDB",
+            Self::Postgres => "PostgreSQL",
+            Self::CockroachDB => "CockroachDB",
+            Self::TimescaleDB => "TimescaleDB",
+            Self::Redshift => "Amazon Redshift",
+            Self::YugabyteDB => "YugabyteDB",
+            Self::OpenGauss => "openGauss",
+            Self::Kingbase => "KingbaseES",
+            Self::Greenplum => "Greenplum",
         }
     }
 
-    /// Default file extension or descriptor.
+    /// Default database name.
     pub fn default_database(&self) -> &'static str {
-        match self {
-            Self::Sqlite => "main.db",
-            Self::Postgres => "postgres",
-            Self::Mysql => "mysql",
+        match self.family() {
+            DatabaseFamily::Sqlite => ":memory:",
+            DatabaseFamily::MySql => "mysql",
+            DatabaseFamily::Postgres => "postgres",
         }
+    }
+
+    /// Default username.
+    pub fn default_user(&self) -> &'static str {
+        match self {
+            Self::Sqlite => "",
+            Self::Mysql | Self::MariaDB | Self::TiDB | Self::OceanBase | Self::StarRocks | Self::Doris | Self::PolarDB => {
+                "root"
+            }
+            Self::Postgres | Self::TimescaleDB | Self::YugabyteDB | Self::Greenplum => "postgres",
+            Self::CockroachDB => "root",
+            Self::Redshift => "awsuser",
+            Self::OpenGauss => "omm",
+            Self::Kingbase => "system",
+        }
+    }
+
+    /// Whether this is a local file-based database.
+    pub fn is_file_based(&self) -> bool {
+        matches!(self, Self::Sqlite)
+    }
+
+    /// All supported databases.
+    pub fn all() -> &'static [DatabaseType] {
+        &[
+            Self::Sqlite,
+            Self::Mysql,
+            Self::MariaDB,
+            Self::TiDB,
+            Self::OceanBase,
+            Self::StarRocks,
+            Self::Doris,
+            Self::PolarDB,
+            Self::Postgres,
+            Self::CockroachDB,
+            Self::TimescaleDB,
+            Self::Redshift,
+            Self::YugabyteDB,
+            Self::OpenGauss,
+            Self::Kingbase,
+            Self::Greenplum,
+        ]
     }
 }
 
@@ -78,6 +228,114 @@ pub struct ConnectionConfig {
     /// Whether this connection is in Read-Only mode (destructive queries blocked).
     #[serde(default)]
     pub is_read_only: bool,
+    /// Environment tag (e.g. Dev, Test, Prod).
+    #[serde(default)]
+    pub environment: EnvironmentTag,
+    /// SSL/TLS mode.
+    #[serde(default)]
+    pub ssl_mode: SslMode,
+    /// Optional SSH Bastion tunnel configuration.
+    #[serde(default)]
+    pub ssh_tunnel: Option<SshTunnelConfig>,
+    /// Connection pool max connections.
+    #[serde(default = "default_max_connections")]
+    pub max_connections: u32,
+    /// Connection pool min connections.
+    #[serde(default = "default_min_connections")]
+    pub min_connections: u32,
+}
+
+fn default_max_connections() -> u32 {
+    10
+}
+
+fn default_min_connections() -> u32 {
+    1
+}
+
+/// Environment deployment tag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum EnvironmentTag {
+    #[default]
+    Development,
+    Testing,
+    Staging,
+    Production,
+}
+
+impl EnvironmentTag {
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::Development => "DEV",
+            Self::Testing => "TEST",
+            Self::Staging => "STAGE",
+            Self::Production => "PROD",
+        }
+    }
+
+    pub fn is_production(&self) -> bool {
+        matches!(self, Self::Production)
+    }
+}
+
+/// SSL / TLS connection encryption mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum SslMode {
+    #[default]
+    Disable,
+    Prefer,
+    Require,
+    VerifyCa,
+    VerifyFull,
+}
+
+impl SslMode {
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::Disable => "Disable",
+            Self::Prefer => "Prefer",
+            Self::Require => "Require",
+            Self::VerifyCa => "Verify-CA",
+            Self::VerifyFull => "Verify-Full",
+        }
+    }
+}
+
+/// SSH Tunnel configuration for bastion host jumping.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct SshTunnelConfig {
+    pub enabled: bool,
+    #[serde(default = "default_ssh_host")]
+    pub host: String,
+    #[serde(default = "default_ssh_port")]
+    pub port: u16,
+    #[serde(default)]
+    pub username: String,
+    #[serde(default)]
+    pub auth_type: SshAuthType,
+    #[serde(default)]
+    pub private_key_path: Option<String>,
+    #[serde(default)]
+    pub passphrase: Option<String>,
+}
+
+fn default_ssh_host() -> String {
+    "127.0.0.1".to_string()
+}
+
+fn default_ssh_port() -> u16 {
+    22
+}
+
+/// SSH authentication method.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum SshAuthType {
+    #[default]
+    Password,
+    PrivateKey,
 }
 
 fn default_host() -> String {
@@ -107,6 +365,11 @@ impl ConnectionConfig {
             connect_timeout_secs: 5,
             query_timeout_secs: 30,
             is_read_only: false,
+            environment: EnvironmentTag::Development,
+            ssl_mode: SslMode::Disable,
+            ssh_tunnel: None,
+            max_connections: 5,
+            min_connections: 1,
         }
     }
 
@@ -131,6 +394,11 @@ impl ConnectionConfig {
             connect_timeout_secs: 10,
             query_timeout_secs: 30,
             is_read_only: false,
+            environment: EnvironmentTag::Development,
+            ssl_mode: SslMode::Prefer,
+            ssh_tunnel: None,
+            max_connections: 10,
+            min_connections: 1,
         }
     }
 
@@ -155,6 +423,11 @@ impl ConnectionConfig {
             connect_timeout_secs: 10,
             query_timeout_secs: 30,
             is_read_only: false,
+            environment: EnvironmentTag::Development,
+            ssl_mode: SslMode::Prefer,
+            ssh_tunnel: None,
+            max_connections: 10,
+            min_connections: 1,
         }
     }
 }
@@ -303,4 +576,79 @@ pub struct IndexInfo {
     pub columns: Vec<String>,
     pub is_unique: bool,
     pub is_primary: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_database_type_properties_and_family() {
+        // Embedded
+        assert_eq!(DatabaseType::Sqlite.family(), DatabaseFamily::Sqlite);
+        assert!(DatabaseType::Sqlite.is_file_based());
+        assert_eq!(DatabaseType::Sqlite.category(), DatabaseCategory::Embedded);
+
+        // MySQL Family
+        let mysql_types = [
+            DatabaseType::Mysql,
+            DatabaseType::MariaDB,
+            DatabaseType::TiDB,
+            DatabaseType::OceanBase,
+            DatabaseType::StarRocks,
+            DatabaseType::Doris,
+            DatabaseType::PolarDB,
+        ];
+        for d in mysql_types {
+            assert_eq!(d.family(), DatabaseFamily::MySql);
+            assert!(!d.is_file_based());
+            assert_eq!(d.default_user(), "root");
+        }
+        assert_eq!(DatabaseType::TiDB.default_port(), 4000);
+        assert_eq!(DatabaseType::OceanBase.default_port(), 2881);
+        assert_eq!(DatabaseType::StarRocks.default_port(), 9030);
+
+        // PostgreSQL Family
+        let pg_types = [
+            DatabaseType::Postgres,
+            DatabaseType::CockroachDB,
+            DatabaseType::TimescaleDB,
+            DatabaseType::Redshift,
+            DatabaseType::YugabyteDB,
+            DatabaseType::OpenGauss,
+            DatabaseType::Kingbase,
+            DatabaseType::Greenplum,
+        ];
+        for d in pg_types {
+            assert_eq!(d.family(), DatabaseFamily::Postgres);
+            assert!(!d.is_file_based());
+        }
+        assert_eq!(DatabaseType::CockroachDB.default_port(), 26257);
+        assert_eq!(DatabaseType::Redshift.default_port(), 5439);
+        assert_eq!(DatabaseType::OpenGauss.default_port(), 5432);
+
+        // All supported count
+        assert_eq!(DatabaseType::all().len(), 16);
+    }
+
+    #[test]
+    fn test_connection_config_serialization_and_defaults() {
+        let mut cfg = ConnectionConfig::mysql("Prod Cluster", "10.0.0.1", 3306, "billing", "app", Some("secret".to_string()));
+        cfg.environment = EnvironmentTag::Production;
+        cfg.is_read_only = true;
+        cfg.ssl_mode = SslMode::Require;
+
+        let json = serde_json::to_string(&cfg).expect("serialization should succeed");
+        assert!(json.contains("\"production\""));
+        assert!(json.contains("\"require\""));
+        assert!(json.contains("\"is_read_only\":true"));
+
+        let deserialized: ConnectionConfig = serde_json::from_str(&json).expect("deserialization should succeed");
+        assert_eq!(deserialized.name, "Prod Cluster");
+        assert_eq!(deserialized.environment, EnvironmentTag::Production);
+        assert!(deserialized.environment.is_production());
+        assert!(deserialized.is_read_only);
+        assert_eq!(deserialized.ssl_mode, SslMode::Require);
+        assert_eq!(deserialized.max_connections, 10);
+    }
 }

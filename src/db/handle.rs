@@ -7,7 +7,7 @@ use crate::db::{
     postgres::PostgresAdapter,
     sqlite::SqliteAdapter,
     types::{
-        ColumnInfo, ConnectionConfig, ConnectionStatus, DatabaseSchema, DatabaseType, IndexInfo,
+        ColumnInfo, ConnectionConfig, ConnectionStatus, DatabaseFamily, DatabaseSchema, IndexInfo,
         QueryResult, TableInfo,
     },
 };
@@ -27,10 +27,10 @@ impl ActiveConnection {
     /// Instantiates a new active connection from a configuration profile.
     pub fn new(config: ConnectionConfig) -> Self {
         let id = config.id.clone();
-        let boxed_adapter: Box<dyn DatabaseAdapter> = match config.db_type {
-            DatabaseType::Sqlite => Box::new(SqliteAdapter::new(config.clone())),
-            DatabaseType::Postgres => Box::new(PostgresAdapter::new(config.clone())),
-            DatabaseType::Mysql => Box::new(MysqlAdapter::new(config.clone())),
+        let boxed_adapter: Box<dyn DatabaseAdapter> = match config.db_type.family() {
+            DatabaseFamily::Sqlite => Box::new(SqliteAdapter::new(config.clone())),
+            DatabaseFamily::Postgres => Box::new(PostgresAdapter::new(config.clone())),
+            DatabaseFamily::MySql => Box::new(MysqlAdapter::new(config.clone())),
         };
 
         Self {

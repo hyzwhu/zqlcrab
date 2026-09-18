@@ -196,8 +196,19 @@ impl RenderOnce for Sidebar {
 
             let engine_icon = match conn.db_type {
                 DatabaseType::Sqlite => IconName::Database,
-                DatabaseType::Postgres => IconName::Layers,
                 DatabaseType::Mysql => IconName::Cpu,
+                DatabaseType::MariaDB => IconName::Server,
+                DatabaseType::TiDB => IconName::Layers,
+                DatabaseType::OceanBase => IconName::HardDrive,
+                DatabaseType::StarRocks | DatabaseType::Doris => IconName::Activity,
+                DatabaseType::PolarDB => IconName::Server,
+                DatabaseType::Postgres => IconName::Layers,
+                DatabaseType::CockroachDB => IconName::Cpu,
+                DatabaseType::TimescaleDB => IconName::Activity,
+                DatabaseType::Redshift => IconName::Layers,
+                DatabaseType::YugabyteDB => IconName::HardDrive,
+                DatabaseType::OpenGauss | DatabaseType::Kingbase => IconName::Server,
+                DatabaseType::Greenplum => IconName::Layers,
             };
 
             let conn_item = h_flex()
@@ -241,11 +252,36 @@ impl RenderOnce for Sidebar {
                         .child(
                             v_flex()
                                 .child(
-                                    div()
-                                        .text_xs()
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .text_color(ThemeColors::TEXT_PRIMARY)
-                                        .child(conn.name.clone()),
+                                    h_flex()
+                                        .items_center()
+                                        .gap_1p5()
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .font_weight(FontWeight::MEDIUM)
+                                                .text_color(ThemeColors::TEXT_PRIMARY)
+                                                .child(conn.name.clone()),
+                                        )
+                                        .when(conn.environment.is_production(), |this| {
+                                            this.child(
+                                                div()
+                                                    .px_1()
+                                                    .rounded_sm()
+                                                    .bg(ThemeColors::ERROR)
+                                                    .text_color(ThemeColors::TEXT_PRIMARY)
+                                                    .child("PROD"),
+                                            )
+                                        })
+                                        .when(conn.is_read_only, |this| {
+                                            this.child(
+                                                div()
+                                                    .px_1()
+                                                    .rounded_sm()
+                                                    .bg(ThemeColors::WARNING)
+                                                    .text_color(ThemeColors::TEXT_PRIMARY)
+                                                    .child("RO"),
+                                            )
+                                        }),
                                 )
                                 .child(
                                     div()
