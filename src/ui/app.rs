@@ -1184,7 +1184,7 @@ impl Render for CrabStudioApp {
                 v_flex()
                     .size_full()
                     .children(quick_connect_banner)
-                    .child(div().flex_1().min_h_0().child(console))
+                    .child(div().size_full().flex_1().min_h_0().child(console))
                     .into_any_element()
             }
             WorkspaceTab::DataGrid => {
@@ -1528,7 +1528,7 @@ impl Render for CrabStudioApp {
                             .min_w_0()
                             .min_h_0()
                             .child(tabs_bar)
-                            .child(v_flex().flex_1().min_h_0().w_full().child(main_content)),
+                            .child(v_flex().size_full().flex_1().min_h_0().w_full().child(main_content)),
                     ),
             )
             .child(status_bar)

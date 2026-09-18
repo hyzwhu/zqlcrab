@@ -721,18 +721,31 @@ impl RenderOnce for DataGrid {
                     .flex_shrink_0()
                     .overflow_hidden()
                     .border_r_1()
-                    .border_color(ThemeColors::BORDER)
+                    .border_color(ThemeColors::BORDER_PROMINENT)
                     .bg(ThemeColors::BG_SURFACE)
                     .child(
-                        div()
+                        h_flex()
                             .size_full()
-                            .flex()
                             .items_center()
-                            .justify_center()
-                            .text_xs()
-                            .font_weight(FontWeight::BOLD)
-                            .text_color(ThemeColors::TEXT_FAINT)
-                            .child("#"),
+                            .justify_between()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .text_xs()
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(ThemeColors::TEXT_FAINT)
+                                    .child("#"),
+                            )
+                            .child(
+                                div()
+                                    .w(px(1.0))
+                                    .h(px(18.0))
+                                    .bg(ThemeColors::BORDER_PROMINENT)
+                                    .flex_none(),
+                            ),
                     ),
             );
 
@@ -819,9 +832,22 @@ impl RenderOnce for DataGrid {
                 .flex_shrink_0()
                 .overflow_hidden()
                 .border_r_1()
-                .border_color(ThemeColors::BORDER)
+                .border_color(ThemeColors::BORDER_PROMINENT)
                 .bg(ThemeColors::BG_SURFACE)
-                .child(header_div);
+                .child(
+                    h_flex()
+                        .size_full()
+                        .items_center()
+                        .justify_between()
+                        .child(header_div.flex_1().min_w_0())
+                        .child(
+                            div()
+                                .w(px(1.0))
+                                .h(px(18.0))
+                                .bg(ThemeColors::BORDER_PROMINENT)
+                                .flex_none(),
+                        ),
+                );
 
             header_row = header_row.child(head_cell);
         }
@@ -985,7 +1011,7 @@ impl RenderOnce for DataGrid {
                         .flex_shrink_0()
                         .overflow_hidden()
                         .border_r_1()
-                        .border_color(ThemeColors::BORDER.opacity(0.25))
+                        .border_color(ThemeColors::BORDER.opacity(0.35))
                         .child(cell_container),
                 );
             }
@@ -1013,20 +1039,30 @@ impl RenderOnce for DataGrid {
             .read(cx)
             .clone();
 
+        let table_wrap = div()
+            .id("data_grid_table_inner_wrap")
+            .size_auto()
+            .min_w_full()
+            .min_h_full()
+            .flex_none()
+            .child(table);
+
         let scroll_area = div()
             .id("data_grid_table_scroll_area")
             .size_full()
             .overflow_x_scroll()
             .overflow_y_scroll()
             .track_scroll(&scroll_handle)
-            .child(table);
+            .child(table_wrap);
 
         let table_scroll_view = div()
             .id("data_grid_table_scroll")
+            .size_full()
             .flex_1()
             .min_w_0()
             .min_h_0()
             .relative()
+            .overflow_hidden()
             .child(scroll_area)
             .scrollbar(&scroll_handle, ScrollbarAxis::Both);
 
@@ -1454,9 +1490,11 @@ impl RenderOnce for DataGrid {
 
         // Main table and inspector layout
         let main_view = h_flex()
+            .size_full()
             .flex_1()
             .min_h_0()
             .w_full()
+            .items_stretch()
             .child(table_scroll_view)
             .children(inspector_panel);
 

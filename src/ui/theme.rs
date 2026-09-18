@@ -25,6 +25,7 @@ impl ThemeColors {
     // Borders and dividers
     pub const BORDER: Hsla = hsla(215.0 / 360.0, 0.25, 0.27, 1.0); // #334155
     pub const BORDER_LIGHT: Hsla = hsla(215.0 / 360.0, 0.19, 0.35, 0.7);
+    pub const BORDER_PROMINENT: Hsla = hsla(215.0 / 360.0, 0.20, 0.45, 1.0); // sharp prominent divider
 
     // Status indicators
     pub const SUCCESS: Hsla = hsla(160.0 / 360.0, 0.84, 0.39, 1.0); // #10B981

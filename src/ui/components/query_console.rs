@@ -372,7 +372,7 @@ impl RenderOnce for QueryConsole {
             .min_h_0()
             .bg(ThemeColors::BG_APP)
             .child(bottom_header)
-            .child(div().flex_1().min_h_0().child(bottom_body));
+            .child(div().size_full().flex_1().min_h_0().child(bottom_body));
 
         v_flex()
             .size_full()
