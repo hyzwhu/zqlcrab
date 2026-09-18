@@ -9,6 +9,7 @@ impl ThemeColors {
     pub const PRIMARY: Hsla = hsla(201.0 / 360.0, 0.96, 0.32, 1.0); // #0369A1
     pub const PRIMARY_LIGHT: Hsla = hsla(199.0 / 360.0, 0.89, 0.48, 1.0); // #0EA5E9
     pub const PRIMARY_BORDER: Hsla = hsla(199.0 / 360.0, 0.95, 0.60, 1.0); // #38BDF8
+    pub const PRIMARY_BG: Hsla = hsla(201.0 / 360.0, 0.96, 0.32, 0.25); // translucent selection bg
 
     // Background surfaces (Obsidian / Slate)
     pub const BG_APP: Hsla = hsla(222.0 / 360.0, 0.47, 0.11, 1.0); // #0F172A

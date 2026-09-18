@@ -12,11 +12,70 @@ use gpui_kit::component::{
     table::{Table, TableBody, TableCell, TableHead, TableHeader, TableRow},
 };
 use gpui_kit::gpui::{
-    App, FontWeight, InteractiveElement as _, IntoElement, ParentElement, RenderOnce,
-    StatefulInteractiveElement as _, Styled, Window, div, prelude::*, px,
+    App, ClipboardItem, ElementId, FontWeight, InteractiveElement as _, IntoElement, ParentElement,
+    RenderOnce, StatefulInteractiveElement as _, Styled, Window, div, prelude::*, px, rgba,
 };
 use std::cmp::Ordering;
 use std::rc::Rc;
+
+/// Helper function to convert a single row into a formatted JSON object string.
+pub fn row_to_json(columns: &[String], row: &[QueryValue]) -> String {
+    let mut map = serde_json::Map::new();
+    for (i, col_name) in columns.iter().enumerate() {
+        let val = row.get(i).unwrap_or(&QueryValue::Null);
+        let json_val = match val {
+            QueryValue::Null => serde_json::Value::Null,
+            QueryValue::Bool(b) => serde_json::Value::Bool(*b),
+            QueryValue::Int(n) => serde_json::Value::Number((*n).into()),
+            QueryValue::Float(f) => serde_json::Number::from_f64(*f)
+                .map(serde_json::Value::Number)
+                .unwrap_or_else(|| serde_json::Value::String(format!("{f}"))),
+            QueryValue::String(s) => {
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(s) {
+                    parsed
+                } else {
+                    serde_json::Value::String(s.clone())
+                }
+            }
+            QueryValue::Bytes(b) => serde_json::Value::String(format!("<blob: {} bytes>", b.len())),
+            QueryValue::DateTime(d) => serde_json::Value::String(d.clone()),
+        };
+        map.insert(col_name.clone(), json_val);
+    }
+    serde_json::to_string_pretty(&serde_json::Value::Object(map))
+        .unwrap_or_else(|_| "{}".to_string())
+}
+
+/// Helper function to convert a single row into a TSV (tab-separated values) string.
+pub fn row_to_tsv(row: &[QueryValue]) -> String {
+    let parts: Vec<String> = row
+        .iter()
+        .map(|v| v.to_display_string().replace(['\t', '\r', '\n'], " "))
+        .collect();
+    parts.join("\t")
+}
+
+/// Formats a raw string value for inspection, detecting JSON and calculating statistics.
+pub fn format_inspector_value(raw: &str, pretty_json: bool) -> (String, bool, usize, usize) {
+    let char_count = raw.chars().count();
+    let line_count = raw.lines().count().max(1);
+    let trimmed = raw.trim();
+    if (trimmed.starts_with('{') && trimmed.ends_with('}'))
+        || (trimmed.starts_with('[') && trimmed.ends_with(']'))
+    {
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
+            if pretty_json {
+                if let Ok(pretty) = serde_json::to_string_pretty(&parsed) {
+                    let p_chars = pretty.chars().count();
+                    let p_lines = pretty.lines().count().max(1);
+                    return (pretty, true, p_chars, p_lines);
+                }
+            }
+            return (raw.to_string(), true, char_count, line_count);
+        }
+    }
+    (raw.to_string(), false, char_count, line_count)
+}
 
 #[derive(IntoElement)]
 pub struct DataGrid {
@@ -27,9 +86,20 @@ pub struct DataGrid {
     sort_column: Option<usize>,
     sort_direction: Option<SortDirection>,
     filter_keyword: String,
-    on_sort: Option<Rc<dyn Fn(usize, &mut Window, &mut App) + 'static>>,
-    on_page_change: Option<Rc<dyn Fn(usize, &mut Window, &mut App) + 'static>>,
-    on_export: Option<Rc<dyn Fn(ExportFormat, &mut Window, &mut App) + 'static>>,
+    selected_cell: Option<(usize, usize)>, // (row_idx in result.rows, col_idx)
+    inspector_open: bool,
+    modal_open: bool,
+    json_pretty: bool,
+    on_sort: Option<Rc<dyn Fn(usize, &mut Window, &mut App)>>,
+    on_page_change: Option<Rc<dyn Fn(usize, &mut Window, &mut App)>>,
+    on_export: Option<Rc<dyn Fn(ExportFormat, &mut Window, &mut App)>>,
+    on_select_cell: Option<Rc<dyn Fn(usize, usize, &mut Window, &mut App)>>,
+    on_toggle_inspector: Option<Rc<dyn Fn(bool, &mut Window, &mut App)>>,
+    on_toggle_modal: Option<Rc<dyn Fn(bool, &mut Window, &mut App)>>,
+    on_toggle_json_pretty: Option<Rc<dyn Fn(bool, &mut Window, &mut App)>>,
+    on_copy_value: Option<Rc<dyn Fn(String, String, &mut Window, &mut App)>>, // (col_name, value)
+    on_copy_row_json: Option<Rc<dyn Fn(usize, String, &mut Window, &mut App)>>, // (row_idx, json)
+    on_copy_row_tsv: Option<Rc<dyn Fn(usize, String, &mut Window, &mut App)>>, // (row_idx, tsv)
 }
 
 impl DataGrid {
@@ -42,9 +112,20 @@ impl DataGrid {
             sort_column: None,
             sort_direction: None,
             filter_keyword: String::new(),
+            selected_cell: None,
+            inspector_open: false,
+            modal_open: false,
+            json_pretty: true,
             on_sort: None,
             on_page_change: None,
             on_export: None,
+            on_select_cell: None,
+            on_toggle_inspector: None,
+            on_toggle_modal: None,
+            on_toggle_json_pretty: None,
+            on_copy_value: None,
+            on_copy_row_json: None,
+            on_copy_row_tsv: None,
         }
     }
 
@@ -63,14 +144,34 @@ impl DataGrid {
         self
     }
 
-    pub fn sort(mut self, col_idx: Option<usize>, dir: Option<SortDirection>) -> Self {
-        self.sort_column = col_idx;
+    pub fn sort(mut self, col: Option<usize>, dir: Option<SortDirection>) -> Self {
+        self.sort_column = col;
         self.sort_direction = dir;
         self
     }
 
     pub fn filter_keyword(mut self, keyword: impl Into<String>) -> Self {
         self.filter_keyword = keyword.into();
+        self
+    }
+
+    pub fn selected_cell(mut self, cell: Option<(usize, usize)>) -> Self {
+        self.selected_cell = cell;
+        self
+    }
+
+    pub fn inspector_open(mut self, open: bool) -> Self {
+        self.inspector_open = open;
+        self
+    }
+
+    pub fn modal_open(mut self, open: bool) -> Self {
+        self.modal_open = open;
+        self
+    }
+
+    pub fn json_pretty(mut self, pretty: bool) -> Self {
+        self.json_pretty = pretty;
         self
     }
 
@@ -95,6 +196,62 @@ impl DataGrid {
         F: Fn(ExportFormat, &mut Window, &mut App) + 'static,
     {
         self.on_export = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_select_cell<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(usize, usize, &mut Window, &mut App) + 'static,
+    {
+        self.on_select_cell = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_toggle_inspector<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(bool, &mut Window, &mut App) + 'static,
+    {
+        self.on_toggle_inspector = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_toggle_modal<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(bool, &mut Window, &mut App) + 'static,
+    {
+        self.on_toggle_modal = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_toggle_json_pretty<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(bool, &mut Window, &mut App) + 'static,
+    {
+        self.on_toggle_json_pretty = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_copy_value<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(String, String, &mut Window, &mut App) + 'static,
+    {
+        self.on_copy_value = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_copy_row_json<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(usize, String, &mut Window, &mut App) + 'static,
+    {
+        self.on_copy_row_json = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_copy_row_tsv<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(usize, String, &mut Window, &mut App) + 'static,
+    {
+        self.on_copy_row_tsv = Some(Rc::new(handler));
         self
     }
 }
@@ -122,7 +279,7 @@ fn compare_query_values(a: &QueryValue, b: &QueryValue, dir: SortDirection) -> O
 }
 
 impl RenderOnce for DataGrid {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut Window, _cx: &mut App) -> impl IntoElement {
         let result = match &self.result {
             Some(res) => res,
             None => {
@@ -149,7 +306,8 @@ impl RenderOnce for DataGrid {
                             .text_xs()
                             .text_color(ThemeColors::TEXT_FAINT)
                             .child("Write a query in the editor and press ⌘↵ to inspect tabular data."),
-                    );
+                    )
+                    .into_any_element();
             }
         };
 
@@ -178,12 +336,13 @@ impl RenderOnce for DataGrid {
                         .text_xs()
                         .text_color(ThemeColors::TEXT_MUTED)
                         .child(format!("{affected} row(s) affected")),
-                );
+                )
+                .into_any_element();
         }
 
-        // Apply in-memory row filtering if a keyword is provided
-        let kw = self.filter_keyword.trim().to_lowercase();
-        let filtered_indices: Vec<usize> = if kw.is_empty() {
+        // Apply keyword filter
+        let filter = self.filter_keyword.to_lowercase();
+        let mut row_indices: Vec<usize> = if filter.is_empty() {
             (0..result.rows.len()).collect()
         } else {
             result
@@ -191,49 +350,46 @@ impl RenderOnce for DataGrid {
                 .iter()
                 .enumerate()
                 .filter(|(_, row)| {
-                    row.iter().any(|val| {
-                        val.to_display_string().to_lowercase().contains(&kw)
-                    })
+                    row.iter()
+                        .any(|v| v.to_display_string().to_lowercase().contains(&filter))
                 })
-                .map(|(idx, _)| idx)
+                .map(|(i, _)| i)
                 .collect()
         };
 
         // Apply sorting
-        let mut sorted_indices = filtered_indices;
         if let (Some(col_idx), Some(dir)) = (self.sort_column, self.sort_direction) {
-            sorted_indices.sort_by(|&idx_a, &idx_b| {
-                let val_a = result.rows[idx_a].get(col_idx).unwrap_or(&QueryValue::Null);
-                let val_b = result.rows[idx_b].get(col_idx).unwrap_or(&QueryValue::Null);
-                compare_query_values(val_a, val_b, dir)
-            });
+            if col_idx < result.columns.len() {
+                row_indices.sort_by(|&a_idx, &b_idx| {
+                    let a_val = &result.rows[a_idx][col_idx];
+                    let b_val = &result.rows[b_idx][col_idx];
+                    compare_query_values(a_val, b_val, dir)
+                });
+            }
         }
 
-        let total_matching = sorted_indices.len();
-        let total_rows = result.rows.len();
-        let total_pages = if total_matching == 0 {
-            1
-        } else {
-            (total_matching + self.page_size - 1) / self.page_size
-        };
-
+        let total_matching_rows = row_indices.len();
+        let total_pages = (total_matching_rows + self.page_size - 1) / self.page_size;
+        let total_pages = total_pages.max(1);
         let current_page = self.current_page.min(total_pages.saturating_sub(1));
+
         let page_start = current_page * self.page_size;
-        let page_end = (page_start + self.page_size).min(total_matching);
-        let page_slice_indices = if total_matching == 0 {
-            &[][..]
+        let page_end = (page_start + self.page_size).min(total_matching_rows);
+        let page_slice_indices = if page_start < total_matching_rows {
+            &row_indices[page_start..page_end]
         } else {
-            &sorted_indices[page_start..page_end]
+            &[]
         };
 
-        // Export Buttons in Toolbar
+        // Export handlers
+        let on_exp = self.on_export.clone();
         let export_csv_btn = {
-            let on_exp = self.on_export.clone();
+            let on_exp = on_exp.clone();
             Button::new("export_csv")
                 .ghost()
                 .xsmall()
-                .icon(IconName::FileText)
                 .tooltip("Export / Copy CSV")
+                .icon(IconName::FileText)
                 .child("CSV")
                 .when_some(on_exp, |btn, handler| {
                     btn.on_click(move |_, window, cx| handler(ExportFormat::Csv, window, cx))
@@ -241,7 +397,7 @@ impl RenderOnce for DataGrid {
         };
 
         let export_json_btn = {
-            let on_exp = self.on_export.clone();
+            let on_exp = on_exp.clone();
             Button::new("export_json")
                 .ghost()
                 .xsmall()
@@ -253,7 +409,7 @@ impl RenderOnce for DataGrid {
         };
 
         let export_md_btn = {
-            let on_exp = self.on_export.clone();
+            let on_exp = on_exp.clone();
             Button::new("export_md")
                 .ghost()
                 .xsmall()
@@ -265,7 +421,7 @@ impl RenderOnce for DataGrid {
         };
 
         let export_sql_btn = {
-            let on_exp = self.on_export.clone();
+            let on_exp = on_exp.clone();
             Button::new("export_sql")
                 .ghost()
                 .xsmall()
@@ -317,20 +473,96 @@ impl RenderOnce for DataGrid {
             btn
         };
 
+        // Inspector toggle button
+        let toggle_inspector_btn = {
+            let on_tog = self.on_toggle_inspector.clone();
+            let is_open = self.inspector_open;
+            Button::new("toggle_inspector_toolbar_btn")
+                .ghost()
+                .xsmall()
+                .icon(IconName::PanelRight)
+                .label(if is_open { "Hide Details" } else { "Details" })
+                .tooltip("Toggle Cell & Row Details Inspector")
+                .border_1()
+                .border_color(if is_open {
+                    ThemeColors::PRIMARY_BORDER
+                } else {
+                    ThemeColors::BORDER
+                })
+                .bg(if is_open {
+                    ThemeColors::PRIMARY_BG
+                } else {
+                    ThemeColors::BG_SURFACE
+                })
+                .when_some(on_tog, move |btn, handler| {
+                    btn.on_click(move |_, window, cx| {
+                        handler(!is_open, window, cx);
+                    })
+                })
+        };
+
+        // Quick copy selected cell button in toolbar if a cell is selected
+        let selected_info_pill = if let Some((sel_row, sel_col)) = self.selected_cell {
+            if sel_row < result.rows.len() && sel_col < result.columns.len() {
+                let col_name = &result.columns[sel_col];
+                let raw_val = result.rows[sel_row][sel_col].to_display_string();
+                let on_cp = self.on_copy_value.clone();
+                let col_name_clone = col_name.clone();
+                let raw_val_clone = raw_val.clone();
+
+                Some(
+                    h_flex()
+                        .items_center()
+                        .gap_1p5()
+                        .px_2()
+                        .py_0p5()
+                        .rounded_md()
+                        .bg(ThemeColors::BG_APP)
+                        .border_1()
+                        .border_color(ThemeColors::BORDER)
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(ThemeColors::TEXT_MUTED)
+                                .child(format!("#{}/{}", sel_row + 1, col_name)),
+                        )
+                        .child(
+                            Button::new("quick_copy_toolbar_btn")
+                                .ghost()
+                                .xsmall()
+                                .icon(IconName::Copy)
+                                .label("Copy")
+                                .tooltip("Copy selected cell value")
+                                .on_click(move |_, window, cx| {
+                                    if let Some(ref h) = on_cp {
+                                        h(col_name_clone.clone(), raw_val_clone.clone(), window, cx);
+                                    } else {
+                                        cx.write_to_clipboard(ClipboardItem::new_string(raw_val_clone.clone()));
+                                    }
+                                }),
+                        ),
+                )
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         // Grid Toolbar
         let toolbar = h_flex()
             .h(px(36.0))
             .w_full()
             .px_3()
-            .items_center()
             .justify_between()
+            .items_center()
             .border_b_1()
             .border_color(ThemeColors::BORDER)
             .bg(ThemeColors::BG_SURFACE)
             .child(
                 h_flex()
                     .items_center()
-                    .gap_2()
+                    .gap_3()
                     .when_some(self.current_table.as_ref(), |this, table| {
                         this.child(
                             div()
@@ -343,31 +575,32 @@ impl RenderOnce for DataGrid {
                     .child(
                         div()
                             .text_xs()
-                            .text_color(ThemeColors::TEXT_FAINT)
-                            .child(if kw.is_empty() {
-                                format!("{total_rows} row(s)")
+                            .text_color(ThemeColors::TEXT_MUTED)
+                            .child(if filter.is_empty() {
+                                format!("{} row(s)", result.rows.len())
                             } else {
-                                format!("{total_matching} of {total_rows} match")
+                                format!("{total_matching_rows} of {} row(s)", result.rows.len())
                             }),
                     )
-                    .when_some(result.execution_time_ms, |this, time| {
+                    .when_some(result.execution_time_ms, |this, ms| {
                         this.child(
                             div()
                                 .px_1p5()
                                 .py_0p5()
-                                .rounded_full()
-                                .bg(ThemeColors::BG_SURFACE_ACTIVE)
+                                .rounded_sm()
+                                .bg(ThemeColors::BG_APP)
                                 .text_xs()
-                                .text_color(ThemeColors::TEXT_MUTED)
-                                .child(format!("{time} ms")),
+                                .text_color(ThemeColors::TEXT_FAINT)
+                                .child(format!("{ms} ms")),
                         )
-                    }),
+                    })
+                    .children(selected_info_pill),
             )
             .child(
                 h_flex()
                     .items_center()
                     .gap_2()
-                    // Export Action Group
+                    // Export Actions
                     .child(
                         h_flex()
                             .items_center()
@@ -396,10 +629,18 @@ impl RenderOnce for DataGrid {
                                     .child(format!("{}/{}", current_page + 1, total_pages)),
                             )
                             .child(next_page_btn),
-                    ),
+                    )
+                    .child(
+                        div()
+                            .w(px(1.0))
+                            .h(px(16.0))
+                            .bg(ThemeColors::BORDER),
+                    )
+                    // Inspector Toggle
+                    .child(toggle_inspector_btn),
             );
 
-        // Smart column width calculation to prevent text from overflowing or stacking
+        // Smart column width calculation
         let col_count = result.columns.len();
         let mut col_widths: Vec<f32> = Vec::with_capacity(col_count);
 
@@ -407,7 +648,6 @@ impl RenderOnce for DataGrid {
             let col_type = result.column_types.get(i).map(|s| s.as_str()).unwrap_or("");
             let col_type_lower = col_type.to_lowercase();
 
-            // Measure header text length (name + type + sort icon space + padding)
             let header_chars = col_name.chars().count()
                 + if col_type.is_empty() {
                     0
@@ -416,14 +656,13 @@ impl RenderOnce for DataGrid {
                 };
             let mut est_w = (header_chars as f32 * 8.5 + 44.0).max(80.0);
 
-            // Sample visible rows (or up to 50 rows) to estimate content width
             for &orig_idx in page_slice_indices.iter().take(50) {
                 if let Some(row) = result.rows.get(orig_idx) {
                     if let Some(val) = row.get(i) {
                         let s = val.to_display_string();
                         let char_count = s.chars().count();
-                        let cjk_count = s.chars().filter(|c| !c.is_ascii()).count();
-                        let ascii_count = char_count.saturating_sub(cjk_count);
+                        let ascii_count = s.bytes().filter(|b| *b < 128).count();
+                        let cjk_count = char_count.saturating_sub(ascii_count);
                         let cell_w = (ascii_count as f32 * 8.0) + (cjk_count as f32 * 13.0) + 28.0;
                         if cell_w > est_w {
                             est_w = cell_w;
@@ -432,7 +671,6 @@ impl RenderOnce for DataGrid {
                 }
             }
 
-            // Determine min and max width based on column type
             let (min_w, max_w) = if col_type_lower.contains("bool") {
                 (80.0, 120.0)
             } else if col_type_lower.contains("int") || col_type_lower.contains("serial") {
@@ -448,18 +686,13 @@ impl RenderOnce for DataGrid {
             } else if col_type_lower.contains("uuid") {
                 (240.0, 320.0)
             } else {
-                // text, varchar, json, etc.
                 (140.0, 420.0)
             };
 
             col_widths.push(est_w.clamp(min_w, max_w));
         }
 
-        // Fixed width for index column '#'
         let index_col_width: f32 = 48.0;
-
-        // If total column width is less than a minimum comfortable viewport width (960px),
-        // proportionally expand data columns so they fill the space nicely
         let min_total_viewport: f32 = 960.0;
         let data_cols_sum: f32 = col_widths.iter().sum();
         if data_cols_sum > 0.0 && data_cols_sum + index_col_width < min_total_viewport {
@@ -472,7 +705,7 @@ impl RenderOnce for DataGrid {
 
         let total_table_width: f32 = col_widths.iter().sum::<f32>() + index_col_width;
 
-        // Header row with sorting indicator and click handler
+        // Table header row
         let mut header_row = TableRow::new().child(
             TableHead::new()
                 .w(px(index_col_width))
@@ -483,7 +716,7 @@ impl RenderOnce for DataGrid {
                     div()
                         .w_full()
                         .text_xs()
-                        .font_weight(FontWeight::SEMIBOLD)
+                        .font_weight(FontWeight::BOLD)
                         .text_color(ThemeColors::TEXT_FAINT)
                         .child("#"),
                 ),
@@ -491,9 +724,11 @@ impl RenderOnce for DataGrid {
 
         for (i, col_name) in result.columns.iter().enumerate() {
             let col_w = col_widths.get(i).copied().unwrap_or(120.0);
-            let col_type = result.column_types.get(i).map(|s| s.as_str()).unwrap_or("");
-            let is_sorted = self.sort_column == Some(i);
-            let sort_dir = if is_sorted { self.sort_direction } else { None };
+            let sort_dir = if self.sort_column == Some(i) {
+                self.sort_direction
+            } else {
+                None
+            };
 
             let on_sort_click = self.on_sort.clone();
 
@@ -519,31 +754,41 @@ impl RenderOnce for DataGrid {
                 .cursor_pointer()
                 .child(
                     div()
+                        .flex_1()
+                        .min_w_0()
                         .truncate()
                         .text_xs()
                         .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(if is_sorted {
+                        .text_color(if sort_dir.is_some() {
                             ThemeColors::PRIMARY_BORDER
                         } else {
                             ThemeColors::TEXT_PRIMARY
                         })
                         .child(col_name.clone()),
                 )
-                .when(!col_type.is_empty(), |this| {
-                    this.child(
-                        div()
-                            .flex_shrink_0()
-                            .text_xs()
-                            .text_color(ThemeColors::TEXT_FAINT)
-                            .child(format!("({col_type})")),
-                    )
+                .when_some(result.column_types.get(i), |this, col_type| {
+                    if col_type.is_empty() {
+                        this
+                    } else {
+                        this.child(
+                            div()
+                                .flex_shrink_0()
+                                .text_xs()
+                                .text_color(ThemeColors::TEXT_FAINT)
+                                .child(format!("({col_type})")),
+                        )
+                    }
                 })
                 .children(sort_icon);
 
-            let header_div = div()
-                .w_full()
+            let header_div = h_flex()
+                .size_full()
+                .items_center()
+                .justify_between()
+                .gap_1()
+                .cursor_pointer()
                 .overflow_hidden()
-                .id(gpui_kit::gpui::ElementId::NamedInteger("sort_col".into(), i as u64))
+                .id(ElementId::NamedInteger("sort_col".into(), i as u64))
                 .when_some(on_sort_click, |d, handler| {
                     d.on_click(move |_, window, cx| handler(i, window, cx))
                 })
@@ -559,29 +804,68 @@ impl RenderOnce for DataGrid {
             header_row = header_row.child(head_cell);
         }
 
-        // Table body
+        // Table body rows
         let mut body = TableBody::new();
         for (rel_idx, &orig_row_idx) in page_slice_indices.iter().enumerate() {
             let abs_idx = page_start + rel_idx + 1;
             let row_data = &result.rows[orig_row_idx];
+            let is_row_selected = self.selected_cell.map(|(r, _)| r == orig_row_idx).unwrap_or(false);
 
-            let mut row = TableRow::new().child(
-                TableCell::new()
-                    .w(px(index_col_width))
-                    .min_w(px(index_col_width))
-                    .flex_shrink_0()
-                    .overflow_hidden()
-                    .child(
-                        div()
-                            .w_full()
-                            .text_xs()
-                            .text_color(ThemeColors::TEXT_FAINT)
-                            .child(abs_idx.to_string()),
-                    ),
-            );
+            // Index column cell with row select handler
+            let on_sel_row = self.on_select_cell.clone();
+            let index_cell_btn = div()
+                .size_full()
+                .h(px(32.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_pointer()
+                .id(ElementId::NamedInteger("row_num_select".into(), orig_row_idx as u64))
+                .hover(|s| s.bg(ThemeColors::BG_SURFACE_HOVER))
+                .on_click(move |_, window, cx| {
+                    if let Some(ref h) = on_sel_row {
+                        h(orig_row_idx, 0, window, cx);
+                    }
+                })
+                .child(
+                    div()
+                        .text_xs()
+                        .font_weight(if is_row_selected {
+                            FontWeight::SEMIBOLD
+                        } else {
+                            FontWeight::NORMAL
+                        })
+                        .text_color(if is_row_selected {
+                            ThemeColors::PRIMARY_BORDER
+                        } else {
+                            ThemeColors::TEXT_FAINT
+                        })
+                        .child(abs_idx.to_string()),
+                );
+
+            let mut row = TableRow::new()
+                .when(is_row_selected, |r| r.bg(ThemeColors::BG_SURFACE_ACTIVE))
+                .child(
+                    TableCell::new()
+                        .h(px(32.0))
+                        .w(px(index_col_width))
+                        .min_w(px(index_col_width))
+                        .flex_shrink_0()
+                        .overflow_hidden()
+                        .child(index_cell_btn),
+                );
 
             for (col_idx, val) in row_data.iter().enumerate() {
                 let col_w = col_widths.get(col_idx).copied().unwrap_or(120.0);
+                let is_cell_selected = self
+                    .selected_cell
+                    .map(|(r, c)| r == orig_row_idx && c == col_idx)
+                    .unwrap_or(false);
+
+                let display_raw = val.to_display_string();
+                // Replace carriage return and newlines with space for clean single-line table display
+                let single_line = display_raw.replace(['\r', '\n'], " ");
+
                 let cell_elem = match val {
                     QueryValue::Null => div()
                         .w_full()
@@ -624,16 +908,53 @@ impl RenderOnce for DataGrid {
                         .text_xs()
                         .font_family("JetBrains Mono")
                         .text_color(ThemeColors::TEXT_PRIMARY)
-                        .child(val.to_display_string()),
+                        .child(single_line),
                 };
+
+                let on_sel_cell = self.on_select_cell.clone();
+                let on_tog_modal = self.on_toggle_modal.clone();
+
+                let cell_container = div()
+                    .size_full()
+                    .h(px(32.0))
+                    .px_2()
+                    .flex()
+                    .items_center()
+                    .cursor_pointer()
+                    .overflow_hidden()
+                    .id(ElementId::NamedInteger(
+                        "grid_cell_click".into(),
+                        ((orig_row_idx as u64) << 24) | (col_idx as u64),
+                    ))
+                    .when(is_cell_selected, |this| {
+                        this.bg(ThemeColors::PRIMARY_BG)
+                            .border_1()
+                            .border_color(ThemeColors::PRIMARY)
+                            .rounded_xs()
+                    })
+                    .when(!is_cell_selected, |this| {
+                        this.hover(|s| s.bg(ThemeColors::BG_SURFACE_HOVER))
+                    })
+                    .on_click(move |event, window, cx| {
+                        if let Some(ref h) = on_sel_cell {
+                            h(orig_row_idx, col_idx, window, cx);
+                        }
+                        if event.click_count() >= 2 {
+                            if let Some(ref h_m) = on_tog_modal {
+                                h_m(true, window, cx);
+                            }
+                        }
+                    })
+                    .child(cell_elem);
 
                 row = row.child(
                     TableCell::new()
+                        .h(px(32.0))
                         .w(px(col_w))
                         .min_w(px(col_w))
                         .flex_shrink_0()
                         .overflow_hidden()
-                        .child(cell_elem),
+                        .child(cell_container),
                 );
             }
             body = body.child(row);
@@ -645,16 +966,709 @@ impl RenderOnce for DataGrid {
             .child(TableHeader::new().child(header_row))
             .child(body);
 
-        v_flex()
+        let table_scroll_view = div()
+            .id("data_grid_table_scroll")
+            .flex_1()
+            .min_w_0()
+            .min_h_0()
+            .overflow_scrollbar()
+            .child(table);
+
+        // Build Right Inspector Panel
+        let inspector_panel = if self.inspector_open {
+            if let Some((sel_row, sel_col)) = self.selected_cell {
+                if sel_row < result.rows.len() && sel_col < result.columns.len() {
+                    let col_name = &result.columns[sel_col];
+                    let col_type = result.column_types.get(sel_col).map(|s| s.as_str()).unwrap_or("TEXT");
+                    let current_val = &result.rows[sel_row][sel_col];
+                    let raw_val_str = current_val.to_display_string();
+                    let (display_val_str, is_json, char_count, line_count) =
+                        format_inspector_value(&raw_val_str, self.json_pretty);
+
+                    // Copy Value button
+                    let on_cp_val = self.on_copy_value.clone();
+                    let col_name_cp = col_name.clone();
+                    let val_cp = raw_val_str.clone();
+                    let copy_val_btn = Button::new("insp_copy_val_btn")
+                        .small()
+                        .icon(IconName::Copy)
+                        .label("Copy Value")
+                        .tooltip("Copy unclipped raw cell value to clipboard")
+                        .on_click(move |_, window, cx| {
+                            if let Some(ref h) = on_cp_val {
+                                h(col_name_cp.clone(), val_cp.clone(), window, cx);
+                            } else {
+                                cx.write_to_clipboard(ClipboardItem::new_string(val_cp.clone()));
+                            }
+                        });
+
+                    // Maximize / Modal button
+                    let on_tog_modal = self.on_toggle_modal.clone();
+                    let max_btn = Button::new("insp_max_modal_btn")
+                        .ghost()
+                        .xsmall()
+                        .icon(IconName::Maximize2)
+                        .tooltip("Expand to large modal view")
+                        .on_click(move |_, window, cx| {
+                            if let Some(ref h) = on_tog_modal {
+                                h(true, window, cx);
+                            }
+                        });
+
+                    // Close inspector button
+                    let on_tog_insp = self.on_toggle_inspector.clone();
+                    let close_insp_btn = Button::new("insp_close_x_btn")
+                        .ghost()
+                        .xsmall()
+                        .icon(IconName::X)
+                        .tooltip("Close Inspector")
+                        .on_click(move |_, window, cx| {
+                            if let Some(ref h) = on_tog_insp {
+                                h(false, window, cx);
+                            }
+                        });
+
+                    // JSON format toggle button
+                    let json_toggle = if is_json {
+                        let on_tog_pretty = self.on_toggle_json_pretty.clone();
+                        let is_pretty = self.json_pretty;
+                        Some(
+                            Button::new("insp_json_format_toggle")
+                                .ghost()
+                                .xsmall()
+                                .label(if is_pretty { "JSON Pretty" } else { "JSON Raw" })
+                                .border_1()
+                                .border_color(ThemeColors::BORDER)
+                                .tooltip("Toggle between formatted JSON and raw string")
+                                .on_click(move |_, window, cx| {
+                                    if let Some(ref h) = on_tog_pretty {
+                                        h(!is_pretty, window, cx);
+                                    }
+                                }),
+                        )
+                    } else {
+                        None
+                    };
+
+                    // Copy row as JSON button
+                    let on_cp_row_json = self.on_copy_row_json.clone();
+                    let row_json_str = row_to_json(&result.columns, &result.rows[sel_row]);
+                    let copy_row_json_btn = Button::new("insp_copy_row_json_btn")
+                        .ghost()
+                        .xsmall()
+                        .icon(IconName::FileText)
+                        .label("Row JSON")
+                        .tooltip("Copy entire row as JSON object")
+                        .on_click(move |_, window, cx| {
+                            if let Some(ref h) = on_cp_row_json {
+                                h(sel_row, row_json_str.clone(), window, cx);
+                            } else {
+                                cx.write_to_clipboard(ClipboardItem::new_string(row_json_str.clone()));
+                            }
+                        });
+
+                    // Copy row as TSV button
+                    let on_cp_row_tsv = self.on_copy_row_tsv.clone();
+                    let row_tsv_str = row_to_tsv(&result.rows[sel_row]);
+                    let copy_row_tsv_btn = Button::new("insp_copy_row_tsv_btn")
+                        .ghost()
+                        .xsmall()
+                        .icon(IconName::Table)
+                        .label("Row TSV")
+                        .tooltip("Copy entire row as TSV for spreadsheets")
+                        .on_click(move |_, window, cx| {
+                            if let Some(ref h) = on_cp_row_tsv {
+                                h(sel_row, row_tsv_str.clone(), window, cx);
+                            } else {
+                                cx.write_to_clipboard(ClipboardItem::new_string(row_tsv_str.clone()));
+                            }
+                        });
+
+                    // Row columns overview list
+                    let mut record_fields_list = v_flex().gap_1();
+                    for (c_idx, c_name) in result.columns.iter().enumerate() {
+                        let is_active_col = c_idx == sel_col;
+                        let field_val = &result.rows[sel_row][c_idx];
+                        let field_str = field_val.to_display_string().replace(['\r', '\n'], " ");
+                        let field_raw_val = field_val.to_display_string();
+
+                        let on_sel = self.on_select_cell.clone();
+                        let on_cp = self.on_copy_value.clone();
+                        let col_name_c = c_name.clone();
+
+                        let field_row = h_flex()
+                            .w_full()
+                            .p_1p5()
+                            .rounded_sm()
+                            .items_center()
+                            .justify_between()
+                            .gap_2()
+                            .cursor_pointer()
+                            .id(ElementId::NamedInteger("insp_col_select".into(), c_idx as u64))
+                            .when(is_active_col, |this| {
+                                this.bg(ThemeColors::PRIMARY_BG)
+                                    .border_1()
+                                    .border_color(ThemeColors::PRIMARY)
+                            })
+                            .when(!is_active_col, |this| {
+                                this.bg(ThemeColors::BG_APP)
+                                    .hover(|s| s.bg(ThemeColors::BG_SURFACE_HOVER))
+                            })
+                            .on_click(move |_, window, cx| {
+                                if let Some(ref h) = on_sel {
+                                    h(sel_row, c_idx, window, cx);
+                                }
+                            })
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .text_color(if is_active_col {
+                                                ThemeColors::PRIMARY_BORDER
+                                            } else {
+                                                ThemeColors::TEXT_MUTED
+                                            })
+                                            .child(c_name.clone()),
+                                    )
+                                    .child(
+                                        div()
+                                            .min_w_0()
+                                            .truncate()
+                                            .text_xs()
+                                            .font_family("JetBrains Mono")
+                                            .text_color(ThemeColors::TEXT_PRIMARY)
+                                            .child(field_str),
+                                    ),
+                            )
+                            .child(
+                                Button::new(ElementId::NamedInteger("insp_copy_col_small".into(), c_idx as u64))
+                                    .ghost()
+                                    .xsmall()
+                                    .icon(IconName::Copy)
+                                    .tooltip("Copy this field")
+                                    .on_click(move |_, window, cx| {
+                                        if let Some(ref h) = on_cp {
+                                            h(col_name_c.clone(), field_raw_val.clone(), window, cx);
+                                        } else {
+                                            cx.write_to_clipboard(ClipboardItem::new_string(field_raw_val.clone()));
+                                        }
+                                    }),
+                            );
+
+                        record_fields_list = record_fields_list.child(field_row);
+                    }
+
+                    Some(
+                        v_flex()
+                            .w(px(380.0))
+                            .h_full()
+                            .flex_shrink_0()
+                            .border_l_1()
+                            .border_color(ThemeColors::BORDER)
+                            .bg(ThemeColors::BG_SURFACE)
+                            // Inspector Header
+                            .child(
+                                h_flex()
+                                    .h(px(36.0))
+                                    .w_full()
+                                    .px_3()
+                                    .items_center()
+                                    .justify_between()
+                                    .border_b_1()
+                                    .border_color(ThemeColors::BORDER)
+                                    .child(
+                                        h_flex()
+                                            .items_center()
+                                            .gap_2()
+                                            .child(Icon::new(IconName::Table).size(px(14.0)).text_color(ThemeColors::PRIMARY_BORDER))
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .font_weight(FontWeight::SEMIBOLD)
+                                                    .text_color(ThemeColors::TEXT_PRIMARY)
+                                                    .child("Value Inspector"),
+                                            )
+                                            .child(
+                                                div()
+                                                    .px_1p5()
+                                                    .py_0p5()
+                                                    .rounded_sm()
+                                                    .bg(ThemeColors::BG_APP)
+                                                    .text_xs()
+                                                    .text_color(ThemeColors::TEXT_FAINT)
+                                                    .child(format!("Row #{}", sel_row + 1)),
+                                            ),
+                                    )
+                                    .child(
+                                        h_flex()
+                                            .items_center()
+                                            .gap_1()
+                                            .child(max_btn)
+                                            .child(close_insp_btn),
+                                    ),
+                            )
+                            // Inspector Content Area
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .min_h_0()
+                                    .overflow_scrollbar()
+                                    .p_3()
+                                    .gap_3()
+                                    // Selected Field Overview Card
+                                    .child(
+                                        v_flex()
+                                            .gap_2()
+                                            .p_2p5()
+                                            .rounded_md()
+                                            .bg(ThemeColors::BG_APP)
+                                            .border_1()
+                                            .border_color(ThemeColors::BORDER)
+                                            .child(
+                                                h_flex()
+                                                    .justify_between()
+                                                    .items_center()
+                                                    .child(
+                                                        h_flex()
+                                                            .items_center()
+                                                            .gap_2()
+                                                            .child(
+                                                                div()
+                                                                    .text_sm()
+                                                                    .font_weight(FontWeight::BOLD)
+                                                                    .text_color(ThemeColors::TEXT_PRIMARY)
+                                                                    .child(col_name.clone()),
+                                                            )
+                                                            .child(
+                                                                div()
+                                                                    .px_1p5()
+                                                                    .py_0p5()
+                                                                    .rounded_sm()
+                                                                    .bg(ThemeColors::BG_SURFACE_ACTIVE)
+                                                                    .text_xs()
+                                                                    .text_color(ThemeColors::TEXT_MUTED)
+                                                                    .child(col_type.to_string()),
+                                                            ),
+                                                    )
+                                                    .children(json_toggle),
+                                            )
+                                            .child(
+                                                h_flex()
+                                                    .items_center()
+                                                    .gap_2()
+                                                    .text_xs()
+                                                    .text_color(ThemeColors::TEXT_FAINT)
+                                                    .child(format!("{char_count} chars"))
+                                                    .child("·")
+                                                    .child(format!("{line_count} line(s)")),
+                                            ),
+                                    )
+                                    // Full Value Display Box
+                                    .child(
+                                        div()
+                                            .w_full()
+                                            .min_h(px(140.0))
+                                            .max_h(px(240.0))
+                                            .p_2p5()
+                                            .rounded_md()
+                                            .bg(ThemeColors::BG_APP)
+                                            .border_1()
+                                            .border_color(ThemeColors::BORDER)
+                                            .overflow_scrollbar()
+                                            .child(
+                                                if current_val.is_null() {
+                                                    div()
+                                                        .text_xs()
+                                                        .text_color(ThemeColors::TEXT_FAINT)
+                                                        .child("<NULL>")
+                                                } else {
+                                                    div()
+                                                        .text_xs()
+                                                        .font_family("JetBrains Mono")
+                                                        .text_color(ThemeColors::TEXT_PRIMARY)
+                                                        .child(display_val_str)
+                                                },
+                                            ),
+                                    )
+                                    // Action Bar for Current Value
+                                    .child(
+                                        h_flex()
+                                            .w_full()
+                                            .items_center()
+                                            .justify_end()
+                                            .child(copy_val_btn),
+                                    )
+                                    // Row Record Fields Section
+                                    .child(
+                                        v_flex()
+                                            .gap_2()
+                                            .pt_2()
+                                            .border_t_1()
+                                            .border_color(ThemeColors::BORDER)
+                                            .child(
+                                                h_flex()
+                                                    .justify_between()
+                                                    .items_center()
+                                                    .child(
+                                                        div()
+                                                            .text_xs()
+                                                            .font_weight(FontWeight::SEMIBOLD)
+                                                            .text_color(ThemeColors::TEXT_MUTED)
+                                                            .child(format!("Row #{} Columns", sel_row + 1)),
+                                                    )
+                                                    .child(
+                                                        h_flex()
+                                                            .items_center()
+                                                            .gap_1()
+                                                            .child(copy_row_json_btn)
+                                                            .child(copy_row_tsv_btn),
+                                                    ),
+                                            )
+                                            .child(record_fields_list),
+                                    ),
+                            ),
+                    )
+                } else {
+                    None
+                }
+            } else {
+                // Empty selection placeholder in inspector
+                Some(
+                    v_flex()
+                        .w(px(380.0))
+                        .h_full()
+                        .flex_shrink_0()
+                        .border_l_1()
+                        .border_color(ThemeColors::BORDER)
+                        .bg(ThemeColors::BG_SURFACE)
+                        .child(
+                            h_flex()
+                                .h(px(36.0))
+                                .w_full()
+                                .px_3()
+                                .items_center()
+                                .justify_between()
+                                .border_b_1()
+                                .border_color(ThemeColors::BORDER)
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(ThemeColors::TEXT_PRIMARY)
+                                        .child("Value Inspector"),
+                                )
+                                .child({
+                                    let on_tog_insp = self.on_toggle_inspector.clone();
+                                    Button::new("insp_close_empty_btn")
+                                        .ghost()
+                                        .xsmall()
+                                        .icon(IconName::X)
+                                        .on_click(move |_, window, cx| {
+                                            if let Some(ref h) = on_tog_insp {
+                                                h(false, window, cx);
+                                            }
+                                        })
+                                }),
+                        )
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .items_center()
+                                .justify_center()
+                                .p_6()
+                                .gap_3()
+                                .child(Icon::new(IconName::Pointer).size(px(32.0)).text_color(ThemeColors::TEXT_FAINT))
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(ThemeColors::TEXT_MUTED)
+                                        .text_center()
+                                        .child("Click any row or cell in the table to inspect its complete content and copy values."),
+                                ),
+                        ),
+                )
+            }
+        } else {
+            None
+        };
+
+        // Main table and inspector layout
+        let main_view = h_flex()
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .child(table_scroll_view)
+            .children(inspector_panel);
+
+        let grid_content = v_flex()
             .size_full()
             .bg(ThemeColors::BG_APP)
             .child(toolbar)
-            .child(
-                div()
-                    .id("data_grid_table_scroll")
-                    .flex_1()
-                    .overflow_scrollbar()
-                    .child(table),
-            )
+            .child(main_view);
+
+        // Modal Detail Viewer overlay if modal_open is true
+        if self.modal_open {
+            if let Some((sel_row, sel_col)) = self.selected_cell {
+                if sel_row < result.rows.len() && sel_col < result.columns.len() {
+                    let col_name = &result.columns[sel_col];
+                    let col_type = result.column_types.get(sel_col).map(|s| s.as_str()).unwrap_or("TEXT");
+                    let current_val = &result.rows[sel_row][sel_col];
+                    let raw_val_str = current_val.to_display_string();
+                    let (display_val_str, is_json, char_count, line_count) =
+                        format_inspector_value(&raw_val_str, self.json_pretty);
+
+                    let on_cp_val = self.on_copy_value.clone();
+                    let col_name_cp = col_name.clone();
+                    let val_cp = raw_val_str.clone();
+
+                    let on_tog_modal = self.on_toggle_modal.clone();
+                    let on_tog_pretty = self.on_toggle_json_pretty.clone();
+                    let is_pretty = self.json_pretty;
+
+                    let modal_dialog = v_flex()
+                        .w(px(800.0))
+                        .h(px(560.0))
+                        .bg(ThemeColors::BG_SURFACE)
+                        .rounded_xl()
+                        .border_1()
+                        .border_color(ThemeColors::BORDER)
+                        .shadow_lg()
+                        .child(
+                            // Modal Header
+                            h_flex()
+                                .w_full()
+                                .p_4()
+                                .justify_between()
+                                .items_center()
+                                .border_b_1()
+                                .border_color(ThemeColors::BORDER)
+                                .child(
+                                    h_flex()
+                                        .items_center()
+                                        .gap_3()
+                                        .child(
+                                            Icon::new(IconName::Table)
+                                                .size(px(20.0))
+                                                .text_color(ThemeColors::PRIMARY_BORDER),
+                                        )
+                                        .child(
+                                            v_flex()
+                                                .child(
+                                                    div()
+                                                        .text_sm()
+                                                        .font_weight(FontWeight::BOLD)
+                                                        .text_color(ThemeColors::TEXT_PRIMARY)
+                                                        .child(format!("Detail Viewer: {col_name}")),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .text_xs()
+                                                        .text_color(ThemeColors::TEXT_MUTED)
+                                                        .child(format!("{col_type} · Row #{}", sel_row + 1)),
+                                                ),
+                                        ),
+                                )
+                                .child(
+                                    h_flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .when(is_json, |this| {
+                                            let on_tog_pretty = on_tog_pretty.clone();
+                                            this.child(
+                                                Button::new("modal_json_toggle_btn")
+                                                    .ghost()
+                                                    .xsmall()
+                                                    .label(if is_pretty { "JSON Pretty" } else { "JSON Raw" })
+                                                    .border_1()
+                                                    .border_color(ThemeColors::BORDER)
+                                                    .on_click(move |_, window, cx| {
+                                                        if let Some(ref h) = on_tog_pretty {
+                                                            h(!is_pretty, window, cx);
+                                                        }
+                                                    }),
+                                            )
+                                        })
+                                        .child({
+                                            let on_tog_modal = on_tog_modal.clone();
+                                            Button::new("modal_close_x_btn")
+                                                .ghost()
+                                                .xsmall()
+                                                .icon(IconName::X)
+                                                .on_click(move |_, window, cx| {
+                                                    if let Some(ref h) = on_tog_modal {
+                                                        h(false, window, cx);
+                                                    }
+                                                })
+                                        }),
+                                ),
+                        )
+                        // Modal Body
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_h_0()
+                                .p_4()
+                                .bg(ThemeColors::BG_APP)
+                                .overflow_scrollbar()
+                                .child(
+                                    if current_val.is_null() {
+                                        div()
+                                            .text_sm()
+                                            .text_color(ThemeColors::TEXT_FAINT)
+                                            .child("<NULL>")
+                                    } else {
+                                        div()
+                                            .text_xs()
+                                            .font_family("JetBrains Mono")
+                                            .text_color(ThemeColors::TEXT_PRIMARY)
+                                            .child(display_val_str)
+                                    },
+                                ),
+                        )
+                        // Modal Footer
+                        .child(
+                            h_flex()
+                                .w_full()
+                                .p_3()
+                                .px_4()
+                                .justify_between()
+                                .items_center()
+                                .border_t_1()
+                                .border_color(ThemeColors::BORDER)
+                                .bg(ThemeColors::BG_SURFACE)
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(ThemeColors::TEXT_FAINT)
+                                        .child(format!("{char_count} characters · {line_count} line(s)")),
+                                )
+                                .child(
+                                    h_flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .child({
+                                            let on_tog_modal = on_tog_modal.clone();
+                                            Button::new("modal_footer_close_btn")
+                                                .ghost()
+                                                .small()
+                                                .label("Close")
+                                                .on_click(move |_, window, cx| {
+                                                    if let Some(ref h) = on_tog_modal {
+                                                        h(false, window, cx);
+                                                    }
+                                                })
+                                        })
+                                        .child(
+                                            Button::new("modal_footer_copy_btn")
+                                                .small()
+                                                .icon(IconName::Copy)
+                                                .label("Copy Value")
+                                                .on_click(move |_, window, cx| {
+                                                    if let Some(ref h) = on_cp_val {
+                                                        h(col_name_cp.clone(), val_cp.clone(), window, cx);
+                                                    } else {
+                                                        cx.write_to_clipboard(ClipboardItem::new_string(val_cp.clone()));
+                                                    }
+                                                }),
+                                        ),
+                                ),
+                        );
+
+                    return div()
+                        .size_full()
+                        .relative()
+                        .child(grid_content)
+                        .child(
+                            div()
+                                .absolute()
+                                .inset_0()
+                                .bg(rgba(0x000000AA))
+                                .justify_center()
+                                .items_center()
+                                .flex()
+                                .child(modal_dialog),
+                        )
+                        .into_any_element();
+                }
+            }
+        }
+
+        grid_content.into_any_element()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_row_to_json_types() {
+        let cols = vec![
+            "id".to_string(),
+            "name".to_string(),
+            "active".to_string(),
+            "payload".to_string(),
+            "nullable".to_string(),
+        ];
+        let row = vec![
+            QueryValue::Int(42),
+            QueryValue::String("crab".to_string()),
+            QueryValue::Bool(true),
+            QueryValue::String(r#"{"key": "value"}"#.to_string()),
+            QueryValue::Null,
+        ];
+        let json_str = row_to_json(&cols, &row);
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).expect("Valid JSON");
+        assert_eq!(parsed["id"], 42);
+        assert_eq!(parsed["name"], "crab");
+        assert_eq!(parsed["active"], true);
+        assert_eq!(parsed["payload"]["key"], "value");
+        assert!(parsed["nullable"].is_null());
+    }
+
+    #[test]
+    fn test_row_to_tsv_newlines_sanitized() {
+        let row = vec![
+            QueryValue::Int(1),
+            QueryValue::String("line 1\nline 2\r\nline 3".to_string()),
+            QueryValue::String("tab\there".to_string()),
+        ];
+        let tsv = row_to_tsv(&row);
+        assert!(!tsv.contains('\n'));
+        assert!(!tsv.contains('\r'));
+        let parts: Vec<&str> = tsv.split('\t').collect();
+        assert_eq!(parts.len(), 3);
+        assert_eq!(parts[0], "1");
+        assert_eq!(parts[1], "line 1 line 2  line 3");
+        assert_eq!(parts[2], "tab here");
+    }
+
+    #[test]
+    fn test_format_inspector_value_plain_text() {
+        let text = "First line\nSecond line\nThird line";
+        let (val, is_json, chars, lines) = format_inspector_value(text, true);
+        assert!(!is_json);
+        assert_eq!(val, text);
+        assert_eq!(lines, 3);
+        assert_eq!(chars, text.chars().count());
+    }
+
+    #[test]
+    fn test_format_inspector_value_json_pretty() {
+        let raw_json = r#"{"name":"zqlcrab","features":["explain","inspector"]}"#;
+        let (pretty, is_json, _chars, lines) = format_inspector_value(raw_json, true);
+        assert!(is_json);
+        assert!(lines > 1);
+        assert!(pretty.contains("  \"name\": \"zqlcrab\""));
+
+        let (raw, is_json_raw, _chars_raw, lines_raw) = format_inspector_value(raw_json, false);
+        assert!(is_json_raw);
+        assert_eq!(lines_raw, 1);
+        assert_eq!(raw, raw_json);
+    }
+}
+

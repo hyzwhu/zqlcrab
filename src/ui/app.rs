@@ -73,6 +73,10 @@ pub struct CrabStudioApp {
     grid_page: usize,
     grid_page_size: usize,
     grid_filter: String,
+    grid_selected_cell: Option<(usize, usize)>,
+    grid_inspector_open: bool,
+    grid_modal_open: bool,
+    grid_json_pretty: bool,
     sidebar_table_filter: Entity<InputState>,
 
     // Dialog state
@@ -175,6 +179,10 @@ impl CrabStudioApp {
             grid_page: 0,
             grid_page_size: 50,
             grid_filter: String::new(),
+            grid_selected_cell: None,
+            grid_inspector_open: true,
+            grid_modal_open: false,
+            grid_json_pretty: true,
             sidebar_table_filter,
             dialog_open: false,
             dialog_db_type: DatabaseType::Sqlite,
@@ -234,6 +242,7 @@ impl CrabStudioApp {
         self.grid_page = 0;
         self.grid_sort_col = None;
         self.grid_sort_dir = None;
+        self.grid_selected_cell = None;
         self.status_message = Some(format!("Loading table {}...", table.name));
         cx.notify();
 
@@ -361,6 +370,7 @@ impl CrabStudioApp {
                         let dur = qr.execution_time_ms.unwrap_or(duration);
                         app.console_result = Some(qr.clone());
                         app.table_data = Some(qr);
+                        app.grid_selected_cell = None;
                         app.console_error = None;
                         app.status_message = Some(format!("Query completed: {rows} rows returned in {dur}ms"));
                     }
@@ -1081,6 +1091,83 @@ impl Render for CrabStudioApp {
                     }
                 };
 
+                let on_select_cell = {
+                    let handle = app_handle.clone();
+                    move |row_idx: usize, col_idx: usize, _: &mut Window, cx: &mut App| {
+                        handle.update(cx, |this, cx| {
+                            this.grid_selected_cell = Some((row_idx, col_idx));
+                            this.grid_inspector_open = true;
+                            cx.notify();
+                        });
+                    }
+                };
+
+                let on_toggle_inspector = {
+                    let handle = app_handle.clone();
+                    move |open: bool, _: &mut Window, cx: &mut App| {
+                        handle.update(cx, |this, cx| {
+                            this.grid_inspector_open = open;
+                            cx.notify();
+                        });
+                    }
+                };
+
+                let on_toggle_modal = {
+                    let handle = app_handle.clone();
+                    move |open: bool, _: &mut Window, cx: &mut App| {
+                        handle.update(cx, |this, cx| {
+                            this.grid_modal_open = open;
+                            cx.notify();
+                        });
+                    }
+                };
+
+                let on_toggle_pretty = {
+                    let handle = app_handle.clone();
+                    move |pretty: bool, _: &mut Window, cx: &mut App| {
+                        handle.update(cx, |this, cx| {
+                            this.grid_json_pretty = pretty;
+                            cx.notify();
+                        });
+                    }
+                };
+
+                let on_copy_val = {
+                    let handle = app_handle.clone();
+                    move |col_name: String, val: String, _: &mut Window, cx: &mut App| {
+                        handle.update(cx, |this, cx| {
+                            let len = val.len();
+                            cx.write_to_clipboard(ClipboardItem::new_string(val));
+                            this.status_message = Some(format!("Copied value of column '{col_name}' ({len} chars)"));
+                            cx.notify();
+                        });
+                    }
+                };
+
+                let on_copy_row_json = {
+                    let handle = app_handle.clone();
+                    move |row_idx: usize, json_str: String, _: &mut Window, cx: &mut App| {
+                        handle.update(cx, |this, cx| {
+                            let len = json_str.len();
+                            cx.write_to_clipboard(ClipboardItem::new_string(json_str));
+                            this.status_message = Some(format!("Copied row #{} as JSON ({len} bytes)", row_idx + 1));
+                            cx.notify();
+                        });
+                    }
+                };
+
+                let on_copy_row_tsv = {
+                    let handle = app_handle.clone();
+                    move |row_idx: usize, tsv_str: String, _: &mut Window, cx: &mut App| {
+                        handle.update(cx, |this, cx| {
+                            let len = tsv_str.len();
+                            cx.write_to_clipboard(ClipboardItem::new_string(tsv_str));
+                            this.status_message = Some(format!("Copied row #{} as TSV ({len} bytes)", row_idx + 1));
+                            cx.notify();
+                        });
+                    }
+                };
+
                 let grid_data = self.table_data.clone().or_else(|| self.console_result.clone());
 
                 DataGrid::new(grid_data)
@@ -1089,9 +1176,20 @@ impl Render for CrabStudioApp {
                     .current_page(self.grid_page)
                     .sort(self.grid_sort_col, self.grid_sort_dir)
                     .filter_keyword(self.grid_filter.clone())
+                    .selected_cell(self.grid_selected_cell)
+                    .inspector_open(self.grid_inspector_open)
+                    .modal_open(self.grid_modal_open)
+                    .json_pretty(self.grid_json_pretty)
                     .on_sort(on_sort)
                     .on_page_change(on_page)
                     .on_export(on_export)
+                    .on_select_cell(on_select_cell)
+                    .on_toggle_inspector(on_toggle_inspector)
+                    .on_toggle_modal(on_toggle_modal)
+                    .on_toggle_json_pretty(on_toggle_pretty)
+                    .on_copy_value(on_copy_val)
+                    .on_copy_row_json(on_copy_row_json)
+                    .on_copy_row_tsv(on_copy_row_tsv)
                     .into_any_element()
             }
             WorkspaceTab::Schema => {
@@ -1267,7 +1365,10 @@ impl Render for CrabStudioApp {
                 this.run_explain(cx);
             }))
             .on_action(cx.listener(|this, _: &CloseDialog, _, cx| {
-                if this.dialog_open {
+                if this.grid_modal_open {
+                    this.grid_modal_open = false;
+                    cx.notify();
+                } else if this.dialog_open {
                     this.close_connection_dialog(cx);
                 }
             }))
