@@ -12,6 +12,7 @@ use gpui_kit::gpui::{
 #[derive(IntoElement)]
 pub struct AppStatusBar {
     pub is_connected: bool,
+    pub is_read_only: bool,
     pub profile_name: Option<SharedString>,
     pub db_type: Option<SharedString>,
     pub status: Option<ConnectionStatus>,
@@ -23,6 +24,7 @@ impl AppStatusBar {
     pub fn new() -> Self {
         Self {
             is_connected: false,
+            is_read_only: false,
             profile_name: None,
             db_type: None,
             status: None,
@@ -33,6 +35,11 @@ impl AppStatusBar {
 
     pub fn connected(mut self, connected: bool) -> Self {
         self.is_connected = connected;
+        self
+    }
+
+    pub fn read_only(mut self, read_only: bool) -> Self {
+        self.is_read_only = read_only;
         self
     }
 
@@ -101,6 +108,19 @@ impl RenderOnce for AppStatusBar {
                         .text_xs()
                         .text_color(ThemeColors::PRIMARY_BORDER)
                         .child(engine),
+                )
+            })
+            .when(self.is_read_only, |this| {
+                this.child(
+                    div()
+                        .px_1p5()
+                        .py_0p5()
+                        .rounded_sm()
+                        .bg(ThemeColors::WARNING)
+                        .text_xs()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(ThemeColors::TEXT_PRIMARY)
+                        .child("READ-ONLY"),
                 )
             })
             .when_some(self.status, |this, stat| {

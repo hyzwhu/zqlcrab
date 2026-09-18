@@ -75,6 +75,9 @@ pub struct ConnectionConfig {
     /// Query execution timeout in seconds.
     #[serde(default = "default_query_timeout")]
     pub query_timeout_secs: u64,
+    /// Whether this connection is in Read-Only mode (destructive queries blocked).
+    #[serde(default)]
+    pub is_read_only: bool,
 }
 
 fn default_host() -> String {
@@ -103,6 +106,7 @@ impl ConnectionConfig {
             password: None,
             connect_timeout_secs: 5,
             query_timeout_secs: 30,
+            is_read_only: false,
         }
     }
 
@@ -126,6 +130,7 @@ impl ConnectionConfig {
             password,
             connect_timeout_secs: 10,
             query_timeout_secs: 30,
+            is_read_only: false,
         }
     }
 
@@ -149,6 +154,23 @@ impl ConnectionConfig {
             password,
             connect_timeout_secs: 10,
             query_timeout_secs: 30,
+            is_read_only: false,
+        }
+    }
+}
+
+/// Sort direction for tabular grid columns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortDirection {
+    Ascending,
+    Descending,
+}
+
+impl SortDirection {
+    pub fn toggle(&self) -> Option<Self> {
+        match self {
+            Self::Ascending => Some(Self::Descending),
+            Self::Descending => None,
         }
     }
 }

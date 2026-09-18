@@ -51,20 +51,28 @@ impl DatabaseAdapter for SqliteAdapter {
                     let _ = std::fs::create_dir_all(parent);
                 }
             }
-            Connection::open_with_flags(
-                db_path,
+            let flags = if self.config.is_read_only {
+                OpenFlags::SQLITE_OPEN_READ_ONLY
+                    | OpenFlags::SQLITE_OPEN_URI
+                    | OpenFlags::SQLITE_OPEN_NO_MUTEX
+            } else {
                 OpenFlags::SQLITE_OPEN_READ_WRITE
                     | OpenFlags::SQLITE_OPEN_CREATE
                     | OpenFlags::SQLITE_OPEN_URI
-                    | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-            )
-            .map_err(|e| DbError::connection(format!("Failed to open SQLite database at '{db_path}': {e}")))?
+                    | OpenFlags::SQLITE_OPEN_NO_MUTEX
+            };
+            Connection::open_with_flags(db_path, flags)
+                .map_err(|e| DbError::connection(format!("Failed to open SQLite database at '{db_path}': {e}")))?
         };
 
-        // Enable foreign keys and WAL journal mode
-        let _ = conn.execute("PRAGMA foreign_keys = ON;", []);
-        if db_path != ":memory:" && !db_path.is_empty() {
-            let _ = conn.query_row("PRAGMA journal_mode = WAL;", [], |_| Ok(()));
+        let _ = conn.busy_timeout(std::time::Duration::from_secs(self.config.connect_timeout_secs.max(1)));
+
+        // Enable foreign keys and WAL journal mode (if writable)
+        if !self.config.is_read_only {
+            let _ = conn.execute("PRAGMA foreign_keys = ON;", []);
+            if db_path != ":memory:" && !db_path.is_empty() {
+                let _ = conn.query_row("PRAGMA journal_mode = WAL;", [], |_| Ok(()));
+            }
         }
 
         self.conn = Some(Arc::new(Mutex::new(conn)));

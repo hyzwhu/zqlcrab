@@ -19,12 +19,14 @@ pub struct Sidebar {
     connections: Vec<ConnectionConfig>,
     active_connection_id: Option<String>,
     active_tables: Vec<TableInfo>,
+    table_filter: String,
     selected_table: Option<String>,
     on_new_connection: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_select_connection: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
     on_select_table: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
     on_disconnect: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_refresh: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
+    on_quick_query: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
 }
 
 impl Sidebar {
@@ -37,13 +39,20 @@ impl Sidebar {
             connections,
             active_connection_id,
             active_tables,
+            table_filter: String::new(),
             selected_table: None,
             on_new_connection: None,
             on_select_connection: None,
             on_select_table: None,
             on_disconnect: None,
             on_refresh: None,
+            on_quick_query: None,
         }
+    }
+
+    pub fn table_filter(mut self, filter: impl Into<String>) -> Self {
+        self.table_filter = filter.into();
+        self
     }
 
     pub fn selected_table(mut self, table: Option<String>) -> Self {
@@ -88,6 +97,14 @@ impl Sidebar {
         F: Fn(&mut Window, &mut App) + 'static,
     {
         self.on_refresh = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_quick_query<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(String, &mut Window, &mut App) + 'static,
+    {
+        self.on_quick_query = Some(Rc::new(handler));
         self
     }
 }
@@ -248,6 +265,18 @@ impl RenderOnce for Sidebar {
         }
 
         // Tables list when connected
+        let filter = self.table_filter.trim().to_lowercase();
+        let filtered_tables: Vec<&TableInfo> = if filter.is_empty() {
+            self.active_tables.iter().collect()
+        } else {
+            self.active_tables
+                .iter()
+                .filter(|t| t.name.to_lowercase().contains(&filter))
+                .collect()
+        };
+
+        let on_quick = self.on_quick_query.clone();
+
         let tables_pane = v_flex()
             .flex_1()
             .border_t_1()
@@ -263,7 +292,11 @@ impl RenderOnce for Sidebar {
                             .text_xs()
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(ThemeColors::TEXT_MUTED)
-                            .child(format!("TABLES ({})", self.active_tables.len())),
+                            .child(if filter.is_empty() {
+                                format!("TABLES ({})", self.active_tables.len())
+                            } else {
+                                format!("TABLES ({}/{})", filtered_tables.len(), self.active_tables.len())
+                            }),
                     ),
             )
             .child({
@@ -274,10 +307,15 @@ impl RenderOnce for Sidebar {
                     .gap_0p5()
                     .p_1();
 
-                for tbl in &self.active_tables {
+                for (idx, tbl) in filtered_tables.iter().enumerate() {
                     let is_selected = self.selected_table.as_deref() == Some(&tbl.name);
                     let tbl_name = tbl.name.clone();
                     let on_tbl_select = self.on_select_table.clone();
+
+                    let tbl_for_query = tbl.name.clone();
+                    let tbl_for_count = tbl.name.clone();
+                    let on_quick_select = on_quick.clone();
+                    let on_quick_count = on_quick.clone();
 
                     let is_view = tbl.table_type == "VIEW";
                     let icon_name = if is_view {
@@ -287,13 +325,13 @@ impl RenderOnce for Sidebar {
                     };
 
                     let row = h_flex()
-                        .id(ElementId::Name(format!("tbl_row_{}", tbl.name).into()))
+                        .id(ElementId::NamedInteger("tbl_row".into(), idx as u64))
                         .w_full()
                         .py_1()
                         .px_2()
                         .rounded_sm()
                         .items_center()
-                        .gap_2()
+                        .justify_between()
                         .cursor_pointer()
                         .bg(if is_selected {
                             ThemeColors::PRIMARY
@@ -308,19 +346,61 @@ impl RenderOnce for Sidebar {
                             }
                         })
                         .child(
-                            Icon::new(icon_name)
-                                .size(px(13.0))
-                                .text_color(if is_selected {
-                                    ThemeColors::TEXT_PRIMARY
-                                } else {
-                                    ThemeColors::PRIMARY_BORDER
-                                }),
+                            h_flex()
+                                .items_center()
+                                .gap_2()
+                                .child(
+                                    Icon::new(icon_name)
+                                        .size(px(13.0))
+                                        .text_color(if is_selected {
+                                            ThemeColors::TEXT_PRIMARY
+                                        } else {
+                                            ThemeColors::PRIMARY_BORDER
+                                        }),
+                                )
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(ThemeColors::TEXT_PRIMARY)
+                                        .child(tbl.name.clone()),
+                                ),
                         )
                         .child(
-                            div()
-                                .text_xs()
-                                .text_color(ThemeColors::TEXT_PRIMARY)
-                                .child(tbl.name.clone()),
+                            h_flex()
+                                .items_center()
+                                .gap_1()
+                                .child(
+                                    Button::new(ElementId::NamedInteger("quick_sel".into(), idx as u64))
+                                        .ghost()
+                                        .xsmall()
+                                        .icon(IconName::Play)
+                                        .tooltip("SELECT * LIMIT 100")
+                                        .when_some(on_quick_select, |btn, handler| {
+                                            btn.on_click(move |_, window, cx| {
+                                                handler(
+                                                    format!("SELECT * FROM \"{}\" LIMIT 100;", tbl_for_query),
+                                                    window,
+                                                    cx,
+                                                );
+                                            })
+                                        }),
+                                )
+                                .child(
+                                    Button::new(ElementId::NamedInteger("quick_cnt".into(), idx as u64))
+                                        .ghost()
+                                        .xsmall()
+                                        .tooltip("COUNT(*)")
+                                        .child("#")
+                                        .when_some(on_quick_count, |btn, handler| {
+                                            btn.on_click(move |_, window, cx| {
+                                                handler(
+                                                    format!("SELECT COUNT(*) AS total_count FROM \"{}\";", tbl_for_count),
+                                                    window,
+                                                    cx,
+                                                );
+                                            })
+                                        }),
+                                ),
                         )
                         .on_click(move |_, window, cx| {
                             if let Some(ref handler) = on_tbl_select {

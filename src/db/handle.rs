@@ -82,6 +82,7 @@ impl ActiveConnection {
     }
 
     pub async fn execute_query(&self, sql: &str) -> DbResult<QueryResult> {
+        crate::db::safety::QuerySafetyValidator::validate_query(sql, self.config.is_read_only)?;
         let adapter = self.adapter.lock().await;
         adapter.execute_query(sql).await
     }

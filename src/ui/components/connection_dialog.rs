@@ -24,9 +24,11 @@ pub struct ConnectionDialog {
     database_input: Entity<InputState>,
     user_input: Entity<InputState>,
     pass_input: Entity<InputState>,
+    is_read_only: bool,
     is_testing: bool,
     test_result: Option<Result<String, String>>,
     on_select_type: Option<Rc<dyn Fn(DatabaseType, &mut Window, &mut App) + 'static>>,
+    on_toggle_read_only: Option<Rc<dyn Fn(bool, &mut Window, &mut App) + 'static>>,
     on_test: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_save: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_cancel: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
@@ -50,13 +52,28 @@ impl ConnectionDialog {
             database_input: database_input.clone(),
             user_input: user_input.clone(),
             pass_input: pass_input.clone(),
+            is_read_only: false,
             is_testing: false,
             test_result: None,
             on_select_type: None,
+            on_toggle_read_only: None,
             on_test: None,
             on_save: None,
             on_cancel: None,
         }
+    }
+
+    pub fn read_only(mut self, is_read_only: bool) -> Self {
+        self.is_read_only = is_read_only;
+        self
+    }
+
+    pub fn on_toggle_read_only<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(bool, &mut Window, &mut App) + 'static,
+    {
+        self.on_toggle_read_only = Some(Rc::new(handler));
+        self
     }
 
     pub fn testing(mut self, is_testing: bool) -> Self {
@@ -390,6 +407,71 @@ impl RenderOnce for ConnectionDialog {
             }
         });
 
+        let on_toggle_ro = self.on_toggle_read_only.clone();
+        let cur_ro = self.is_read_only;
+
+        let read_only_row = h_flex()
+            .w_full()
+            .items_center()
+            .justify_between()
+            .p_2p5()
+            .rounded_lg()
+            .bg(ThemeColors::BG_SURFACE)
+            .border_1()
+            .border_color(if cur_ro {
+                ThemeColors::WARNING
+            } else {
+                ThemeColors::BORDER
+            })
+            .child(
+                h_flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        Icon::new(IconName::Shield)
+                            .size(px(16.0))
+                            .text_color(if cur_ro {
+                                ThemeColors::WARNING
+                            } else {
+                                ThemeColors::TEXT_MUTED
+                            }),
+                    )
+                    .child(
+                        v_flex()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(if cur_ro {
+                                        ThemeColors::WARNING
+                                    } else {
+                                        ThemeColors::TEXT_PRIMARY
+                                    })
+                                    .child("Read-Only Protection"),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(ThemeColors::TEXT_FAINT)
+                                    .child("Block destructive queries (DROP, DELETE, UPDATE, TRUNCATE)"),
+                            ),
+                    ),
+            )
+            .child({
+                let mut btn = Button::new("toggle_ro_btn").xsmall();
+                if cur_ro {
+                    btn = btn.primary().label("Enabled");
+                } else {
+                    btn = btn.ghost().label("Disabled");
+                }
+                if let Some(handler) = on_toggle_ro {
+                    btn = btn.on_click(move |_, window, cx| {
+                        handler(!cur_ro, window, cx);
+                    });
+                }
+                btn
+            });
+
         // Dialog container modal
         let modal = v_flex()
             .w(px(500.0))
@@ -443,6 +525,7 @@ impl RenderOnce for ConnectionDialog {
                     .gap_4()
                     .child(engine_selector)
                     .child(form_fields)
+                    .child(read_only_row)
                     .children(test_banner),
             )
             .child(

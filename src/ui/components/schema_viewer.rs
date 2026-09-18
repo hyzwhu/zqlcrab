@@ -6,12 +6,14 @@ use gpui_kit::assets::IconName;
 use gpui_kit::base::{h_flex, v_flex};
 use gpui_kit::component::{
     Icon, Sizable as _,
+    button::{Button, ButtonVariants as _},
     table::{Table, TableBody, TableCell, TableHead, TableHeader, TableRow},
 };
 use gpui_kit::gpui::{
     App, FontWeight, InteractiveElement as _, IntoElement, ParentElement, RenderOnce,
     StatefulInteractiveElement as _, Styled, Window, div, prelude::*, px,
 };
+use std::rc::Rc;
 
 #[derive(IntoElement)]
 pub struct SchemaViewer {
@@ -19,6 +21,7 @@ pub struct SchemaViewer {
     columns: Vec<ColumnInfo>,
     indexes: Vec<IndexInfo>,
     ddl: Option<String>,
+    on_quick_query: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
 }
 
 impl SchemaViewer {
@@ -33,7 +36,16 @@ impl SchemaViewer {
             columns,
             indexes,
             ddl,
+            on_quick_query: None,
         }
+    }
+
+    pub fn on_quick_query<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(String, &mut Window, &mut App) + 'static,
+    {
+        self.on_quick_query = Some(Rc::new(handler));
+        self
     }
 }
 
@@ -67,24 +79,78 @@ impl RenderOnce for SchemaViewer {
         };
 
         // Header
+        let tbl_for_sel = table_name.clone();
+        let tbl_for_cnt = table_name.clone();
+        let tbl_for_exp = table_name.clone();
+        let on_quick_sel = self.on_quick_query.clone();
+        let on_quick_cnt = self.on_quick_query.clone();
+        let on_quick_exp = self.on_quick_query.clone();
+
         let header = h_flex()
             .items_center()
-            .gap_2()
+            .justify_between()
             .p_3()
             .border_b_1()
             .border_color(ThemeColors::BORDER)
             .bg(ThemeColors::BG_SURFACE)
             .child(
-                Icon::new(IconName::TableProperties)
-                    .size(px(18.0))
-                    .text_color(ThemeColors::PRIMARY_BORDER),
+                h_flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        Icon::new(IconName::TableProperties)
+                            .size(px(18.0))
+                            .text_color(ThemeColors::PRIMARY_BORDER),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(ThemeColors::TEXT_PRIMARY)
+                            .child(format!("Table Structure: {table_name}")),
+                    ),
             )
             .child(
-                div()
-                    .text_sm()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(ThemeColors::TEXT_PRIMARY)
-                    .child(format!("Table Structure: {table_name}")),
+                h_flex()
+                    .items_center()
+                    .gap_1p5()
+                    .child(
+                        Button::new("schema_sel_btn")
+                            .primary()
+                            .xsmall()
+                            .icon(IconName::Play)
+                            .tooltip("Query first 100 rows")
+                            .child("Select 100")
+                            .when_some(on_quick_sel, |btn, handler| {
+                                btn.on_click(move |_, window, cx| {
+                                    handler(format!("SELECT * FROM \"{}\" LIMIT 100;", tbl_for_sel), window, cx);
+                                })
+                            }),
+                    )
+                    .child(
+                        Button::new("schema_count_btn")
+                            .ghost()
+                            .xsmall()
+                            .tooltip("Count total rows")
+                            .child("Count (*)")
+                            .when_some(on_quick_cnt, |btn, handler| {
+                                btn.on_click(move |_, window, cx| {
+                                    handler(format!("SELECT COUNT(*) AS total_count FROM \"{}\";", tbl_for_cnt), window, cx);
+                                })
+                            }),
+                    )
+                    .child(
+                        Button::new("schema_explain_btn")
+                            .ghost()
+                            .xsmall()
+                            .tooltip("Explain query plan")
+                            .child("Explain Plan")
+                            .when_some(on_quick_exp, |btn, handler| {
+                                btn.on_click(move |_, window, cx| {
+                                    handler(format!("EXPLAIN SELECT * FROM \"{}\" LIMIT 100;", tbl_for_exp), window, cx);
+                                })
+                            }),
+                    ),
             );
 
         // Columns section
