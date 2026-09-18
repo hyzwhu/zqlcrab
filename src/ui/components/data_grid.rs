@@ -13,7 +13,8 @@ use gpui_kit::component::{
 };
 use gpui_kit::gpui::{
     App, ClipboardItem, ElementId, FontWeight, InteractiveElement as _, IntoElement, ParentElement,
-    RenderOnce, StatefulInteractiveElement as _, Styled, Window, div, prelude::*, px, rgba,
+    RenderOnce, StatefulInteractiveElement as _, Styled, Window, div, prelude::*, px,
+    rgba,
 };
 use std::cmp::Ordering;
 use std::rc::Rc;

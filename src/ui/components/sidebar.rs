@@ -9,6 +9,7 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
     input::{Input, InputState},
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem},
+    resizable::{resizable_panel, v_resizable, ResizableState},
 };
 use gpui_kit::gpui::{
     Anchor, App, Context, ElementId, Entity, FontWeight, InteractiveElement as _, IntoElement, ParentElement,
@@ -23,7 +24,9 @@ pub struct Sidebar {
     connections: Vec<ConnectionConfig>,
     active_connection_id: Option<String>,
     active_tables: Vec<TableInfo>,
+    connection_filter: Entity<InputState>,
     table_filter: Entity<InputState>,
+    split_state: Entity<ResizableState>,
     selected_table: Option<String>,
     on_new_connection: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_select_connection: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
@@ -41,13 +44,17 @@ impl Sidebar {
         connections: Vec<ConnectionConfig>,
         active_connection_id: Option<String>,
         active_tables: Vec<TableInfo>,
+        connection_filter: &Entity<InputState>,
         table_filter: &Entity<InputState>,
+        split_state: &Entity<ResizableState>,
     ) -> Self {
         Self {
             connections,
             active_connection_id,
             active_tables,
+            connection_filter: connection_filter.clone(),
             table_filter: table_filter.clone(),
+            split_state: split_state.clone(),
             selected_table: None,
             on_new_connection: None,
             on_select_connection: None,
@@ -295,6 +302,15 @@ impl RenderOnce for Sidebar {
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(ThemeColors::TEXT_PRIMARY)
                             .child("CONNECTIONS"),
+                    )
+                    .child(
+                        div()
+                            .px_1()
+                            .rounded_sm()
+                            .bg(ThemeColors::BG_SURFACE_HOVER)
+                            .text_size(px(10.0))
+                            .text_color(ThemeColors::TEXT_FAINT)
+                            .child(self.connections.len().to_string()),
                     ),
             )
             .child(
@@ -307,13 +323,53 @@ impl RenderOnce for Sidebar {
                     .child(new_btn),
             );
 
+        // Connections search bar
+        let conn_search_row = h_flex()
+            .w_full()
+            .px_2()
+            .py_1()
+            .border_b_1()
+            .border_color(ThemeColors::BORDER)
+            .child(Input::new(&self.connection_filter).small().w_full());
+
+        // Filter connections by search query
+        let conn_query = self.connection_filter.read(cx).value().to_string();
+        let conn_query = conn_query.trim().to_lowercase();
+        let filtered_connections: Vec<&ConnectionConfig> = self
+            .connections
+            .iter()
+            .filter(|c| {
+                conn_query.is_empty()
+                    || c.name.to_lowercase().contains(&conn_query)
+                    || c.database.to_lowercase().contains(&conn_query)
+            })
+            .collect();
+
         // Connections list
         let mut conn_list = v_flex()
             .id("sidebar_conn_scroll")
-            .gap_1()
-            .p_2();
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .gap_0p5()
+            .p_1();
 
-        for conn in &self.connections {
+        if filtered_connections.is_empty() {
+            conn_list = conn_list.child(
+                div()
+                    .px_3()
+                    .py_2()
+                    .text_xs()
+                    .text_color(ThemeColors::TEXT_FAINT)
+                    .child(if conn_query.is_empty() {
+                        "No connections configured"
+                    } else {
+                        "No matching connections"
+                    }),
+            );
+        }
+
+        for conn in filtered_connections {
             let is_active = self.active_connection_id.as_deref() == Some(&conn.id);
 
             let engine_icon = match conn.db_type {
@@ -393,9 +449,13 @@ impl RenderOnce for Sidebar {
                 )
                 .child(
                     div()
+                        .flex_1()
+                        .min_w_0()
                         .text_xs()
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(ThemeColors::TEXT_PRIMARY)
+                        .overflow_hidden()
+                        .text_ellipsis()
                         .child(conn.name.clone()),
                 )
                 .when(conn.environment.is_production(), |this| {
@@ -528,40 +588,84 @@ impl RenderOnce for Sidebar {
             }
         }
 
+        let conn_pane = v_flex()
+            .size_full()
+            .min_h_0()
+            .child(header)
+            .child(conn_search_row)
+            .child(conn_list);
+
+        let db_name = if active_database.is_empty() {
+            family_label(active_family).to_string()
+        } else {
+            active_database.clone()
+        };
+
+        let database_row = h_flex()
+            .w_full()
+            .px_3()
+            .py_1p5()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .bg(ThemeColors::BG_SURFACE)
+            .border_b_1()
+            .border_color(ThemeColors::BORDER)
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .items_center()
+                    .gap_1p5()
+                    .child(
+                        Icon::new(IconName::Database)
+                            .size(px(13.0))
+                            .text_color(ThemeColors::WARNING),
+                    )
+                    .child(
+                        div()
+                            .px_1()
+                            .py_0p5()
+                            .rounded_sm()
+                            .bg(ThemeColors::PRIMARY_BG)
+                            .text_color(ThemeColors::PRIMARY_LIGHT)
+                            .text_size(px(10.0))
+                            .font_weight(FontWeight::BOLD)
+                            .child("DATABASE"),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_xs()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(ThemeColors::TEXT_PRIMARY)
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .child(db_name),
+                    ),
+            )
+            .child(
+                div()
+                    .px_1()
+                    .py_0p5()
+                    .rounded_sm()
+                    .bg(ThemeColors::BG_SURFACE_HOVER)
+                    .text_size(px(10.0))
+                    .text_color(ThemeColors::TEXT_FAINT)
+                    .child(family_label(active_family)),
+            );
+
         let search_row = h_flex()
             .w_full()
             .px_2()
             .py_1()
-            .border_t_1()
+            .border_b_1()
             .border_color(ThemeColors::BORDER)
             .child(Input::new(&self.table_filter).small().w_full());
 
-        let database_row = h_flex()
-            .w_full()
-            .px_2()
-            .py_1()
-            .items_center()
-            .gap_2()
-            .border_t_1()
-            .border_color(ThemeColors::BORDER)
-            .child(
-                Icon::new(IconName::Database)
-                    .size(px(13.0))
-                    .text_color(ThemeColors::WARNING),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(ThemeColors::TEXT_PRIMARY)
-                    .child(if active_database.is_empty() {
-                        family_label(active_family).to_string()
-                    } else {
-                        active_database
-                    }),
-            );
-
         let tables_pane = v_flex()
-            .flex_1()
+            .size_full()
             .min_h_0()
             .child(database_row)
             .child(search_row)
@@ -569,6 +673,7 @@ impl RenderOnce for Sidebar {
                 let mut tbl_list = v_flex()
                     .id("sidebar_tables_scroll")
                     .flex_1()
+                    .min_h_0()
                     .overflow_y_scroll()
                     .gap_0p5()
                     .p_1();
@@ -624,17 +729,48 @@ impl RenderOnce for Sidebar {
                 tbl_list
             });
 
+        let default_conn_height = px(
+            (36.0 + 34.0 + (self.connections.len().min(6) as f32) * 31.0 + 6.0)
+                .clamp(140.0, 256.0),
+        );
+
+        let content = if self.active_connection_id.is_some() {
+            div()
+                .flex_1()
+                .min_h_0()
+                .w_full()
+                .child(
+                    v_resizable("sidebar-split")
+                        .with_state(&self.split_state)
+                        .child(
+                            resizable_panel()
+                                .size(default_conn_height)
+                                .size_range(px(100.0)..px(600.0))
+                                .flex_none()
+                                .child(conn_pane),
+                        )
+                        .child(
+                            resizable_panel()
+                                .child(tables_pane),
+                        ),
+                )
+                .into_any_element()
+        } else {
+            div()
+                .flex_1()
+                .min_h_0()
+                .w_full()
+                .child(conn_pane)
+                .into_any_element()
+        };
+
         v_flex()
             .w(px(260.0))
             .h_full()
             .bg(ThemeColors::BG_APP)
             .border_r_1()
             .border_color(ThemeColors::BORDER)
-            .child(header)
-            .child(conn_list)
-            .when(self.active_connection_id.is_some(), |this| {
-                this.child(tables_pane)
-            })
+            .child(content)
     }
 }
 

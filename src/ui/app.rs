@@ -77,7 +77,9 @@ pub struct CrabStudioApp {
     grid_inspector_open: bool,
     grid_modal_open: bool,
     grid_json_pretty: bool,
+    sidebar_conn_filter: Entity<InputState>,
     sidebar_table_filter: Entity<InputState>,
+    sidebar_split: Entity<ResizableState>,
 
     // Dialog state
     dialog_open: bool,
@@ -120,6 +122,16 @@ impl CrabStudioApp {
             )
         });
         let console_split = cx.new(|_cx| ResizableState::default());
+        let sidebar_split = cx.new(|_cx| ResizableState::default());
+        let sidebar_conn_filter = cx.new(|cx| {
+            InputState::new(window, cx).placeholder("Search connections…")
+        });
+        cx.subscribe(&sidebar_conn_filter, |_, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
+        })
+        .detach();
         let sidebar_table_filter = cx.new(|cx| {
             InputState::new(window, cx).placeholder("Search tables, views…")
         });
@@ -184,7 +196,9 @@ impl CrabStudioApp {
             grid_inspector_open: true,
             grid_modal_open: false,
             grid_json_pretty: true,
+            sidebar_conn_filter,
             sidebar_table_filter,
+            sidebar_split,
             dialog_open: false,
             dialog_editing_id: None,
             dialog_db_type: DatabaseType::Sqlite,
@@ -825,7 +839,9 @@ impl Render for CrabStudioApp {
             self.saved_connections.clone(),
             active_conn_id,
             self.active_tables.clone(),
+            &self.sidebar_conn_filter,
             &self.sidebar_table_filter,
+            &self.sidebar_split,
         )
         .selected_table(self.selected_table.clone())
         .on_new_connection({
