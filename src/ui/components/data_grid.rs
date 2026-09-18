@@ -15,7 +15,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::gpui::{
     App, ClipboardItem, ElementId, Entity, FontWeight, InteractiveElement as _, IntoElement, ParentElement,
-    RenderOnce, ScrollHandle, StatefulInteractiveElement as _, Styled, Window, div, prelude::*, px,
+    RenderOnce, ScrollHandle, StatefulInteractiveElement as _, Styled, Window, div, point, prelude::*, px,
     rgba,
 };
 use std::cmp::Ordering;
@@ -1051,6 +1051,8 @@ impl RenderOnce for DataGrid {
 
         // Table header row
         let mut header_row = TableRow::new()
+            .w(px(total_table_width))
+            .min_w(px(total_table_width))
             .bg(ThemeColors::BG_SURFACE)
             .border_b_1()
             .border_color(ThemeColors::BORDER)
@@ -1234,6 +1236,8 @@ impl RenderOnce for DataGrid {
                 );
 
             let mut row = TableRow::new()
+                .w(px(total_table_width))
+                .min_w(px(total_table_width))
                 .border_b_1()
                 .border_color(rgba(0x10B98140))
                 .bg(if is_row_selected {
@@ -1420,6 +1424,8 @@ impl RenderOnce for DataGrid {
                 );
 
             let mut row = TableRow::new()
+                .w(px(total_table_width))
+                .min_w(px(total_table_width))
                 .border_b_1()
                 .border_color(ThemeColors::BORDER.opacity(0.35))
                 .when(is_row_deleted, |r| r.bg(rgba(0xEF444412)))
@@ -1577,15 +1583,21 @@ impl RenderOnce for DataGrid {
 
         let table = Table::new()
             .small()
+            .w(px(total_table_width))
             .min_w(px(total_table_width))
             .child(
                 TableHeader::new()
+                    .w(px(total_table_width))
+                    .min_w(px(total_table_width))
                     .bg(ThemeColors::BG_SURFACE)
                     .border_b_1()
                     .border_color(ThemeColors::BORDER)
                     .child(header_row),
             )
-            .child(body);
+            .child(
+                body.w(px(total_table_width))
+                    .min_w(px(total_table_width)),
+            );
 
         let scroll_handle = window
             .use_keyed_state(
@@ -1598,7 +1610,8 @@ impl RenderOnce for DataGrid {
 
         let table_wrap = div()
             .id("data_grid_table_inner_wrap")
-            .size_auto()
+            .w(px(total_table_width))
+            .min_w(px(total_table_width))
             .min_w_full()
             .min_h_full()
             .flex_none()
@@ -1610,6 +1623,21 @@ impl RenderOnce for DataGrid {
             .overflow_x_scroll()
             .overflow_y_scroll()
             .track_scroll(&scroll_handle)
+            .on_scroll_wheel({
+                let scroll_handle = scroll_handle.clone();
+                move |event, window, _| {
+                    if event.modifiers.shift {
+                        let p_delta = event.delta.pixel_delta(px(24.0));
+                        if p_delta.y != px(0.0) && p_delta.x == px(0.0) {
+                            let curr = scroll_handle.offset();
+                            let max_off = scroll_handle.max_offset();
+                            let new_x = (curr.x + p_delta.y).clamp(-max_off.x, px(0.0));
+                            scroll_handle.set_offset(point(new_x, curr.y));
+                            window.refresh();
+                        }
+                    }
+                }
+            })
             .child(table_wrap);
 
         let table_scroll_view = div()
