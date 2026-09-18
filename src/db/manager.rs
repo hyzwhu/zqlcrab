@@ -54,6 +54,16 @@ impl ConnectionManager {
         }
     }
 
+    /// List all saved connection configuration profiles.
+    pub fn list_configs(&self) -> Vec<ConnectionConfig> {
+        self.load_saved_configs()
+    }
+
+    /// Retrieve a saved configuration profile by ID.
+    pub fn get_config(&self, id: &str) -> Option<ConnectionConfig> {
+        self.load_saved_configs().into_iter().find(|c| c.id == id)
+    }
+
     /// Save or update a connection configuration profile to disk.
     pub fn save_config(&self, config: ConnectionConfig) -> DbResult<()> {
         let mut configs = self.load_saved_configs();

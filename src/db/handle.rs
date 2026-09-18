@@ -20,6 +20,7 @@ pub struct ActiveConnection {
     pub id: String,
     pub config: ConnectionConfig,
     pub adapter: Arc<Mutex<Box<dyn DatabaseAdapter>>>,
+    pub status: Option<ConnectionStatus>,
 }
 
 impl ActiveConnection {
@@ -36,7 +37,28 @@ impl ActiveConnection {
             id,
             config,
             adapter: Arc::new(Mutex::new(boxed_adapter)),
+            status: None,
         }
+    }
+
+    /// Establishes and tests a connection for a given configuration.
+    pub async fn connect_config(config: ConnectionConfig) -> DbResult<Self> {
+        let conn = Self::new(config);
+        conn.adapter.lock().await.connect().await?;
+        let status = conn.adapter.lock().await.test_connection().await.ok();
+        Ok(Self {
+            status,
+            ..conn
+        })
+    }
+
+    /// Tests a configuration without keeping an active handle open.
+    pub async fn test_config(config: &ConnectionConfig) -> DbResult<ConnectionStatus> {
+        let conn = Self::new(config.clone());
+        conn.adapter.lock().await.connect().await?;
+        let status = conn.adapter.lock().await.test_connection().await;
+        let _ = conn.adapter.lock().await.disconnect().await;
+        status
     }
 
     pub async fn connect(&self) -> DbResult<()> {
