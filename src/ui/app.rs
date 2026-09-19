@@ -318,7 +318,7 @@ impl CrabStudioApp {
             grid_page_size: 50,
             grid_filter: String::new(),
             grid_selected_cell: None,
-            grid_inspector_open: true,
+            grid_inspector_open: false,
             grid_modal_open: false,
             grid_json_pretty: true,
             grid_changeset: GridChangeset::new(),
@@ -405,6 +405,7 @@ impl CrabStudioApp {
         self.grid_sort_col = None;
         self.grid_sort_dir = None;
         self.grid_selected_cell = None;
+        self.grid_inspector_open = false;
         self.grid_changeset.clear();
         self.sql_review_modal_open = false;
         self.sql_review_plan = None;
@@ -567,6 +568,7 @@ impl CrabStudioApp {
                         app.console_result = Some(qr.clone());
                         app.table_data = Some(qr);
                         app.grid_selected_cell = None;
+                        app.grid_inspector_open = false;
                         app.console_error = None;
                         app.status_message = Some(format!("Query completed: {rows} rows returned in {dur}ms"));
                     }
