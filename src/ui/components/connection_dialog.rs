@@ -5,7 +5,7 @@ use crate::ui::theme::ThemeColors;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::{h_flex, v_flex};
 use gpui_kit::component::{
-    Icon, Sizable as _,
+    Icon, Side, Sizable as _,
     button::{Button, ButtonVariants as _},
     input::{Input, InputState},
     menu::{DropdownMenu as _, PopupMenuItem},
@@ -288,6 +288,7 @@ impl RenderOnce for ConnectionDialog {
             .label(format!("{}  ·  {}", current_db_type.display_name(), current_db_type.category().display_name()))
             .dropdown_menu_with_anchor(Anchor::BottomLeft, move |mut menu, _window, _cx| {
                 menu = menu
+                    .check_side(Side::Right)
                     .scrollable(true)
                     .max_h(px(380.0))
                     .min_w(px(520.0));
@@ -760,3 +761,64 @@ impl RenderOnce for ConnectionDialog {
             .child(modal)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui_kit::AssetSource as _;
+    use gpui_kit::assets::AllAssets;
+
+    #[test]
+    fn test_all_36_database_icons_exist_in_assets() {
+        let all_types = [
+            DatabaseType::Sqlite,
+            DatabaseType::Mysql,
+            DatabaseType::MariaDB,
+            DatabaseType::TiDB,
+            DatabaseType::OceanBase,
+            DatabaseType::StarRocks,
+            DatabaseType::Doris,
+            DatabaseType::PolarDB,
+            DatabaseType::TDSQL,
+            DatabaseType::SelectDB,
+            DatabaseType::Databend,
+            DatabaseType::GoldenDB,
+            DatabaseType::SingleStore,
+            DatabaseType::ManticoreSearch,
+            DatabaseType::CloudSQLMySQL,
+            DatabaseType::Postgres,
+            DatabaseType::CockroachDB,
+            DatabaseType::TimescaleDB,
+            DatabaseType::Redshift,
+            DatabaseType::YugabyteDB,
+            DatabaseType::OpenGauss,
+            DatabaseType::Kingbase,
+            DatabaseType::GaussDB,
+            DatabaseType::Greenplum,
+            DatabaseType::QuestDB,
+            DatabaseType::Vastbase,
+            DatabaseType::YashanDB,
+            DatabaseType::HighGo,
+            DatabaseType::UXDB,
+            DatabaseType::GBase8c,
+            DatabaseType::EnterpriseDB,
+            DatabaseType::CrateDB,
+            DatabaseType::Materialize,
+            DatabaseType::AlloyDB,
+            DatabaseType::CloudSQLPG,
+            DatabaseType::FujitsuPG,
+        ];
+
+        let assets = AllAssets;
+        for db_type in all_types {
+            let icon = database_icon(db_type);
+            let icon_path = icon.path();
+            let loaded = assets.load(&icon_path).expect("Asset loading should not error");
+            assert!(
+                loaded.is_some(),
+                "Icon for {db_type:?} at path '{icon_path}' must exist in AllAssets"
+            );
+        }
+    }
+}
+

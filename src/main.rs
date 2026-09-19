@@ -16,7 +16,7 @@ fn main() {
     let _tokio_guard = db::tokio_runtime().enter();
 
     gpui_kit::application()
-        .with_assets(gpui_kit::assets::Assets)
+        .with_assets(gpui_kit::assets::AllAssets)
         .run(|cx| {
             gpui_kit::init(cx);
             Theme::change(ThemeMode::Dark, None, cx);
