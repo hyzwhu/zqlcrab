@@ -16,9 +16,6 @@ fn translate_en(key: &'static str) -> &'static str {
         // Activity bar & navigation
         "nav.databases" => "Databases",
         "nav.console" => "Query Console",
-        "nav.ai" => "AI & LLMs",
-        "nav.history" => "Query History",
-        "nav.git" => "Source Control",
         "nav.settings" => "Settings",
 
         // Settings header & general
@@ -33,8 +30,6 @@ fn translate_en(key: &'static str) -> &'static str {
         "tab.editor" => "Editor",
         "tab.query" => "Query",
         "tab.language" => "Language",
-        "tab.llms" => "LLMs",
-        "tab.mcp" => "MCP Bridge",
         "tab.drivers" => "JRE & Drivers",
         "tab.about" => "About",
 
@@ -94,10 +89,6 @@ fn translate_en(key: &'static str) -> &'static str {
         "language.zh_desc" => "完整的中文本地化界面",
 
         // Other tabs
-        "llm.provider" => "AI Model Provider",
-        "llm.desc" => "Configure local or cloud LLM endpoints for natural language SQL assistance",
-        "mcp.status" => "Model Context Protocol (MCP) Bridge",
-        "mcp.desc" => "Standardized interface for Claude Code, Cursor, and agentic workflows",
         "drivers.status" => "Database Drivers & JVM Engine",
         "drivers.desc" => "100% Native Rust Drivers (Zero JVM overhead, bundled SQLite, Tokio-Postgres, Async-MySQL)",
         "about.desc" => "A modern, high-performance database IDE built with Rust & GPUI",
@@ -112,9 +103,6 @@ fn translate_zh(key: &'static str) -> &'static str {
         // Activity bar & navigation
         "nav.databases" => "数据库",
         "nav.console" => "查询控制台",
-        "nav.ai" => "AI 大模型",
-        "nav.history" => "查询历史",
-        "nav.git" => "版本控制",
         "nav.settings" => "设置",
 
         // Settings header & general
@@ -129,8 +117,6 @@ fn translate_zh(key: &'static str) -> &'static str {
         "tab.editor" => "编辑器",
         "tab.query" => "查询",
         "tab.language" => "语言",
-        "tab.llms" => "大模型",
-        "tab.mcp" => "MCP 协议",
         "tab.drivers" => "JRE 与驱动",
         "tab.about" => "关于",
 
@@ -190,10 +176,6 @@ fn translate_zh(key: &'static str) -> &'static str {
         "language.zh_desc" => "完整的中文本地化界面",
 
         // Other tabs
-        "llm.provider" => "AI 模型提供商",
-        "llm.desc" => "配置本地或云端大模型接口，用于自然语言生成 SQL 及优化建议",
-        "mcp.status" => "Model Context Protocol (MCP) 桥接服务",
-        "mcp.desc" => "专为 Claude Code、Cursor 及智能体打造的标准化数据库工具桥接协议",
         "drivers.status" => "数据库原生驱动与引擎",
         "drivers.desc" => "100% 纯 Rust 原生驱动 (零 JVM 内存开销，内置 SQLite、PostgreSQL 及 MySQL 引擎)",
         "about.desc" => "基于 Rust 与 GPUI 打造的高性能现代化桌面数据库客户端",

@@ -17,9 +17,6 @@ pub enum ActivityNav {
     #[default]
     Databases,
     Console,
-    Ai,
-    History,
-    Git,
     Settings,
 }
 
@@ -120,25 +117,6 @@ impl RenderOnce for ActivityBar {
             IconName::Code,
             "nav.console",
         );
-        let ai_item = self.render_nav_item(
-            "act_nav_ai",
-            ActivityNav::Ai,
-            IconName::Bot,
-            "nav.ai",
-        );
-        let history_item = self.render_nav_item(
-            "act_nav_hist",
-            ActivityNav::History,
-            IconName::Clock,
-            "nav.history",
-        );
-        let git_item = self.render_nav_item(
-            "act_nav_git",
-            ActivityNav::Git,
-            IconName::GitBranch,
-            "nav.git",
-        );
-
         let settings_item = self.render_nav_item(
             "act_nav_settings",
             ActivityNav::Settings,
@@ -161,10 +139,7 @@ impl RenderOnce for ActivityBar {
                     .items_center()
                     .gap_1()
                     .child(db_item)
-                    .child(console_item)
-                    .child(ai_item)
-                    .child(history_item)
-                    .child(git_item),
+                    .child(console_item),
             )
             .child(
                 v_flex()
@@ -185,5 +160,6 @@ mod tests {
         assert_eq!(default_nav, ActivityNav::Databases);
         assert!(!default_nav.is_settings());
         assert!(ActivityNav::Settings.is_settings());
+        assert_ne!(ActivityNav::Databases, ActivityNav::Console);
     }
 }

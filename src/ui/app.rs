@@ -2694,6 +2694,7 @@ impl Render for CrabStudioApp {
                             .on_click(move |_, _, cx| {
                                 handle.update(cx, |this, cx| {
                                     this.active_tab = WorkspaceTab::QueryConsole;
+                                    this.active_nav = ActivityNav::Console;
                                     cx.notify();
                                 });
                             })
@@ -2724,6 +2725,7 @@ impl Render for CrabStudioApp {
                             .on_click(move |_, _, cx| {
                                 handle.update(cx, |this, cx| {
                                     this.active_tab = WorkspaceTab::DataGrid;
+                                    this.active_nav = ActivityNav::Databases;
                                     cx.notify();
                                 });
                             })
@@ -2754,6 +2756,7 @@ impl Render for CrabStudioApp {
                             .on_click(move |_, _, cx| {
                                 handle.update(cx, |this, cx| {
                                     this.active_tab = WorkspaceTab::Schema;
+                                    this.active_nav = ActivityNav::Databases;
                                     cx.notify();
                                 });
                             })
@@ -2781,6 +2784,7 @@ impl Render for CrabStudioApp {
                             .on_click(move |_, _, cx| {
                                 handle.update(cx, |this, cx| {
                                     this.active_tab = WorkspaceTab::History;
+                                    this.active_nav = ActivityNav::Databases;
                                     cx.notify();
                                 });
                             })
@@ -3369,25 +3373,24 @@ impl Render for CrabStudioApp {
                         match nav {
                             ActivityNav::Databases => {
                                 this.active_nav = ActivityNav::Databases;
+                                if this.active_tab == WorkspaceTab::QueryConsole && this.selected_table.is_some() {
+                                    this.active_tab = WorkspaceTab::DataGrid;
+                                }
                             }
                             ActivityNav::Console => {
-                                this.active_nav = ActivityNav::Databases;
+                                this.active_nav = ActivityNav::Console;
                                 this.active_tab = WorkspaceTab::QueryConsole;
                             }
-                            ActivityNav::Ai => {
-                                this.active_nav = ActivityNav::Settings;
-                                this.active_settings_tab = SettingsTab::Llms;
-                            }
-                            ActivityNav::History => {
-                                this.active_nav = ActivityNav::Databases;
-                                this.active_tab = WorkspaceTab::History;
-                            }
-                            ActivityNav::Git => {
-                                this.status_message =
-                                    Some("Source Control: Git branch 'master' is up to date".to_string());
-                            }
                             ActivityNav::Settings => {
-                                this.active_nav = ActivityNav::Settings;
+                                if this.active_nav == ActivityNav::Settings {
+                                    this.active_nav = if this.active_tab == WorkspaceTab::QueryConsole {
+                                        ActivityNav::Console
+                                    } else {
+                                        ActivityNav::Databases
+                                    };
+                                } else {
+                                    this.active_nav = ActivityNav::Settings;
+                                }
                             }
                         }
                         cx.notify();

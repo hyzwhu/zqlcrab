@@ -23,8 +23,6 @@ pub enum SettingsTab {
     Editor,
     Query,
     Language,
-    Llms,
-    Mcp,
     Drivers,
     About,
 }
@@ -182,8 +180,6 @@ impl SettingsView {
             (SettingsTab::Editor, "tab.editor", IconName::Code),
             (SettingsTab::Query, "tab.query", IconName::Database),
             (SettingsTab::Language, "tab.language", IconName::Languages),
-            (SettingsTab::Llms, "tab.llms", IconName::Bot),
-            (SettingsTab::Mcp, "tab.mcp", IconName::Network),
             (SettingsTab::Drivers, "tab.drivers", IconName::Cpu),
             (SettingsTab::About, "tab.about", IconName::Info),
         ];
@@ -555,7 +551,7 @@ impl SettingsView {
                                             .items_center()
                                             .justify_center()
                                             .child(
-                                                Icon::new(IconName::Sparkles)
+                                                Icon::new(IconName::Database)
                                                     .size(px(20.0))
                                                     .text_color(ThemeColors::PRIMARY_BORDER),
                                             ),
@@ -1268,32 +1264,6 @@ impl RenderOnce for SettingsView {
             SettingsTab::Editor => self.render_editor_tab().into_any_element(),
             SettingsTab::Query => self.render_query_tab().into_any_element(),
             SettingsTab::Language => self.render_language_tab().into_any_element(),
-            SettingsTab::Llms => self
-                .render_informative_tab(
-                    "llm.provider",
-                    "llm.desc",
-                    IconName::Bot,
-                    vec![
-                        ("Default Provider", "OpenAI / Compatible API"),
-                        ("Model", "gpt-4o / claude-3-5-sonnet"),
-                        ("Local Endpoint", "http://localhost:11434 (Ollama)"),
-                        ("Natural Language SQL", "Supported"),
-                    ],
-                )
-                .into_any_element(),
-            SettingsTab::Mcp => self
-                .render_informative_tab(
-                    "mcp.status",
-                    "mcp.desc",
-                    IconName::Network,
-                    vec![
-                        ("Protocol Version", "2024-11-05"),
-                        ("Transport", "Standard I/O (stdio)"),
-                        ("Registered Tools", "zqlcrab_execute_query, zqlcrab_list_tables, zqlcrab_explain_query"),
-                        ("Client Support", "Claude Code, Claude Desktop, Cursor"),
-                    ],
-                )
-                .into_any_element(),
             SettingsTab::Drivers => self
                 .render_informative_tab(
                     "drivers.status",
