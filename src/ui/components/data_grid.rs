@@ -137,6 +137,7 @@ pub struct DataGrid {
     on_revert_cell: Option<Rc<dyn Fn(usize, usize, &mut Window, &mut App)>>,
     on_toggle_delete_row: Option<Rc<dyn Fn(usize, &mut Window, &mut App)>>,
     on_add_row: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
+    on_duplicate_row: Option<Rc<dyn Fn(GridCellCoord, &mut Window, &mut App)>>,
     on_discard_inserted_row: Option<Rc<dyn Fn(usize, &mut Window, &mut App)>>,
     on_discard_all_changes: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
     on_save_changes: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
@@ -174,6 +175,7 @@ impl DataGrid {
             on_revert_cell: None,
             on_toggle_delete_row: None,
             on_add_row: None,
+            on_duplicate_row: None,
             on_discard_inserted_row: None,
             on_discard_all_changes: None,
             on_save_changes: None,
@@ -263,6 +265,14 @@ impl DataGrid {
         F: Fn(&mut Window, &mut App) + 'static,
     {
         self.on_add_row = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_duplicate_row<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(GridCellCoord, &mut Window, &mut App) + 'static,
+    {
+        self.on_duplicate_row = Some(Rc::new(handler));
         self
     }
 
@@ -763,6 +773,30 @@ impl RenderOnce for DataGrid {
             None
         };
 
+        // Duplicate Selected Row button (uses selected row as template for new insertion)
+        let duplicate_row_btn = if !self.is_read_only {
+            if let Some(coord) = self.selected_cell {
+                let on_dup = self.on_duplicate_row.clone();
+                Some(
+                    Button::new("grid_duplicate_row_btn")
+                        .outline()
+                        .xsmall()
+                        .icon(IconName::Copy)
+                        .label("Duplicate")
+                        .tooltip("Duplicate selected row as new row template (⌘D)")
+                        .when_some(on_dup, move |btn, handler| {
+                            btn.on_click(move |_, window, cx| {
+                                handler(coord, window, cx);
+                            })
+                        }),
+                )
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         // Row delete / restore / discard toggle button in toolbar
         let delete_restore_btn = if !self.is_read_only {
             if let Some(coord) = self.selected_cell {
@@ -936,6 +970,7 @@ impl RenderOnce for DataGrid {
                         )
                     })
                     .children(add_new_row_btn)
+                    .children(duplicate_row_btn)
                     .children(selected_info_pill)
                     .children(delete_restore_btn),
             )
@@ -1775,6 +1810,26 @@ impl RenderOnce for DataGrid {
                             cx.write_to_clipboard(ClipboardItem::new_string(row_tsv_str.clone()));
                         });
 
+                    // Inspector Duplicate row button
+                    let insp_duplicate_row_btn = if !self.is_read_only {
+                        let on_dup = self.on_duplicate_row.clone();
+                        Some(
+                            Button::new("insp_duplicate_row_btn")
+                                .ghost()
+                                .xsmall()
+                                .icon(IconName::Copy)
+                                .label("Duplicate")
+                                .tooltip("Duplicate this row as a new row template (⌘D)")
+                                .when_some(on_dup, move |btn, handler| {
+                                    btn.on_click(move |_, window, cx| {
+                                        handler(coord, window, cx);
+                                    })
+                                }),
+                        )
+                    } else {
+                        None
+                    };
+
                     // Row columns overview list
                     let mut record_fields_list = v_flex().gap_1();
                     for (c_idx, c_name) in result.columns.iter().enumerate() {
@@ -2210,7 +2265,8 @@ impl RenderOnce for DataGrid {
                                                             .items_center()
                                                             .gap_1()
                                                             .child(copy_row_json_btn)
-                                                            .child(copy_row_tsv_btn),
+                                                            .child(copy_row_tsv_btn)
+                                                            .children(insp_duplicate_row_btn),
                                                     ),
                                             )
                                             .child(record_fields_list),
@@ -2574,6 +2630,19 @@ mod tests {
         assert!(is_json_raw);
         assert_eq!(lines_raw, 1);
         assert_eq!(raw, raw_json);
+    }
+
+    #[test]
+    fn test_grid_cell_coord_and_inserted_state() {
+        let coord_existing = GridCellCoord::existing(2, 4);
+        assert!(!coord_existing.is_inserted);
+        assert_eq!(coord_existing.row_idx, 2);
+        assert_eq!(coord_existing.col_idx, 4);
+
+        let coord_inserted = GridCellCoord::inserted(0, 1);
+        assert!(coord_inserted.is_inserted);
+        assert_eq!(coord_inserted.row_idx, 0);
+        assert_eq!(coord_inserted.col_idx, 1);
     }
 }
 

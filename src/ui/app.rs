@@ -37,7 +37,7 @@ use gpui_kit::gpui::{
 };
 use uuid::Uuid;
 
-gpui_kit::actions!(zqlcrab, [RunQuery, CloseDialog, FormatSql, ExplainQuery, SaveGridChanges, DeleteGridRow, AddNewRow]);
+gpui_kit::actions!(zqlcrab, [RunQuery, CloseDialog, FormatSql, ExplainQuery, SaveGridChanges, DeleteGridRow, AddNewRow, DuplicateGridRow]);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkspaceTab {
@@ -50,6 +50,17 @@ pub enum WorkspaceTab {
 fn parse_edited_query_value(new_text: &str, orig_val: &QueryValue, col_type: &str) -> QueryValue {
     let trimmed = new_text.trim();
     if trimmed.eq_ignore_ascii_case("null") {
+        return QueryValue::Null;
+    }
+    if trimmed.eq_ignore_ascii_case("<auto>") {
+        return QueryValue::String("<auto>".to_string());
+    }
+    if trimmed.eq_ignore_ascii_case("<default>") {
+        return QueryValue::String("<default>".to_string());
+    }
+
+    let type_lower = col_type.to_lowercase();
+    if trimmed.is_empty() && !type_lower.contains("char") && !type_lower.contains("text") {
         return QueryValue::Null;
     }
 
@@ -746,7 +757,30 @@ impl CrabStudioApp {
             1
         };
 
+        // If a row is currently selected, borrow template values for NOT NULL columns without default
+        let selected_row_vals: Option<Vec<QueryValue>> = if let Some(coord) = self.grid_selected_cell {
+            if coord.is_inserted {
+                self.grid_changeset.inserted_rows.get(coord.row_idx).map(|r| r.values.clone())
+            } else if let Some(r) = res {
+                r.rows.get(coord.row_idx).map(|row| {
+                    (0..col_count)
+                        .map(|c_idx| {
+                            let orig = row.get(c_idx).unwrap_or(&QueryValue::Null);
+                            self.grid_changeset.get_effective_cell_value(coord.row_idx, c_idx, orig).clone()
+                        })
+                        .collect()
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let mut default_values = Vec::with_capacity(col_count);
+        let mut first_editable_col = 0;
+        let mut found_editable = false;
+
         for i in 0..col_count {
             let col_name = res
                 .and_then(|r| r.columns.get(i))
@@ -767,20 +801,34 @@ impl CrabStudioApp {
 
             if is_auto {
                 default_values.push(QueryValue::String("<auto>".to_string()));
-            } else if let Some(def) = col_meta.and_then(|c| c.default_value.as_ref()) {
-                default_values.push(QueryValue::String(def.clone()));
             } else {
-                default_values.push(QueryValue::Null);
+                if !found_editable {
+                    first_editable_col = i;
+                    found_editable = true;
+                }
+                if let Some(def) = col_meta.and_then(|c| c.default_value.as_ref()) {
+                    default_values.push(QueryValue::String(def.clone()));
+                } else if let Some(ref sel_vals) = selected_row_vals {
+                    if let Some(v) = sel_vals.get(i) {
+                        default_values.push(v.clone());
+                    } else if col_meta.is_some_and(|c| !c.is_nullable) {
+                        default_values.push(QueryValue::String("0".to_string()));
+                    } else {
+                        default_values.push(QueryValue::Null);
+                    }
+                } else {
+                    default_values.push(QueryValue::Null);
+                }
             }
         }
 
         let insert_idx = self.grid_changeset.inserted_rows.len();
         self.grid_changeset.add_inserted_row(default_values);
-        let new_coord = GridCellCoord::inserted(insert_idx, 0);
+        let new_coord = GridCellCoord::inserted(insert_idx, first_editable_col);
         self.grid_selected_cell = Some(new_coord);
         self.grid_inspector_open = true;
 
-        let cur_val = self.grid_changeset.get_inserted_cell_value(insert_idx, 0);
+        let cur_val = self.grid_changeset.get_inserted_cell_value(insert_idx, first_editable_col);
         let display_str = cur_val.map(|v| if v.is_null() { String::new() } else { v.to_display_string() }).unwrap_or_default();
         self.grid_cell_edit_input.update(cx, |inp, cx| {
             inp.set_value(&display_str, window, cx);
@@ -789,6 +837,85 @@ impl CrabStudioApp {
         let (updates, deletes, inserts) = self.grid_changeset.change_summary();
         self.status_message = Some(format!(
             "Added new row #{}. Staged: {inserts} new row(s), {updates} update(s), {deletes} deletion(s)",
+            insert_idx + 1
+        ));
+        cx.notify();
+    }
+
+    /// Duplicate a selected grid row as an uncommitted inserted row template
+    pub fn duplicate_grid_row(&mut self, coord: GridCellCoord, window: &mut Window, cx: &mut Context<Self>) {
+        if self.active_connection.as_ref().is_some_and(|c| c.config.is_read_only) {
+            self.status_message = Some("Cannot duplicate row: Connection is in read-only mode".to_string());
+            cx.notify();
+            return;
+        }
+
+        let res = self.table_data.as_ref().or(self.console_result.as_ref());
+        let Some(res) = res else { return; };
+
+        let orig_values: Vec<QueryValue> = if coord.is_inserted {
+            if let Some(ins) = self.grid_changeset.inserted_rows.get(coord.row_idx) {
+                ins.values.clone()
+            } else {
+                return;
+            }
+        } else {
+            let Some(row) = res.rows.get(coord.row_idx) else { return; };
+            let mut vals = Vec::with_capacity(row.len());
+            for (col_idx, orig_val) in row.iter().enumerate() {
+                let eff = self.grid_changeset.get_effective_cell_value(coord.row_idx, col_idx, orig_val);
+                vals.push(eff.clone());
+            }
+            vals
+        };
+
+        // Prepare values for duplicate insertion, resetting auto-increment / serial primary key columns
+        let mut new_row_values = orig_values;
+        let mut first_editable_col = 0;
+        let mut found_editable = false;
+
+        for (col_idx, val) in new_row_values.iter_mut().enumerate() {
+            let col_name = res
+                .columns
+                .get(col_idx)
+                .cloned()
+                .or_else(|| self.schema_columns.get(col_idx).map(|c| c.name.clone()))
+                .unwrap_or_default();
+
+            let col_meta = self
+                .schema_columns
+                .iter()
+                .find(|c| c.name.eq_ignore_ascii_case(&col_name));
+
+            let is_auto = col_meta.map(|c| {
+                c.is_auto_increment
+                    || c.data_type.to_lowercase().contains("serial")
+                    || (c.is_primary_key && (c.data_type.to_lowercase().contains("int") || self.active_connection.as_ref().map(|conn| conn.config.db_type == DatabaseType::Sqlite).unwrap_or(false)))
+            }).unwrap_or(false);
+
+            if is_auto {
+                *val = QueryValue::String("<auto>".to_string());
+            } else if !found_editable {
+                first_editable_col = col_idx;
+                found_editable = true;
+            }
+        }
+
+        let insert_idx = self.grid_changeset.inserted_rows.len();
+        self.grid_changeset.add_inserted_row(new_row_values);
+        let new_coord = GridCellCoord::inserted(insert_idx, first_editable_col);
+        self.grid_selected_cell = Some(new_coord);
+        self.grid_inspector_open = true;
+
+        let cur_val = self.grid_changeset.get_inserted_cell_value(insert_idx, first_editable_col);
+        let display_str = cur_val.map(|v| if v.is_null() { String::new() } else { v.to_display_string() }).unwrap_or_default();
+        self.grid_cell_edit_input.update(cx, |inp, cx| {
+            inp.set_value(&display_str, window, cx);
+        });
+
+        let (updates, deletes, inserts) = self.grid_changeset.change_summary();
+        self.status_message = Some(format!(
+            "Duplicated row as new row #{}. Staged: {inserts} new row(s), {updates} update(s), {deletes} deletion(s)",
             insert_idx + 1
         ));
         cx.notify();
@@ -1083,12 +1210,24 @@ impl CrabStudioApp {
         let inserts_count = plan.inserts_count;
         let updates_count = plan.updates_count;
         let deletes_count = plan.deletes_count;
+        let reload_sql = if self.active_tab == WorkspaceTab::QueryConsole {
+            let s = self.query_editor.read(cx).value().trim().to_string();
+            if !s.is_empty() {
+                Some(s)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
         cx.spawn(async move |this, cx: &mut AsyncApp| {
             let res = conn.execute_batch(&full_script).await;
             match res {
                 Ok(_) => {
-                    let query_sql = if let Some(ref tbl) = table_name {
+                    let query_sql = if let Some(ref s) = reload_sql {
+                        s.clone()
+                    } else if let Some(ref tbl) = table_name {
                         let family = conn.config.db_type.family();
                         let qualified = crate::db::types::TableInfo {
                             name: tbl.clone(),
@@ -1110,9 +1249,7 @@ impl CrabStudioApp {
                         app.grid_changeset.clear();
                         if let Some(qr) = reloaded {
                             app.table_data = Some(qr.clone());
-                            if app.active_tab == WorkspaceTab::QueryConsole {
-                                app.console_result = Some(qr);
-                            }
+                            app.console_result = Some(qr);
                         }
                         app.status_message = Some(format!(
                             "Successfully applied {inserts_count} insertion(s), {updates_count} update(s), and {deletes_count} deletion(s)"
@@ -1671,6 +1808,245 @@ impl CrabStudioApp {
             cx.notify();
         }
     }
+
+    /// Helper to construct a fully-interactive DataGrid bound to the application state
+    pub fn build_data_grid(
+        &self,
+        app_handle: &Entity<Self>,
+        grid_data: Option<QueryResult>,
+        table_name: Option<String>,
+        is_read_only: bool,
+    ) -> DataGrid {
+        let on_sort = {
+            let handle = app_handle.clone();
+            move |col: usize, _: &mut Window, cx: &mut App| {
+                handle.update(cx, |this, cx| {
+                    if this.grid_sort_col == Some(col) {
+                        this.grid_sort_dir = match this.grid_sort_dir {
+                            None => Some(SortDirection::Ascending),
+                            Some(SortDirection::Ascending) => Some(SortDirection::Descending),
+                            Some(SortDirection::Descending) => None,
+                        };
+                        if this.grid_sort_dir.is_none() {
+                            this.grid_sort_col = None;
+                        }
+                    } else {
+                        this.grid_sort_col = Some(col);
+                        this.grid_sort_dir = Some(SortDirection::Ascending);
+                    }
+                    cx.notify();
+                });
+            }
+        };
+
+        let on_page = {
+            let handle = app_handle.clone();
+            move |page: usize, _: &mut Window, cx: &mut App| {
+                handle.update(cx, |this, cx| {
+                    this.grid_page = page;
+                    cx.notify();
+                });
+            }
+        };
+
+        let on_export = {
+            let handle = app_handle.clone();
+            move |format: ExportFormat, _: &mut Window, cx: &mut App| {
+                handle.update(cx, |this, cx| {
+                    this.export_grid_data(format, cx);
+                });
+            }
+        };
+
+        let on_select_cell = {
+            let handle = app_handle.clone();
+            move |coord: GridCellCoord, window: &mut Window, cx: &mut App| {
+                handle.update(cx, |this, cx| {
+                    this.select_grid_cell(coord, window, cx);
+                });
+            }
+        };
+
+        let on_add_row = {
+            let handle = app_handle.clone();
+            move |window: &mut Window, cx: &mut App| {
+                handle.update(cx, |this, cx| {
+                    this.add_new_grid_row(window, cx);
+                });
+            }
+        };
+
+        let on_duplicate_row = {
+            let handle = app_handle.clone();
+            move |coord: GridCellCoord, window: &mut Window, cx: &mut App| {
+                handle.update(cx, |this, cx| {
+                    this.duplicate_grid_row(coord, window, cx);
+                });
+            }
+        };
+
+        let on_discard_inserted_row = {
+            let handle = app_handle.clone();
+            move |insert_idx: usize, _: &mut Window, cx: &mut App| {
+                handle.update(cx, |this, cx| {
+                    this.discard_inserted_row(insert_idx, cx);
+                });
+            }
+        };
+
+        let on_toggle_inspector = {
+            let handle = app_handle.clone();
+            move |open: bool, _: &mut Window, cx: &mut App| {
+                handle.update(cx, |this, cx| {
+                    this.grid_inspector_open = open;
+                    cx.notify();
+                });
+            }
+        };
+
+        let on_toggle_modal = {
+            let handle = app_handle.clone();
+            move |open: bool, _: &mut Window, cx: &mut App| {
+                handle.update(cx, |this, cx| {
+                    this.grid_modal_open = open;
+                    cx.notify();
+                });
+            }
+        };
+
+        let on_toggle_pretty = {
+            let handle = app_handle.clone();
+            move |pretty: bool, _: &mut Window, cx: &mut App| {
+                handle.update(cx, |this, cx| {
+                    this.grid_json_pretty = pretty;
+                    cx.notify();
+                });
+            }
+        };
+
+        let on_copy_val = {
+            let handle = app_handle.clone();
+            move |col_name: String, val: String, _: &mut Window, cx: &mut App| {
+                handle.update(cx, |this, cx| {
+                    let len = val.len();
+                    cx.write_to_clipboard(ClipboardItem::new_string(val));
+                    this.status_message = Some(format!("Copied value of column '{col_name}' ({len} chars)"));
+                    cx.notify();
+                });
+            }
+        };
+
+        let on_copy_row_json = {
+            let handle = app_handle.clone();
+            move |row_idx: usize, json_str: String, _: &mut Window, cx: &mut App| {
+                handle.update(cx, |this, cx| {
+                    let len = json_str.len();
+                    cx.write_to_clipboard(ClipboardItem::new_string(json_str));
+                    this.status_message = Some(format!("Copied row #{} as JSON ({len} bytes)", row_idx + 1));
+                    cx.notify();
+                });
+            }
+        };
+
+        let on_copy_row_tsv = {
+            let handle = app_handle.clone();
+            move |row_idx: usize, tsv_str: String, _: &mut Window, cx: &mut App| {
+                handle.update(cx, |this, cx| {
+                    let len = tsv_str.len();
+                    cx.write_to_clipboard(ClipboardItem::new_string(tsv_str));
+                    this.status_message = Some(format!("Copied row #{} as TSV ({len} bytes)", row_idx + 1));
+                    cx.notify();
+                });
+            }
+        };
+
+        let on_apply_cell_edit = {
+            let handle = app_handle.clone();
+            move |window: &mut Window, cx: &mut App| {
+                handle.update(cx, |this, cx| {
+                    this.apply_grid_cell_edit(window, cx);
+                });
+            }
+        };
+
+        let on_set_cell_null = {
+            let handle = app_handle.clone();
+            move |window: &mut Window, cx: &mut App| {
+                handle.update(cx, |this, cx| {
+                    this.set_grid_cell_null(window, cx);
+                });
+            }
+        };
+
+        let on_revert_cell = {
+            let handle = app_handle.clone();
+            move |row_idx: usize, col_idx: usize, window: &mut Window, cx: &mut App| {
+                handle.update(cx, |this, cx| {
+                    this.revert_grid_cell(row_idx, col_idx, window, cx);
+                });
+            }
+        };
+
+        let on_toggle_del_row = {
+            let handle = app_handle.clone();
+            move |row_idx: usize, _: &mut Window, cx: &mut App| {
+                handle.update(cx, |this, cx| {
+                    this.toggle_delete_grid_row(row_idx, cx);
+                });
+            }
+        };
+
+        let on_discard_all = {
+            let handle = app_handle.clone();
+            move |window: &mut Window, cx: &mut App| {
+                handle.update(cx, |this, cx| {
+                    this.discard_all_grid_changes(window, cx);
+                });
+            }
+        };
+
+        let on_save_changes = {
+            let handle = app_handle.clone();
+            move |_: &mut Window, cx: &mut App| {
+                handle.update(cx, |this, cx| {
+                    this.open_sql_review_modal(cx);
+                });
+            }
+        };
+
+        DataGrid::new(grid_data)
+            .table_name(table_name)
+            .page_size(self.grid_page_size)
+            .current_page(self.grid_page)
+            .sort(self.grid_sort_col, self.grid_sort_dir)
+            .filter_keyword(self.grid_filter.clone())
+            .selected_cell(self.grid_selected_cell)
+            .inspector_open(self.grid_inspector_open)
+            .modal_open(self.grid_modal_open)
+            .json_pretty(self.grid_json_pretty)
+            .changeset(self.grid_changeset.clone())
+            .read_only(is_read_only)
+            .cell_edit_input(Some(self.grid_cell_edit_input.clone()))
+            .on_sort(on_sort)
+            .on_page_change(on_page)
+            .on_export(on_export)
+            .on_select_cell(on_select_cell)
+            .on_toggle_inspector(on_toggle_inspector)
+            .on_toggle_modal(on_toggle_modal)
+            .on_toggle_json_pretty(on_toggle_pretty)
+            .on_copy_value(on_copy_val)
+            .on_copy_row_json(on_copy_row_json)
+            .on_copy_row_tsv(on_copy_row_tsv)
+            .on_apply_cell_edit(on_apply_cell_edit)
+            .on_set_cell_null(on_set_cell_null)
+            .on_revert_cell(on_revert_cell)
+            .on_toggle_delete_row(on_toggle_del_row)
+            .on_add_row(on_add_row)
+            .on_duplicate_row(on_duplicate_row)
+            .on_discard_inserted_row(on_discard_inserted_row)
+            .on_discard_all_changes(on_discard_all)
+            .on_save_changes(on_save_changes)
+    }
 }
 
 impl Render for CrabStudioApp {
@@ -2030,6 +2406,13 @@ impl Render for CrabStudioApp {
                     _ => None,
                 };
 
+                let console_grid = self.build_data_grid(
+                    &app_handle,
+                    self.console_result.clone(),
+                    self.selected_table.clone(),
+                    is_read_only,
+                );
+
                 let console = QueryConsole::new(&self.query_editor, &self.console_split)
                     .result(self.console_result.clone())
                     .error(self.console_error.clone())
@@ -2040,6 +2423,7 @@ impl Render for CrabStudioApp {
                     .bottom_tab(self.console_bottom_tab)
                     .explain_view(self.explain_view)
                     .connection_label(connection_label)
+                    .results_view(console_grid)
                     .on_run(on_run)
                     .on_clear(on_clear)
                     .on_format(on_format)
@@ -2126,228 +2510,14 @@ impl Render for CrabStudioApp {
                     .into_any_element()
             }
             WorkspaceTab::DataGrid => {
-                let on_sort = {
-                    let handle = app_handle.clone();
-                    move |col: usize, _: &mut Window, cx: &mut App| {
-                        handle.update(cx, |this, cx| {
-                            if this.grid_sort_col == Some(col) {
-                                this.grid_sort_dir = match this.grid_sort_dir {
-                                    None => Some(SortDirection::Ascending),
-                                    Some(SortDirection::Ascending) => Some(SortDirection::Descending),
-                                    Some(SortDirection::Descending) => None,
-                                };
-                                if this.grid_sort_dir.is_none() {
-                                    this.grid_sort_col = None;
-                                }
-                            } else {
-                                this.grid_sort_col = Some(col);
-                                this.grid_sort_dir = Some(SortDirection::Ascending);
-                            }
-                            cx.notify();
-                        });
-                    }
-                };
-
-                let on_page = {
-                    let handle = app_handle.clone();
-                    move |page: usize, _: &mut Window, cx: &mut App| {
-                        handle.update(cx, |this, cx| {
-                            this.grid_page = page;
-                            cx.notify();
-                        });
-                    }
-                };
-
-                let on_export = {
-                    let handle = app_handle.clone();
-                    move |format: ExportFormat, _: &mut Window, cx: &mut App| {
-                        handle.update(cx, |this, cx| {
-                            this.export_grid_data(format, cx);
-                        });
-                    }
-                };
-
-                let on_select_cell = {
-                    let handle = app_handle.clone();
-                    move |coord: GridCellCoord, window: &mut Window, cx: &mut App| {
-                        handle.update(cx, |this, cx| {
-                            this.select_grid_cell(coord, window, cx);
-                        });
-                    }
-                };
-
-                let on_add_row = {
-                    let handle = app_handle.clone();
-                    move |window: &mut Window, cx: &mut App| {
-                        handle.update(cx, |this, cx| {
-                            this.add_new_grid_row(window, cx);
-                        });
-                    }
-                };
-
-                let on_discard_inserted_row = {
-                    let handle = app_handle.clone();
-                    move |insert_idx: usize, _: &mut Window, cx: &mut App| {
-                        handle.update(cx, |this, cx| {
-                            this.discard_inserted_row(insert_idx, cx);
-                        });
-                    }
-                };
-
-                let on_toggle_inspector = {
-                    let handle = app_handle.clone();
-                    move |open: bool, _: &mut Window, cx: &mut App| {
-                        handle.update(cx, |this, cx| {
-                            this.grid_inspector_open = open;
-                            cx.notify();
-                        });
-                    }
-                };
-
-                let on_toggle_modal = {
-                    let handle = app_handle.clone();
-                    move |open: bool, _: &mut Window, cx: &mut App| {
-                        handle.update(cx, |this, cx| {
-                            this.grid_modal_open = open;
-                            cx.notify();
-                        });
-                    }
-                };
-
-                let on_toggle_pretty = {
-                    let handle = app_handle.clone();
-                    move |pretty: bool, _: &mut Window, cx: &mut App| {
-                        handle.update(cx, |this, cx| {
-                            this.grid_json_pretty = pretty;
-                            cx.notify();
-                        });
-                    }
-                };
-
-                let on_copy_val = {
-                    let handle = app_handle.clone();
-                    move |col_name: String, val: String, _: &mut Window, cx: &mut App| {
-                        handle.update(cx, |this, cx| {
-                            let len = val.len();
-                            cx.write_to_clipboard(ClipboardItem::new_string(val));
-                            this.status_message = Some(format!("Copied value of column '{col_name}' ({len} chars)"));
-                            cx.notify();
-                        });
-                    }
-                };
-
-                let on_copy_row_json = {
-                    let handle = app_handle.clone();
-                    move |row_idx: usize, json_str: String, _: &mut Window, cx: &mut App| {
-                        handle.update(cx, |this, cx| {
-                            let len = json_str.len();
-                            cx.write_to_clipboard(ClipboardItem::new_string(json_str));
-                            this.status_message = Some(format!("Copied row #{} as JSON ({len} bytes)", row_idx + 1));
-                            cx.notify();
-                        });
-                    }
-                };
-
-                let on_copy_row_tsv = {
-                    let handle = app_handle.clone();
-                    move |row_idx: usize, tsv_str: String, _: &mut Window, cx: &mut App| {
-                        handle.update(cx, |this, cx| {
-                            let len = tsv_str.len();
-                            cx.write_to_clipboard(ClipboardItem::new_string(tsv_str));
-                            this.status_message = Some(format!("Copied row #{} as TSV ({len} bytes)", row_idx + 1));
-                            cx.notify();
-                        });
-                    }
-                };
-
-                let on_apply_cell_edit = {
-                    let handle = app_handle.clone();
-                    move |window: &mut Window, cx: &mut App| {
-                        handle.update(cx, |this, cx| {
-                            this.apply_grid_cell_edit(window, cx);
-                        });
-                    }
-                };
-
-                let on_set_cell_null = {
-                    let handle = app_handle.clone();
-                    move |window: &mut Window, cx: &mut App| {
-                        handle.update(cx, |this, cx| {
-                            this.set_grid_cell_null(window, cx);
-                        });
-                    }
-                };
-
-                let on_revert_cell = {
-                    let handle = app_handle.clone();
-                    move |row_idx: usize, col_idx: usize, window: &mut Window, cx: &mut App| {
-                        handle.update(cx, |this, cx| {
-                            this.revert_grid_cell(row_idx, col_idx, window, cx);
-                        });
-                    }
-                };
-
-                let on_toggle_del_row = {
-                    let handle = app_handle.clone();
-                    move |row_idx: usize, _: &mut Window, cx: &mut App| {
-                        handle.update(cx, |this, cx| {
-                            this.toggle_delete_grid_row(row_idx, cx);
-                        });
-                    }
-                };
-
-                let on_discard_all = {
-                    let handle = app_handle.clone();
-                    move |window: &mut Window, cx: &mut App| {
-                        handle.update(cx, |this, cx| {
-                            this.discard_all_grid_changes(window, cx);
-                        });
-                    }
-                };
-
-                let on_save_changes = {
-                    let handle = app_handle.clone();
-                    move |_: &mut Window, cx: &mut App| {
-                        handle.update(cx, |this, cx| {
-                            this.open_sql_review_modal(cx);
-                        });
-                    }
-                };
-
                 let grid_data = self.table_data.clone().or_else(|| self.console_result.clone());
-
-                DataGrid::new(grid_data)
-                    .table_name(self.selected_table.clone())
-                    .page_size(self.grid_page_size)
-                    .current_page(self.grid_page)
-                    .sort(self.grid_sort_col, self.grid_sort_dir)
-                    .filter_keyword(self.grid_filter.clone())
-                    .selected_cell(self.grid_selected_cell)
-                    .inspector_open(self.grid_inspector_open)
-                    .modal_open(self.grid_modal_open)
-                    .json_pretty(self.grid_json_pretty)
-                    .changeset(self.grid_changeset.clone())
-                    .read_only(is_read_only)
-                    .cell_edit_input(Some(self.grid_cell_edit_input.clone()))
-                    .on_sort(on_sort)
-                    .on_page_change(on_page)
-                    .on_export(on_export)
-                    .on_select_cell(on_select_cell)
-                    .on_toggle_inspector(on_toggle_inspector)
-                    .on_toggle_modal(on_toggle_modal)
-                    .on_toggle_json_pretty(on_toggle_pretty)
-                    .on_copy_value(on_copy_val)
-                    .on_copy_row_json(on_copy_row_json)
-                    .on_copy_row_tsv(on_copy_row_tsv)
-                    .on_apply_cell_edit(on_apply_cell_edit)
-                    .on_set_cell_null(on_set_cell_null)
-                    .on_revert_cell(on_revert_cell)
-                    .on_toggle_delete_row(on_toggle_del_row)
-                    .on_add_row(on_add_row)
-                    .on_discard_inserted_row(on_discard_inserted_row)
-                    .on_discard_all_changes(on_discard_all)
-                    .on_save_changes(on_save_changes)
-                    .into_any_element()
+                self.build_data_grid(
+                    &app_handle,
+                    grid_data,
+                    self.selected_table.clone(),
+                    is_read_only,
+                )
+                .into_any_element()
             }
             WorkspaceTab::Schema => {
                 let on_quick = {
@@ -2704,17 +2874,24 @@ impl Render for CrabStudioApp {
                 this.run_explain(cx);
             }))
             .on_action(cx.listener(|this, _: &SaveGridChanges, _, cx| {
-                if this.active_tab == WorkspaceTab::DataGrid && this.grid_changeset.is_dirty() {
+                if (this.active_tab == WorkspaceTab::DataGrid || this.active_tab == WorkspaceTab::QueryConsole) && this.grid_changeset.is_dirty() {
                     this.open_sql_review_modal(cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &AddNewRow, window, cx| {
-                if this.active_tab == WorkspaceTab::DataGrid {
+                if this.active_tab == WorkspaceTab::DataGrid || this.active_tab == WorkspaceTab::QueryConsole {
                     this.add_new_grid_row(window, cx);
                 }
             }))
+            .on_action(cx.listener(|this, _: &DuplicateGridRow, window, cx| {
+                if this.active_tab == WorkspaceTab::DataGrid || this.active_tab == WorkspaceTab::QueryConsole {
+                    if let Some(coord) = this.grid_selected_cell {
+                        this.duplicate_grid_row(coord, window, cx);
+                    }
+                }
+            }))
             .on_action(cx.listener(|this, _: &DeleteGridRow, _, cx| {
-                if this.active_tab == WorkspaceTab::DataGrid {
+                if this.active_tab == WorkspaceTab::DataGrid || this.active_tab == WorkspaceTab::QueryConsole {
                     if let Some(coord) = this.grid_selected_cell {
                         if coord.is_inserted {
                             this.discard_inserted_row(coord.row_idx, cx);

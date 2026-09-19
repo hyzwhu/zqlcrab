@@ -15,7 +15,7 @@ use gpui_kit::component::{
     tab::{Tab, TabBar},
 };
 use gpui_kit::gpui::{
-    App, Entity, IntoElement, ParentElement, RenderOnce, Styled, Window, div,
+    AnyElement, App, Entity, IntoElement, ParentElement, RenderOnce, Styled, Window, div,
     prelude::FluentBuilder as _, px,
 };
 use std::rc::Rc;
@@ -40,6 +40,7 @@ pub struct QueryConsole {
     bottom_tab: ConsoleBottomTab,
     explain_view: ExplainViewMode,
     connection_label: Option<String>,
+    results_view: Option<AnyElement>,
     on_run: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_clear: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_format: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
@@ -62,6 +63,7 @@ impl QueryConsole {
             bottom_tab: ConsoleBottomTab::Results,
             explain_view: ExplainViewMode::Tree,
             connection_label: None,
+            results_view: None,
             on_run: None,
             on_clear: None,
             on_format: None,
@@ -113,6 +115,11 @@ impl QueryConsole {
 
     pub fn connection_label(mut self, label: Option<String>) -> Self {
         self.connection_label = label;
+        self
+    }
+
+    pub fn results_view(mut self, view: impl IntoElement) -> Self {
+        self.results_view = Some(view.into_any_element());
         self
     }
 
@@ -351,7 +358,13 @@ impl RenderOnce for QueryConsole {
             });
 
         let bottom_body = match self.bottom_tab {
-            ConsoleBottomTab::Results => DataGrid::new(self.query_result).into_any_element(),
+            ConsoleBottomTab::Results => {
+                if let Some(view) = self.results_view {
+                    view
+                } else {
+                    DataGrid::new(self.query_result).into_any_element()
+                }
+            }
             ConsoleBottomTab::Explain => ExplainPanel::new(self.explain_plan)
                 .error(self.explain_error)
                 .executing(self.is_explaining)

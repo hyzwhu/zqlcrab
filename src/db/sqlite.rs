@@ -613,5 +613,63 @@ mod tests {
         assert_eq!(reloaded.rows[1][1], QueryValue::String("Bob".into()));
         assert_eq!(reloaded.rows[1][2], QueryValue::String("bob@example.com".into()));
     }
+
+    #[tokio::test]
+    async fn test_sqlite_batch_execution_with_duplicated_row_template() {
+        let config = ConnectionConfig::sqlite("test_duplicate_row", ":memory:");
+        let mut adapter = SqliteAdapter::new(config);
+        adapter.connect().await.expect("connect should succeed");
+
+        adapter
+            .execute_query("CREATE TABLE complex_products (id INTEGER PRIMARY KEY AUTOINCREMENT, sku TEXT NOT NULL, name TEXT NOT NULL, price REAL NOT NULL);")
+            .await
+            .expect("create complex_products");
+
+        adapter
+            .execute_query("INSERT INTO complex_products (sku, name, price) VALUES ('SKU-1001', 'Widget Pro', 49.99);")
+            .await
+            .expect("insert initial product");
+
+        let initial = adapter
+            .execute_query("SELECT id, sku, name, price FROM complex_products;")
+            .await
+            .expect("query initial product");
+        let cols = adapter.list_columns(None, None, "complex_products").await.expect("list columns");
+
+        let mut cs = crate::db::changeset::GridChangeset::new();
+        // Duplicate row 0: ID reset to <auto>, other NOT NULL columns cloned and SKU tweaked
+        cs.add_inserted_row(vec![
+            QueryValue::String("<auto>".into()),
+            QueryValue::String("SKU-1002".into()),
+            initial.rows[0][2].clone(), // 'Widget Pro'
+            initial.rows[0][3].clone(), // 49.99
+        ]);
+
+        let plan = crate::db::sql_gen::generate_review_plan(
+            "complex_products",
+            None,
+            crate::db::types::DatabaseFamily::Sqlite,
+            &cols,
+            &initial.columns,
+            &initial.rows,
+            &cs,
+        );
+
+        assert_eq!(plan.inserts_count, 1);
+        // <auto> ID column was omitted from INSERT
+        assert!(plan.full_script.contains("INSERT INTO \"complex_products\" (\"sku\", \"name\", \"price\") VALUES ('SKU-1002', 'Widget Pro', 49.99);"));
+
+        adapter.execute_batch(&plan.full_script).await.expect("execute_batch should succeed");
+
+        let reloaded = adapter
+            .execute_query("SELECT id, sku, name, price FROM complex_products ORDER BY id ASC;")
+            .await
+            .expect("query after duplicate");
+        assert_eq!(reloaded.rows.len(), 2);
+        assert_eq!(reloaded.rows[0][0], QueryValue::Int(1));
+        assert_eq!(reloaded.rows[1][0], QueryValue::Int(2));
+        assert_eq!(reloaded.rows[1][1], QueryValue::String("SKU-1002".into()));
+        assert_eq!(reloaded.rows[1][2], QueryValue::String("Widget Pro".into()));
+    }
 }
 
