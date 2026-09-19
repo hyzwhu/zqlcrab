@@ -6,7 +6,7 @@ use crate::db::export::{ExportFormat, ExportOptions, export_result};
 use crate::db::handle::ActiveConnection;
 use crate::db::history::{QueryHistoryItem, QueryHistoryManager, QueryHistoryStatus};
 use crate::db::manager::ConnectionManager;
-use crate::db::sql_format::format_sql;
+use crate::db::sql_format::format_sql_with_indent;
 use crate::db::sql_gen::{
     ColumnDef, CreateTableDef, SqlReviewPlan, TableIndexDef, TableIndexType,
     column_matches_index_spec, extract_table_from_sql, generate_create_table_sql,
@@ -24,6 +24,7 @@ use crate::ui::components::{
     create_table_modal::{CreateTableColumnState, CreateTableIndexState, CreateTableModal},
     data_grid::GridCellCoord,
 };
+use crate::ui::i18n::t;
 use crate::ui::theme::ThemeColors;
 use chrono::Utc;
 use gpui_kit::assets::IconName;
@@ -37,7 +38,6 @@ use gpui_kit::component::{
 use gpui_kit::gpui::{
     App, AsyncApp, ClipboardItem, Context, ElementId, Entity, FontWeight, IntoElement,
     ParentElement, Render, ScrollHandle, Styled, Window, div, point, prelude::*, px,
-    transparent_black,
 };
 use uuid::Uuid;
 
@@ -221,6 +221,9 @@ impl CrabStudioApp {
         manager.ensure_default_presets();
         let saved = manager.list_configs();
         let settings_manager = SettingsManager::new();
+        crate::ui::theme::set_active_theme_mode(
+            settings_manager.settings().appearance.theme == ThemePreference::Light,
+        );
 
         let handle = cx.entity().clone();
         let first_conn_id = saved
@@ -308,7 +311,8 @@ impl CrabStudioApp {
             },
         ];
 
-        let history_manager = QueryHistoryManager::new();
+        let mut history_manager = QueryHistoryManager::new();
+        history_manager.set_max_entries(settings_manager.settings().query.history_limit);
 
         Self {
             manager,
@@ -451,10 +455,11 @@ impl CrabStudioApp {
         };
         let family = conn.config.db_type.family();
         let qualified = table.qualified_name(family);
+        let default_limit = self.settings_manager.settings().query.default_limit;
 
         cx.spawn(async move |this, cx: &mut AsyncApp| {
             let data_res = conn
-                .execute_query(&format!("SELECT * FROM {qualified} LIMIT 100"))
+                .execute_query(&format!("SELECT * FROM {qualified} LIMIT {default_limit}"))
                 .await;
             let cols = conn
                 .list_columns(None, schema.as_deref(), &tbl)
@@ -541,7 +546,7 @@ impl CrabStudioApp {
 
         // Format SQL before execution if configured
         if settings.editor.format_on_run {
-            let formatted = format_sql(&sql);
+            let formatted = format_sql_with_indent(&sql, settings.editor.tab_size);
             if formatted != sql {
                 sql = formatted;
             }
@@ -627,10 +632,21 @@ impl CrabStudioApp {
         cx.notify();
 
         let sql_for_exec = sql.clone();
+        let timeout_secs = settings.query.query_timeout_secs;
+        let auto_explain = settings.query.auto_explain_slow;
+
         cx.spawn(async move |this, cx: &mut AsyncApp| {
             let start = std::time::Instant::now();
-            let res = conn.execute_query(&sql_for_exec).await;
+            let timeout_duration = std::time::Duration::from_secs(timeout_secs);
+            let timed_res = tokio::time::timeout(timeout_duration, conn.execute_query(&sql_for_exec)).await;
             let duration = start.elapsed().as_millis() as u64;
+
+            let res = match timed_res {
+                Ok(inner) => inner,
+                Err(_) => Err(crate::db::error::DbError::query(format!(
+                    "Query timed out after {timeout_secs}s"
+                ))),
+            };
 
             this.update(cx, |app, cx| {
                 app.is_executing_query = false;
@@ -666,6 +682,11 @@ impl CrabStudioApp {
                         app.console_error = None;
                         app.status_message =
                             Some(format!("Query completed: {rows} rows returned in {dur}ms"));
+
+                        // Auto explain slow queries (>500ms) if enabled in settings
+                        if auto_explain && dur >= 500 {
+                            app.run_explain(cx);
+                        }
                     }
                     Err(err) => {
                         app.console_error = Some(err.to_string());
@@ -685,7 +706,8 @@ impl CrabStudioApp {
         if sql.trim().is_empty() {
             return;
         }
-        let formatted = format_sql(&sql);
+        let tab_size = self.settings_manager.settings().editor.tab_size;
+        let formatted = format_sql_with_indent(&sql, tab_size);
         self.query_editor.update(cx, |editor, cx| {
             editor.set_value(&formatted, window, cx);
         });
@@ -2655,6 +2677,7 @@ impl Render for CrabStudioApp {
 
         // Tabs navigation bar
         let selected_tbl_label = self.selected_table.as_deref();
+        let lang = self.settings_manager.settings().language;
 
         let tabs_bar = h_flex()
             .h(px(38.0))
@@ -2676,6 +2699,7 @@ impl Render for CrabStudioApp {
                     .child({
                         let is_active = self.active_tab == WorkspaceTab::QueryConsole;
                         let handle = app_handle.clone();
+                        let console_label = t("workspace.console", lang);
                         Button::new("tab_console")
                             .small()
                             .ghost()
@@ -2683,13 +2707,13 @@ impl Render for CrabStudioApp {
                             .min_w(px(36.0))
                             .overflow_hidden()
                             .icon(IconName::Terminal)
-                            .label("SQL Console")
-                            .tooltip("SQL Console")
+                            .label(console_label)
+                            .tooltip(console_label)
                             .border_b_2()
                             .border_color(if is_active {
                                 ThemeColors::PRIMARY_BORDER
                             } else {
-                                transparent_black()
+                                ThemeColors::TRANSPARENT
                             })
                             .on_click(move |_, _, cx| {
                                 handle.update(cx, |this, cx| {
@@ -2702,9 +2726,10 @@ impl Render for CrabStudioApp {
                     .child({
                         let is_active = self.active_tab == WorkspaceTab::DataGrid;
                         let handle = app_handle.clone();
+                        let data_str = t("workspace.data", lang);
                         let label = match selected_tbl_label {
-                            Some(name) => format!("Data · {name}"),
-                            None => "Data".to_string(),
+                            Some(name) => format!("{data_str} · {name}"),
+                            None => data_str.to_string(),
                         };
                         let tooltip = label.clone();
                         Button::new("tab_data")
@@ -2720,7 +2745,7 @@ impl Render for CrabStudioApp {
                             .border_color(if is_active {
                                 ThemeColors::PRIMARY_BORDER
                             } else {
-                                transparent_black()
+                                ThemeColors::TRANSPARENT
                             })
                             .on_click(move |_, _, cx| {
                                 handle.update(cx, |this, cx| {
@@ -2733,9 +2758,10 @@ impl Render for CrabStudioApp {
                     .child({
                         let is_active = self.active_tab == WorkspaceTab::Schema;
                         let handle = app_handle.clone();
+                        let schema_str = t("workspace.schema", lang);
                         let label = match selected_tbl_label {
-                            Some(name) => format!("Schema · {name}"),
-                            None => "Schema".to_string(),
+                            Some(name) => format!("{schema_str} · {name}"),
+                            None => schema_str.to_string(),
                         };
                         let tooltip = label.clone();
                         Button::new("tab_schema")
@@ -2751,7 +2777,7 @@ impl Render for CrabStudioApp {
                             .border_color(if is_active {
                                 ThemeColors::PRIMARY_BORDER
                             } else {
-                                transparent_black()
+                                ThemeColors::TRANSPARENT
                             })
                             .on_click(move |_, _, cx| {
                                 handle.update(cx, |this, cx| {
@@ -2765,7 +2791,9 @@ impl Render for CrabStudioApp {
                         let is_active = self.active_tab == WorkspaceTab::History;
                         let handle = app_handle.clone();
                         let count = self.history_manager.items().len();
-                        let label = format!("History ({count})");
+                        let hist_str = t("workspace.history", lang);
+                        let label = format!("{hist_str} ({count})");
+                        let tooltip = format!("{hist_str} ({count})");
                         Button::new("tab_history")
                             .small()
                             .ghost()
@@ -2774,12 +2802,12 @@ impl Render for CrabStudioApp {
                             .overflow_hidden()
                             .icon(IconName::Clock)
                             .label(label)
-                            .tooltip("Query History")
+                            .tooltip(tooltip)
                             .border_b_2()
                             .border_color(if is_active {
                                 ThemeColors::PRIMARY_BORDER
                             } else {
-                                transparent_black()
+                                ThemeColors::TRANSPARENT
                             })
                             .on_click(move |_, _, cx| {
                                 handle.update(cx, |this, cx| {
@@ -2788,6 +2816,24 @@ impl Render for CrabStudioApp {
                                     cx.notify();
                                 });
                             })
+                    })
+                    .when(!self.settings_manager.settings().appearance.show_activity_bar, |this| {
+                        let handle = app_handle.clone();
+                        this.child(
+                            h_flex().ml_auto().child(
+                                Button::new("btn_open_settings_fallback")
+                                    .ghost()
+                                    .small()
+                                    .icon(IconName::Settings)
+                                    .tooltip("Settings")
+                                    .on_click(move |_, _, cx| {
+                                        handle.update(cx, |this, cx| {
+                                            this.active_nav = ActivityNav::Settings;
+                                            cx.notify();
+                                        });
+                                    }),
+                            ),
+                        )
                     }),
             );
 
@@ -2876,6 +2922,8 @@ impl Render for CrabStudioApp {
                     .explain_view(self.explain_view)
                     .connection_label(connection_label)
                     .results_view(console_grid)
+                    .editor_settings(self.settings_manager.settings().editor.clone())
+                    .language(self.settings_manager.settings().language)
                     .on_run(on_run)
                     .on_clear(on_clear)
                     .on_format(on_format)
@@ -3077,6 +3125,7 @@ impl Render for CrabStudioApp {
             .connected(is_connected)
             .read_only(is_read_only)
             .status(active_status)
+            .language(self.settings_manager.settings().language)
             .query_stats(query_row_count, query_duration);
         if let Some(name) = conn_name {
             status_bar = status_bar.profile(name);
@@ -3420,11 +3469,14 @@ impl Render for CrabStudioApp {
                 handle.update(cx, |this, cx| {
                     let _ = this.settings_manager.update(mutator);
                     let _ = this.settings_manager.save();
+                    let hist_limit = this.settings_manager.settings().query.history_limit;
+                    this.history_manager.set_max_entries(hist_limit);
                     let theme = this.settings_manager.settings().appearance.theme;
                     let theme_mode = match theme {
                         ThemePreference::Light => ThemeMode::Light,
                         _ => ThemeMode::Dark,
                     };
+                    crate::ui::theme::set_active_theme_mode(theme_mode == ThemeMode::Light);
                     Theme::change(theme_mode, Some(window), cx);
                     this.status_message = Some("Settings saved".to_string());
                     cx.notify();
@@ -3436,11 +3488,14 @@ impl Render for CrabStudioApp {
             move |window, cx| {
                 handle.update(cx, |this, cx| {
                     let _ = this.settings_manager.reset_defaults();
+                    let hist_limit = this.settings_manager.settings().query.history_limit;
+                    this.history_manager.set_max_entries(hist_limit);
                     let theme = this.settings_manager.settings().appearance.theme;
                     let theme_mode = match theme {
                         ThemePreference::Light => ThemeMode::Light,
                         _ => ThemeMode::Dark,
                     };
+                    crate::ui::theme::set_active_theme_mode(theme_mode == ThemeMode::Light);
                     Theme::change(theme_mode, Some(window), cx);
                     this.status_message = Some("Settings reset to defaults".to_string());
                     cx.notify();
@@ -3543,13 +3598,17 @@ impl Render for CrabStudioApp {
             .size_full()
             .bg(ThemeColors::BG_APP)
             .child(title_bar)
-            .child(
+            .child({
+                let show_act_bar = self.settings_manager.settings().appearance.show_activity_bar
+                    || self.active_nav == ActivityNav::Settings;
                 h_flex()
                     .items_stretch()
                     .flex_1()
                     .w_full()
                     .min_h_0()
-                    .child(activity_bar)
+                    .when(show_act_bar, |this| {
+                        this.child(activity_bar)
+                    })
                     .child(if self.active_nav == ActivityNav::Settings {
                         settings_view.into_any_element()
                     } else {
@@ -3576,9 +3635,11 @@ impl Render for CrabStudioApp {
                                     ),
                             )
                             .into_any_element()
-                    }),
-            )
-            .child(status_bar)
+                    })
+            })
+            .when(self.settings_manager.settings().appearance.show_status_bar, |this| {
+                this.child(status_bar)
+            })
             .children(dialog_overlay)
             .children(sql_review_overlay)
             .children(create_table_overlay)

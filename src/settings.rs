@@ -59,10 +59,18 @@ impl AppLanguage {
     }
 }
 
+fn default_true() -> bool {
+    true
+}
+
 /// Appearance and theme preferences.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AppearanceSettings {
     pub theme: ThemePreference,
+    #[serde(default = "default_true")]
+    pub show_activity_bar: bool,
+    #[serde(default = "default_true")]
+    pub show_status_bar: bool,
     pub last_update_check: Option<String>,
 }
 
@@ -70,6 +78,8 @@ impl Default for AppearanceSettings {
     fn default() -> Self {
         Self {
             theme: ThemePreference::Dark,
+            show_activity_bar: true,
+            show_status_bar: true,
             last_update_check: None,
         }
     }

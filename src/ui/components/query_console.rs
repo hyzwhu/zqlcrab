@@ -2,8 +2,10 @@
 
 use crate::db::explain::ExplainPlan;
 use crate::db::types::QueryResult;
+use crate::settings::{AppLanguage, EditorSettings};
 use crate::ui::components::data_grid::DataGrid;
 use crate::ui::components::explain_panel::{ExplainPanel, ExplainViewMode};
+use crate::ui::i18n::t;
 use crate::ui::theme::ThemeColors;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::{h_flex, v_flex};
@@ -41,6 +43,8 @@ pub struct QueryConsole {
     explain_view: ExplainViewMode,
     connection_label: Option<String>,
     results_view: Option<AnyElement>,
+    editor_settings: Option<EditorSettings>,
+    language: AppLanguage,
     on_run: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_clear: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_format: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
@@ -64,6 +68,8 @@ impl QueryConsole {
             explain_view: ExplainViewMode::Tree,
             connection_label: None,
             results_view: None,
+            editor_settings: None,
+            language: AppLanguage::Auto,
             on_run: None,
             on_clear: None,
             on_format: None,
@@ -123,6 +129,16 @@ impl QueryConsole {
         self
     }
 
+    pub fn editor_settings(mut self, settings: EditorSettings) -> Self {
+        self.editor_settings = Some(settings);
+        self
+    }
+
+    pub fn language(mut self, lang: AppLanguage) -> Self {
+        self.language = lang;
+        self
+    }
+
     pub fn on_run<F>(mut self, handler: F) -> Self
     where
         F: Fn(&mut Window, &mut App) + 'static,
@@ -173,8 +189,31 @@ impl QueryConsole {
 }
 
 impl RenderOnce for QueryConsole {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let busy = self.is_executing || self.is_explaining;
+        let lang = self.language;
+
+        let ed_font_size = self
+            .editor_settings
+            .as_ref()
+            .map(|s| s.font_size)
+            .unwrap_or(13.0);
+        let ed_font_family = self
+            .editor_settings
+            .as_ref()
+            .map(|s| s.font_family.clone())
+            .unwrap_or_else(|| "JetBrains Mono".to_string());
+        let show_line_numbers = self
+            .editor_settings
+            .as_ref()
+            .map(|s| s.line_numbers)
+            .unwrap_or(true);
+
+        let run_label = if self.is_executing {
+            t("console.running", lang)
+        } else {
+            t("console.run", lang)
+        };
 
         let mut run_button = Button::new("run_query")
             .ghost()
@@ -183,7 +222,7 @@ impl RenderOnce for QueryConsole {
             .min_w(px(28.0))
             .overflow_hidden()
             .icon(IconName::Play)
-            .label("Run")
+            .label(run_label)
             .disabled(busy)
             .tooltip("Run query (⌘↵ / Ctrl+Enter)");
         if let Some(on_run) = self.on_run {
@@ -199,13 +238,19 @@ impl RenderOnce for QueryConsole {
             .min_w(px(28.0))
             .overflow_hidden()
             .icon(IconName::ListIndentIncrease)
-            .label("Format")
+            .label(t("console.format", lang))
             .tooltip("Format SQL (Shift+Alt+F)");
         if let Some(on_format) = self.on_format {
             format_button = format_button.on_click(move |_, window, cx| {
                 on_format(window, cx);
             });
         }
+
+        let explain_label = if self.is_explaining {
+            t("console.explaining", lang)
+        } else {
+            t("console.explain", lang)
+        };
 
         let mut explain_button = Button::new("explain_query")
             .ghost()
@@ -214,7 +259,7 @@ impl RenderOnce for QueryConsole {
             .min_w(px(28.0))
             .overflow_hidden()
             .icon(IconName::Activity)
-            .label("Explain")
+            .label(explain_label)
             .disabled(busy)
             .tooltip("Explain plan (⌘⇧E)");
         if let Some(on_explain) = self.on_explain {
@@ -230,7 +275,7 @@ impl RenderOnce for QueryConsole {
             .min_w(px(28.0))
             .overflow_hidden()
             .icon(IconName::Trash)
-            .label("Clear")
+            .label(t("console.clear", lang))
             .tooltip("Clear editor");
         if let Some(on_clear) = self.on_clear {
             clear_button = clear_button.on_click(move |_, window, cx| {
@@ -319,12 +364,52 @@ impl RenderOnce for QueryConsole {
                 .child(div().text_xs().text_color(ThemeColors::ERROR).child(err))
         });
 
-        let editor_pane = div().size_full().min_h_0().bg(ThemeColors::BG_APP).child(
-            Textarea::new(&self.editor_state)
+        let line_count = self.editor_state.read(cx).value().lines().count().max(1);
+        let line_gutter = if show_line_numbers {
+            let mut col = v_flex()
                 .h_full()
-                .bg(ThemeColors::BG_APP)
-                .text_color(ThemeColors::TEXT_PRIMARY),
-        );
+                .min_w(px((28.0 + (line_count.to_string().len().saturating_sub(2) as f32) * 8.0).max(28.0)))
+                .py_2()
+                .px_1p5()
+                .bg(ThemeColors::BG_SURFACE)
+                .border_r_1()
+                .border_color(ThemeColors::BORDER)
+                .items_end();
+
+            for line_idx in 1..=line_count {
+                col = col.child(
+                    div()
+                        .h(px(ed_font_size * 1.5))
+                        .text_size(px(ed_font_size * 0.9))
+                        .font_family(ed_font_family.clone())
+                        .text_color(ThemeColors::TEXT_FAINT)
+                        .child(format!("{line_idx}")),
+                );
+            }
+            Some(col)
+        } else {
+            None
+        };
+
+        let editor_pane = h_flex()
+            .size_full()
+            .min_h_0()
+            .bg(ThemeColors::BG_APP)
+            .font_family(ed_font_family)
+            .text_size(px(ed_font_size))
+            .children(line_gutter)
+            .child(
+                div()
+                    .flex_1()
+                    .h_full()
+                    .min_w_0()
+                    .child(
+                        Textarea::new(&self.editor_state)
+                            .h_full()
+                            .bg(ThemeColors::BG_APP)
+                            .text_color(ThemeColors::TEXT_PRIMARY),
+                    ),
+            );
 
         let bottom_selected = match self.bottom_tab {
             ConsoleBottomTab::Results => 0,
@@ -348,13 +433,15 @@ impl RenderOnce for QueryConsole {
                     );
                 }
             })
-            .child(Tab::new().label("Results"))
-            .child(Tab::new().label("Explain"));
+            .child(Tab::new().label(t("console.results", lang)))
+            .child(Tab::new().label(t("console.explain_tab", lang)));
 
         let stats = self.query_result.as_ref().map(|res| {
             format!(
-                "Rows: {}  Time: {}ms",
+                "{}: {}  {}: {}ms",
+                t("console.rows", lang),
                 res.rows.len(),
+                t("console.time", lang),
                 res.execution_time_ms.unwrap_or(0)
             )
         });

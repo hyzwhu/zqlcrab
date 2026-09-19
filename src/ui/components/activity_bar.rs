@@ -8,7 +8,6 @@ use gpui_kit::base::{h_flex, v_flex};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::gpui::{
     App, ElementId, IntoElement, ParentElement, RenderOnce, Styled, Window, div, px,
-    transparent_black,
 };
 use std::rc::Rc;
 
@@ -80,7 +79,7 @@ impl ActivityBar {
             .bg(if is_active {
                 ThemeColors::BG_SURFACE_ACTIVE
             } else {
-                transparent_black()
+                ThemeColors::TRANSPARENT
             })
             .child(
                 div()
@@ -90,7 +89,7 @@ impl ActivityBar {
                     .bg(if is_active {
                         ThemeColors::PRIMARY_BORDER
                     } else {
-                        transparent_black()
+                        ThemeColors::TRANSPARENT
                     }),
             )
             .child(

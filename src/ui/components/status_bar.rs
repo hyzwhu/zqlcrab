@@ -1,6 +1,8 @@
 //! Status bar component displaying database session metrics and engine information.
 
 use crate::db::types::ConnectionStatus;
+use crate::settings::AppLanguage;
+use crate::ui::i18n::t;
 use crate::ui::theme::ThemeColors;
 use gpui_kit::base::h_flex;
 use gpui_kit::component::status_bar::StatusBar;
@@ -18,6 +20,7 @@ pub struct AppStatusBar {
     pub status: Option<ConnectionStatus>,
     pub row_count: Option<usize>,
     pub execution_time_ms: Option<u64>,
+    pub language: AppLanguage,
 }
 
 impl AppStatusBar {
@@ -30,7 +33,13 @@ impl AppStatusBar {
             status: None,
             row_count: None,
             execution_time_ms: None,
+            language: AppLanguage::Auto,
         }
+    }
+
+    pub fn language(mut self, lang: AppLanguage) -> Self {
+        self.language = lang;
+        self
     }
 
     pub fn connected(mut self, connected: bool) -> Self {
@@ -68,9 +77,9 @@ impl AppStatusBar {
 impl RenderOnce for AppStatusBar {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
         let (status_color, status_text) = if self.is_connected {
-            (ThemeColors::SUCCESS, "Connected")
+            (ThemeColors::SUCCESS, t("status.connected", self.language))
         } else {
-            (ThemeColors::TEXT_FAINT, "Disconnected")
+            (ThemeColors::TEXT_FAINT, t("status.disconnected", self.language))
         };
 
         let left_part = h_flex()

@@ -26,6 +26,7 @@ fn main() {
                 _ => ThemeMode::Dark,
             };
             Theme::change(initial_theme, None, cx);
+            ui::theme::set_active_theme_mode(initial_theme == ThemeMode::Light);
 
             cx.bind_keys([
                 KeyBinding::new("cmd-enter", RunQuery, Some("CrabStudio")),

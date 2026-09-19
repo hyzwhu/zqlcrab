@@ -12,7 +12,7 @@ use gpui_kit::component::{
 use gpui_kit::gpui::{
     App, ElementId, FontWeight, InteractiveElement as _, IntoElement, ParentElement,
     RenderOnce, StatefulInteractiveElement as _, Styled, Window, div, hsla,
-    prelude::FluentBuilder as _, px, transparent_black,
+    prelude::FluentBuilder as _, px,
 };
 use std::rc::Rc;
 
@@ -23,7 +23,6 @@ pub enum SettingsTab {
     Editor,
     Query,
     Language,
-    Drivers,
     About,
 }
 
@@ -180,7 +179,6 @@ impl SettingsView {
             (SettingsTab::Editor, "tab.editor", IconName::Code),
             (SettingsTab::Query, "tab.query", IconName::Database),
             (SettingsTab::Language, "tab.language", IconName::Languages),
-            (SettingsTab::Drivers, "tab.drivers", IconName::Cpu),
             (SettingsTab::About, "tab.about", IconName::Info),
         ];
 
@@ -209,7 +207,7 @@ impl SettingsView {
                 .border_color(if is_active {
                     ThemeColors::PRIMARY_BORDER
                 } else {
-                    transparent_black()
+                    ThemeColors::TRANSPARENT
                 });
 
             if is_active {
@@ -433,6 +431,7 @@ impl SettingsView {
     fn render_appearance_tab(&self) -> impl IntoElement {
         let lang = self.settings.language;
         let on_check = self.on_check_updates.clone();
+        let on_change = self.on_change_settings.clone();
         let is_checking = self.is_checking_update;
 
         let status_msg = if is_checking {
@@ -505,6 +504,51 @@ impl SettingsView {
                                 "appearance.light_desc",
                             )),
                     ),
+            )
+            // Activity Bar & Status Bar Layout Toggle
+            .child(
+                self.render_toggle_row(
+                    "appearance.show_activity_bar",
+                    "appearance.show_activity_bar_desc",
+                    self.settings.appearance.show_activity_bar,
+                    {
+                        let on_ch = on_change.clone();
+                        let curr = self.settings.appearance.show_activity_bar;
+                        move |window, cx| {
+                            if let Some(ref handler) = on_ch {
+                                handler(
+                                    Box::new(move |s| {
+                                        s.appearance.show_activity_bar = !curr;
+                                    }),
+                                    window,
+                                    cx,
+                                );
+                            }
+                        }
+                    },
+                ),
+            )
+            .child(
+                self.render_toggle_row(
+                    "appearance.show_status_bar",
+                    "appearance.show_status_bar_desc",
+                    self.settings.appearance.show_status_bar,
+                    {
+                        let on_ch = on_change.clone();
+                        let curr = self.settings.appearance.show_status_bar;
+                        move |window, cx| {
+                            if let Some(ref handler) = on_ch {
+                                handler(
+                                    Box::new(move |s| {
+                                        s.appearance.show_status_bar = !curr;
+                                    }),
+                                    window,
+                                    cx,
+                                );
+                            }
+                        }
+                    },
+                ),
             )
             // Check for Updates Section
             .child(
@@ -1264,19 +1308,6 @@ impl RenderOnce for SettingsView {
             SettingsTab::Editor => self.render_editor_tab().into_any_element(),
             SettingsTab::Query => self.render_query_tab().into_any_element(),
             SettingsTab::Language => self.render_language_tab().into_any_element(),
-            SettingsTab::Drivers => self
-                .render_informative_tab(
-                    "drivers.status",
-                    "drivers.desc",
-                    IconName::Cpu,
-                    vec![
-                        ("SQLite Driver", "rusqlite v0.32 (Bundled C SQLite3 engine)"),
-                        ("PostgreSQL Driver", "tokio-postgres v0.7 (Native Async Wire Protocol)"),
-                        ("MySQL Driver", "mysql_async v0.34 (Pure Rust TLS Async Protocol)"),
-                        ("JVM Overhead", "0 MB (No Java Runtime required)"),
-                    ],
-                )
-                .into_any_element(),
             SettingsTab::About => self
                 .render_informative_tab(
                     "settings.title",

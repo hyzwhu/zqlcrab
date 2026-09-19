@@ -16,7 +16,31 @@ fn translate_en(key: &'static str) -> &'static str {
         // Activity bar & navigation
         "nav.databases" => "Databases",
         "nav.console" => "Query Console",
+        "nav.history" => "History",
         "nav.settings" => "Settings",
+
+        // Query console actions & tabs
+        "console.run" => "Run",
+        "console.running" => "Executing...",
+        "console.format" => "Format",
+        "console.explain" => "Explain",
+        "console.explaining" => "Explaining...",
+        "console.clear" => "Clear",
+        "console.results" => "Results",
+        "console.explain_tab" => "Execution Plan",
+        "console.rows" => "Rows",
+        "console.time" => "Time",
+
+        // Status & workspace
+        "status.connected" => "Connected",
+        "status.disconnected" => "Disconnected",
+        "status.ready" => "Ready",
+        "workspace.databases" => "Databases",
+        "workspace.console" => "SQL Console",
+        "workspace.data" => "Data",
+        "workspace.schema" => "Schema",
+        "workspace.history" => "History",
+        "workspace.settings" => "Settings",
 
         // Settings header & general
         "settings.title" => "Settings",
@@ -30,7 +54,6 @@ fn translate_en(key: &'static str) -> &'static str {
         "tab.editor" => "Editor",
         "tab.query" => "Query",
         "tab.language" => "Language",
-        "tab.drivers" => "JRE & Drivers",
         "tab.about" => "About",
 
         // Appearance tab
@@ -42,6 +65,10 @@ fn translate_en(key: &'static str) -> &'static str {
         "appearance.dark_desc" => "Obsidian Slate dark theme",
         "appearance.light" => "Light",
         "appearance.light_desc" => "Clean high-contrast light theme",
+        "appearance.show_activity_bar" => "Show Activity Bar",
+        "appearance.show_activity_bar_desc" => "Toggle visibility of the left-hand navigation activity bar",
+        "appearance.show_status_bar" => "Show Status Bar",
+        "appearance.show_status_bar_desc" => "Toggle visibility of the bottom session and metrics status bar",
         "appearance.updates" => "Check for Updates",
         "appearance.updates_desc" => "Check for new releases, patches, and feature updates",
         "appearance.current_ver" => "Current Version",
@@ -89,8 +116,6 @@ fn translate_en(key: &'static str) -> &'static str {
         "language.zh_desc" => "完整的中文本地化界面",
 
         // Other tabs
-        "drivers.status" => "Database Drivers & JVM Engine",
-        "drivers.desc" => "100% Native Rust Drivers (Zero JVM overhead, bundled SQLite, Tokio-Postgres, Async-MySQL)",
         "about.desc" => "A modern, high-performance database IDE built with Rust & GPUI",
 
         // Fallback
@@ -103,7 +128,31 @@ fn translate_zh(key: &'static str) -> &'static str {
         // Activity bar & navigation
         "nav.databases" => "数据库",
         "nav.console" => "查询控制台",
+        "nav.history" => "执行历史",
         "nav.settings" => "设置",
+
+        // Query console actions & tabs
+        "console.run" => "执行",
+        "console.running" => "执行中...",
+        "console.format" => "格式化",
+        "console.explain" => "执行计划",
+        "console.explaining" => "分析中...",
+        "console.clear" => "清空",
+        "console.results" => "查询结果",
+        "console.explain_tab" => "执行计划",
+        "console.rows" => "行数",
+        "console.time" => "耗时",
+
+        // Status & workspace
+        "status.connected" => "已连接",
+        "status.disconnected" => "未连接",
+        "status.ready" => "就绪",
+        "workspace.databases" => "数据库",
+        "workspace.console" => "SQL 控制台",
+        "workspace.data" => "数据浏览",
+        "workspace.schema" => "表结构",
+        "workspace.history" => "执行历史",
+        "workspace.settings" => "偏好设置",
 
         // Settings header & general
         "settings.title" => "设置",
@@ -117,7 +166,6 @@ fn translate_zh(key: &'static str) -> &'static str {
         "tab.editor" => "编辑器",
         "tab.query" => "查询",
         "tab.language" => "语言",
-        "tab.drivers" => "JRE 与驱动",
         "tab.about" => "关于",
 
         // Appearance tab
@@ -129,6 +177,10 @@ fn translate_zh(key: &'static str) -> &'static str {
         "appearance.dark_desc" => "黑曜石石板深色主题 (推荐)",
         "appearance.light" => "浅色模式",
         "appearance.light_desc" => "清爽高对比度浅色主题",
+        "appearance.show_activity_bar" => "显示左侧活动栏",
+        "appearance.show_activity_bar_desc" => "切换左侧图标导航栏的可见性",
+        "appearance.show_status_bar" => "显示底部状态栏",
+        "appearance.show_status_bar_desc" => "切换底部数据库连接与度量指标状态栏",
         "appearance.updates" => "检查更新",
         "appearance.updates_desc" => "检查应用新版本、补丁及功能更新",
         "appearance.current_ver" => "当前版本",
@@ -176,8 +228,6 @@ fn translate_zh(key: &'static str) -> &'static str {
         "language.zh_desc" => "完整的中文本地化界面",
 
         // Other tabs
-        "drivers.status" => "数据库原生驱动与引擎",
-        "drivers.desc" => "100% 纯 Rust 原生驱动 (零 JVM 内存开销，内置 SQLite、PostgreSQL 及 MySQL 引擎)",
         "about.desc" => "基于 Rust 与 GPUI 打造的高性能现代化桌面数据库客户端",
 
         // Fallback

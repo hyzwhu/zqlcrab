@@ -153,6 +153,15 @@ impl QueryHistoryManager {
         let _ = self.save();
     }
 
+    /// Update maximum capacity and truncate excess entries if needed.
+    pub fn set_max_entries(&mut self, max: usize) {
+        self.max_entries = max;
+        if self.items.len() > self.max_entries {
+            self.items.truncate(self.max_entries);
+            let _ = self.save();
+        }
+    }
+
     /// Get all history items.
     pub fn list(&self) -> &[QueryHistoryItem] {
         &self.items

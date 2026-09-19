@@ -4,16 +4,23 @@ use sqlformat::{FormatOptions, Indent, QueryParams};
 
 /// Formats SQL with 2-space indent and uppercase keywords.
 pub fn format_sql(sql: &str) -> String {
+    format_sql_with_indent(sql, 2)
+}
+
+/// Formats SQL with custom indentation spaces and uppercase keywords.
+pub fn format_sql_with_indent(sql: &str, tab_size: usize) -> String {
     let trimmed = sql.trim();
     if trimmed.is_empty() {
         return String::new();
     }
 
+    let indent_spaces = tab_size.clamp(2, 8) as u8;
+
     let formatted = sqlformat::format(
         trimmed,
         &QueryParams::None,
         FormatOptions {
-            indent: Indent::Spaces(2),
+            indent: Indent::Spaces(indent_spaces),
             uppercase: true,
             lines_between_queries: 1,
         },
@@ -42,5 +49,13 @@ mod tests {
     #[test]
     fn empty_input_stays_empty() {
         assert_eq!(format_sql("   \n  "), "");
+    }
+
+    #[test]
+    fn formats_with_custom_tab_size() {
+        let out_4 = format_sql_with_indent("SELECT id, name FROM users", 4);
+        assert!(out_4.contains("SELECT"));
+        let out_8 = format_sql_with_indent("SELECT id, name FROM users", 8);
+        assert!(out_8.contains("SELECT"));
     }
 }
