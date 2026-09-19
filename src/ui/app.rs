@@ -2086,10 +2086,13 @@ impl Render for CrabStudioApp {
                 .justify_between()
                 .items_center()
                 .px_3()
+                .gap_2()
+                .overflow_hidden()
                 .child(
                     h_flex()
                         .items_center()
                         .gap_2()
+                        .flex_shrink_0()
                         .child(
                             Icon::new(IconName::Database)
                                 .size(px(16.0))
@@ -2107,9 +2110,13 @@ impl Render for CrabStudioApp {
                     h_flex()
                         .items_center()
                         .gap_2()
+                        .flex_shrink(1.0)
+                        .min_w_0()
+                        .overflow_hidden()
                         .when(is_read_only, |this| {
                             this.child(
                                 div()
+                                    .flex_shrink_0()
                                     .px_2()
                                     .py_0p5()
                                     .rounded_full()
@@ -2123,6 +2130,10 @@ impl Render for CrabStudioApp {
                         .when_some(self.status_message.as_ref(), |this, msg| {
                             this.child(
                                 div()
+                                    .flex_shrink(1.0)
+                                    .min_w_0()
+                                    .overflow_hidden()
+                                    .text_ellipsis()
                                     .text_xs()
                                     .text_color(ThemeColors::TEXT_MUTED)
                                     .child(msg.clone()),
@@ -2133,8 +2144,12 @@ impl Render for CrabStudioApp {
                             Button::new("title_new_conn")
                                 .outline()
                                 .xsmall()
+                                .flex_shrink(1.0)
+                                .min_w(px(32.0))
+                                .overflow_hidden()
                                 .icon(IconName::Plus)
                                 .label("New Connection")
+                                .tooltip("New Connection Profile")
                                 .on_click(move |_, window, cx| {
                                     handle.update(cx, |this, cx| {
                                         this.open_connection_dialog(window, cx);
@@ -2147,8 +2162,12 @@ impl Render for CrabStudioApp {
                                 Button::new("title_create_table")
                                     .outline()
                                     .xsmall()
+                                    .flex_shrink(1.0)
+                                    .min_w(px(32.0))
+                                    .overflow_hidden()
                                     .icon(IconName::Table)
                                     .label("Create Table")
+                                    .tooltip("Create New Table")
                                     .on_click(move |_, window, cx| {
                                         handle.update(cx, |this, cx| {
                                             this.open_create_table_modal(window, cx);
@@ -2262,18 +2281,26 @@ impl Render for CrabStudioApp {
             .border_b_1()
             .border_color(ThemeColors::BORDER)
             .bg(ThemeColors::BG_SURFACE)
+            .overflow_hidden()
             .child(
                 h_flex()
+                    .flex_1()
+                    .min_w_0()
                     .items_center()
                     .gap_1()
+                    .overflow_hidden()
                     .child({
                         let is_active = self.active_tab == WorkspaceTab::QueryConsole;
                         let handle = app_handle.clone();
                         Button::new("tab_console")
                             .small()
                             .ghost()
+                            .flex_shrink(1.0)
+                            .min_w(px(36.0))
+                            .overflow_hidden()
                             .icon(IconName::Terminal)
                             .label("SQL Console")
+                            .tooltip("SQL Console")
                             .border_b_2()
                             .border_color(if is_active {
                                 ThemeColors::PRIMARY_BORDER
@@ -2294,11 +2321,16 @@ impl Render for CrabStudioApp {
                             Some(name) => format!("Data · {name}"),
                             None => "Data".to_string(),
                         };
+                        let tooltip = label.clone();
                         Button::new("tab_data")
                             .small()
                             .ghost()
+                            .flex_shrink(1.0)
+                            .min_w(px(36.0))
+                            .overflow_hidden()
                             .icon(IconName::Table)
                             .label(label)
+                            .tooltip(tooltip)
                             .border_b_2()
                             .border_color(if is_active {
                                 ThemeColors::PRIMARY_BORDER
@@ -2319,11 +2351,16 @@ impl Render for CrabStudioApp {
                             Some(name) => format!("Schema · {name}"),
                             None => "Schema".to_string(),
                         };
+                        let tooltip = label.clone();
                         Button::new("tab_schema")
                             .small()
                             .ghost()
+                            .flex_shrink(1.0)
+                            .min_w(px(36.0))
+                            .overflow_hidden()
                             .icon(IconName::TableProperties)
                             .label(label)
+                            .tooltip(tooltip)
                             .border_b_2()
                             .border_color(if is_active {
                                 ThemeColors::PRIMARY_BORDER
@@ -2345,8 +2382,12 @@ impl Render for CrabStudioApp {
                         Button::new("tab_history")
                             .small()
                             .ghost()
+                            .flex_shrink(1.0)
+                            .min_w(px(36.0))
+                            .overflow_hidden()
                             .icon(IconName::Clock)
                             .label(label)
+                            .tooltip("Query History")
                             .border_b_2()
                             .border_color(if is_active {
                                 ThemeColors::PRIMARY_BORDER
@@ -2451,20 +2492,20 @@ impl Render for CrabStudioApp {
                     .on_explain_view(on_explain_view);
 
                 let quick_connect_banner = if !is_connected {
-                    let mut conn_chips = h_flex().gap_2().items_center();
+                    let mut conn_chips = h_flex().gap_2().items_center().flex_wrap().min_w_0();
                     for conn in self.saved_connections.iter().take(4) {
                         let conn_id = conn.id.clone();
                         let handle = app_handle.clone();
-                        let icon = match conn.db_type.family() {
-                            DatabaseFamily::Sqlite => IconName::Database,
-                            DatabaseFamily::MySql => IconName::Cpu,
-                            DatabaseFamily::Postgres => IconName::Layers,
-                        };
+                        let icon = crate::ui::components::connection_dialog::database_icon(conn.db_type);
                         let chip = Button::new(ElementId::Name(format!("quick_conn_{}", conn.id).into()))
                             .outline()
                             .small()
+                            .flex_shrink(1.0)
+                            .min_w(px(32.0))
+                            .overflow_hidden()
                             .icon(icon)
                             .label(format!("Connect: {}", conn.name))
+                            .tooltip(format!("Connect to {}", conn.name))
                             .on_click(move |_, _, cx| {
                                 handle.update(cx, |this, cx| {
                                     this.select_connection(&conn_id, cx);

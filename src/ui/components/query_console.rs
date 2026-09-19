@@ -179,7 +179,11 @@ impl RenderOnce for QueryConsole {
         let mut run_button = Button::new("run_query")
             .ghost()
             .small()
+            .flex_shrink(1.0)
+            .min_w(px(28.0))
+            .overflow_hidden()
             .icon(IconName::Play)
+            .label("Run")
             .disabled(busy)
             .tooltip("Run query (⌘↵ / Ctrl+Enter)");
         if let Some(on_run) = self.on_run {
@@ -191,6 +195,9 @@ impl RenderOnce for QueryConsole {
         let mut format_button = Button::new("format_sql")
             .ghost()
             .small()
+            .flex_shrink(1.0)
+            .min_w(px(28.0))
+            .overflow_hidden()
             .icon(IconName::ListIndentIncrease)
             .label("Format")
             .tooltip("Format SQL (Shift+Alt+F)");
@@ -203,6 +210,9 @@ impl RenderOnce for QueryConsole {
         let mut explain_button = Button::new("explain_query")
             .ghost()
             .small()
+            .flex_shrink(1.0)
+            .min_w(px(28.0))
+            .overflow_hidden()
             .icon(IconName::Activity)
             .label("Explain")
             .disabled(busy)
@@ -216,7 +226,11 @@ impl RenderOnce for QueryConsole {
         let mut clear_button = Button::new("clear_query")
             .ghost()
             .small()
-            .icon(IconName::Menu)
+            .flex_shrink(1.0)
+            .min_w(px(28.0))
+            .overflow_hidden()
+            .icon(IconName::Trash)
+            .label("Clear")
             .tooltip("Clear editor");
         if let Some(on_clear) = self.on_clear {
             clear_button = clear_button.on_click(move |_, window, cx| {
@@ -233,10 +247,15 @@ impl RenderOnce for QueryConsole {
             .bg(ThemeColors::BG_SURFACE)
             .border_b_1()
             .border_color(ThemeColors::BORDER)
+            .gap_2()
+            .overflow_hidden()
             .child(
                 h_flex()
                     .items_center()
                     .gap_1()
+                    .flex_shrink(1.0)
+                    .min_w_0()
+                    .overflow_hidden()
                     .child(run_button)
                     .child(format_button)
                     .child(explain_button)
@@ -245,7 +264,8 @@ impl RenderOnce for QueryConsole {
                             .h(px(16.0))
                             .w(px(1.0))
                             .bg(ThemeColors::BORDER)
-                            .mx_1(),
+                            .mx_1()
+                            .flex_shrink_0(),
                     )
                     .child(clear_button),
             )
@@ -253,20 +273,29 @@ impl RenderOnce for QueryConsole {
                 h_flex()
                     .items_center()
                     .gap_2()
+                    .flex_shrink(1.0)
+                    .min_w_0()
+                    .overflow_hidden()
                     .when_some(self.connection_label.clone(), |this, label| {
                         this.child(
                             h_flex()
                                 .items_center()
                                 .gap_1()
+                                .flex_shrink(1.0)
+                                .min_w_0()
+                                .overflow_hidden()
                                 .child(
                                     Icon::new(IconName::Database)
                                         .size(px(12.0))
-                                        .text_color(ThemeColors::PRIMARY_LIGHT),
+                                        .text_color(ThemeColors::PRIMARY_LIGHT)
+                                        .flex_shrink_0(),
                                 )
                                 .child(
                                     div()
                                         .text_xs()
                                         .text_color(ThemeColors::TEXT_MUTED)
+                                        .overflow_hidden()
+                                        .text_ellipsis()
                                         .child(label),
                                 ),
                         )
@@ -346,13 +375,22 @@ impl RenderOnce for QueryConsole {
             .border_b_1()
             .border_color(ThemeColors::BORDER)
             .bg(ThemeColors::BG_SURFACE)
-            .child(bottom_tabs)
+            .overflow_hidden()
+            .gap_2()
+            .child(
+                div()
+                    .flex_shrink(1.0)
+                    .min_w_0()
+                    .overflow_hidden()
+                    .child(bottom_tabs),
+            )
             .when_some(stats, |this, label| {
                 this.child(
                     div()
                         .px_3()
                         .text_xs()
                         .text_color(ThemeColors::TEXT_FAINT)
+                        .flex_shrink_0()
                         .child(label),
                 )
             });

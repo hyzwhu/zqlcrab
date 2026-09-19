@@ -640,6 +640,9 @@ impl RenderOnce for DataGrid {
             Button::new("export_csv")
                 .ghost()
                 .xsmall()
+                .flex_shrink(1.0)
+                .min_w(px(26.0))
+                .overflow_hidden()
                 .tooltip("Export / Copy CSV")
                 .icon(IconName::FileText)
                 .child("CSV")
@@ -653,6 +656,9 @@ impl RenderOnce for DataGrid {
             Button::new("export_json")
                 .ghost()
                 .xsmall()
+                .flex_shrink(1.0)
+                .min_w(px(26.0))
+                .overflow_hidden()
                 .tooltip("Export / Copy JSON")
                 .child("JSON")
                 .when_some(on_exp, |btn, handler| {
@@ -665,6 +671,9 @@ impl RenderOnce for DataGrid {
             Button::new("export_md")
                 .ghost()
                 .xsmall()
+                .flex_shrink(1.0)
+                .min_w(px(26.0))
+                .overflow_hidden()
                 .tooltip("Export / Copy Markdown")
                 .child("MD")
                 .when_some(on_exp, |btn, handler| {
@@ -677,6 +686,9 @@ impl RenderOnce for DataGrid {
             Button::new("export_sql")
                 .ghost()
                 .xsmall()
+                .flex_shrink(1.0)
+                .min_w(px(26.0))
+                .overflow_hidden()
                 .tooltip("Export / Copy SQL Inserts")
                 .child("SQL")
                 .when_some(on_exp, |btn, handler| {
@@ -732,6 +744,9 @@ impl RenderOnce for DataGrid {
             Button::new("toggle_inspector_toolbar_btn")
                 .ghost()
                 .xsmall()
+                .flex_shrink(1.0)
+                .min_w(px(26.0))
+                .overflow_hidden()
                 .icon(IconName::PanelRight)
                 .label(if is_open { "Hide Details" } else { "Details" })
                 .tooltip("Toggle Cell & Row Details Inspector")
@@ -770,6 +785,9 @@ impl RenderOnce for DataGrid {
                             .gap_1p5()
                             .px_2()
                             .py_0p5()
+                            .flex_shrink(1.0)
+                            .min_w_0()
+                            .overflow_hidden()
                             .rounded_md()
                             .bg(rgba(0x10B9811C))
                             .border_1()
@@ -779,12 +797,14 @@ impl RenderOnce for DataGrid {
                                     .text_xs()
                                     .font_weight(FontWeight::BOLD)
                                     .text_color(ThemeColors::SUCCESS)
+                                    .flex_shrink_0()
                                     .child(format!("New Row #{}", coord.row_idx + 1)),
                             )
                             .child(
                                 div()
                                     .text_xs()
                                     .text_color(ThemeColors::TEXT_FAINT)
+                                    .flex_shrink_0()
                                     .child("·"),
                             )
                             .child(
@@ -792,12 +812,19 @@ impl RenderOnce for DataGrid {
                                     .text_xs()
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(ThemeColors::TEXT_PRIMARY)
+                                    .flex_shrink(1.0)
+                                    .min_w_0()
+                                    .overflow_hidden()
+                                    .text_ellipsis()
                                     .child(col_name),
                             )
                             .child(
                                 Button::new("quick_copy_toolbar_btn")
                                     .ghost()
                                     .xsmall()
+                                    .flex_shrink(1.0)
+                                    .min_w(px(24.0))
+                                    .overflow_hidden()
                                     .icon(IconName::Copy)
                                     .label("Copy")
                                     .tooltip("Copy selected cell value")
@@ -831,6 +858,9 @@ impl RenderOnce for DataGrid {
                         .gap_1p5()
                         .px_2()
                         .py_0p5()
+                        .flex_shrink(1.0)
+                        .min_w_0()
+                        .overflow_hidden()
                         .rounded_md()
                         .bg(ThemeColors::BG_APP)
                         .when(is_dirty, |this| this.bg(rgba(0xF59E0B1A)))
@@ -840,12 +870,19 @@ impl RenderOnce for DataGrid {
                             div()
                                 .text_xs()
                                 .text_color(if is_dirty { ThemeColors::WARNING } else { ThemeColors::TEXT_MUTED })
+                                .flex_shrink(1.0)
+                                .min_w_0()
+                                .overflow_hidden()
+                                .text_ellipsis()
                                 .child(format!("#{}/{}", sel_row + 1, col_name)),
                         )
                         .child(
                             Button::new("quick_copy_toolbar_btn")
                                 .ghost()
                                 .xsmall()
+                                .flex_shrink(1.0)
+                                .min_w(px(24.0))
+                                .overflow_hidden()
                                 .icon(IconName::Copy)
                                 .label("Copy")
                                 .tooltip("Copy selected cell value")
@@ -872,6 +909,9 @@ impl RenderOnce for DataGrid {
                 Button::new("grid_add_new_row_btn")
                     .outline()
                     .xsmall()
+                    .flex_shrink(1.0)
+                    .min_w(px(28.0))
+                    .overflow_hidden()
                     .icon(IconName::Plus)
                     .label("New Row")
                     .tooltip("Add a new uncommitted row (⌘N)")
@@ -893,6 +933,9 @@ impl RenderOnce for DataGrid {
                     Button::new("grid_duplicate_row_btn")
                         .outline()
                         .xsmall()
+                        .flex_shrink(1.0)
+                        .min_w(px(28.0))
+                        .overflow_hidden()
                         .icon(IconName::Copy)
                         .label("Duplicate")
                         .tooltip("Duplicate selected row as new row template (⌘D)")
@@ -919,6 +962,9 @@ impl RenderOnce for DataGrid {
                         Button::new("tb_discard_row_btn")
                             .outline()
                             .xsmall()
+                            .flex_shrink(1.0)
+                            .min_w(px(28.0))
+                            .overflow_hidden()
                             .icon(IconName::Trash)
                             .label("Discard Row")
                             .tooltip("Discard this uncommitted new row")
@@ -936,6 +982,9 @@ impl RenderOnce for DataGrid {
                         Button::new("tb_del_restore_btn")
                             .ghost()
                             .xsmall()
+                            .flex_shrink(1.0)
+                            .min_w(px(28.0))
+                            .overflow_hidden()
                             .icon(if is_del { IconName::Undo } else { IconName::Trash })
                             .label(if is_del { "Restore Row" } else { "Delete Row" })
                             .tooltip(if is_del { "Restore row from deletion" } else { "Mark row for deletion (staged)" })
@@ -962,6 +1011,9 @@ impl RenderOnce for DataGrid {
             let discard_btn = Button::new("grid_discard_all_btn")
                 .ghost()
                 .xsmall()
+                .flex_shrink(1.0)
+                .min_w(px(28.0))
+                .overflow_hidden()
                 .icon(IconName::Undo)
                 .label("Discard All")
                 .when_some(on_discard, |btn, handler| {
@@ -971,6 +1023,9 @@ impl RenderOnce for DataGrid {
             let save_btn = Button::new("grid_save_changes_btn")
                 .primary()
                 .xsmall()
+                .flex_shrink(1.0)
+                .min_w(px(28.0))
+                .overflow_hidden()
                 .icon(IconName::Check)
                 .label("Review & Save (⌘S)")
                 .when_some(on_save, |btn, handler| {
@@ -1046,16 +1101,25 @@ impl RenderOnce for DataGrid {
             .border_b_1()
             .border_color(ThemeColors::BORDER)
             .bg(ThemeColors::BG_SURFACE)
+            .gap_2()
+            .overflow_hidden()
             .child(
                 h_flex()
                     .items_center()
-                    .gap_3()
+                    .gap_2()
+                    .flex_shrink(1.0)
+                    .min_w_0()
+                    .overflow_hidden()
                     .when_some(self.current_table.as_ref(), |this, table| {
                         this.child(
                             div()
                                 .text_xs()
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(ThemeColors::TEXT_PRIMARY)
+                                .flex_shrink(1.0)
+                                .min_w_0()
+                                .overflow_hidden()
+                                .text_ellipsis()
                                 .child(table.clone()),
                         )
                     })
@@ -1063,6 +1127,7 @@ impl RenderOnce for DataGrid {
                         div()
                             .text_xs()
                             .text_color(ThemeColors::TEXT_MUTED)
+                            .flex_shrink_0()
                             .child(if filter.is_empty() {
                                 format!("{} row(s)", result.rows.len())
                             } else {
@@ -1078,23 +1143,38 @@ impl RenderOnce for DataGrid {
                                 .bg(ThemeColors::BG_APP)
                                 .text_xs()
                                 .text_color(ThemeColors::TEXT_FAINT)
+                                .flex_shrink_0()
                                 .child(format!("{ms} ms")),
                         )
                     })
                     .children(add_new_row_btn)
                     .children(duplicate_row_btn)
-                    .children(selected_info_pill)
+                    .when_some(selected_info_pill, |this, pill| {
+                        this.child(
+                            div()
+                                .flex_shrink(1.0)
+                                .min_w_0()
+                                .overflow_hidden()
+                                .child(pill),
+                        )
+                    })
                     .children(delete_restore_btn),
             )
             .child(
                 h_flex()
                     .items_center()
                     .gap_2()
+                    .flex_shrink(1.0)
+                    .min_w_0()
+                    .overflow_hidden()
                     // Export Actions
                     .child(
                         h_flex()
                             .items_center()
                             .gap_1()
+                            .flex_shrink(1.0)
+                            .min_w_0()
+                            .overflow_hidden()
                             .child(export_csv_btn)
                             .child(export_json_btn)
                             .child(export_md_btn)
@@ -1104,13 +1184,15 @@ impl RenderOnce for DataGrid {
                         div()
                             .w(px(1.0))
                             .h(px(16.0))
-                            .bg(ThemeColors::BORDER),
+                            .bg(ThemeColors::BORDER)
+                            .flex_shrink_0(),
                     )
                     // Pagination Navigation
                     .child(
                         h_flex()
                             .items_center()
                             .gap_1p5()
+                            .flex_shrink_0()
                             .child(prev_page_btn)
                             .child(
                                 div()
@@ -1124,7 +1206,8 @@ impl RenderOnce for DataGrid {
                         div()
                             .w(px(1.0))
                             .h(px(16.0))
-                            .bg(ThemeColors::BORDER),
+                            .bg(ThemeColors::BORDER)
+                            .flex_shrink_0(),
                     )
                     // Inspector Toggle
                     .child(toggle_inspector_btn),
