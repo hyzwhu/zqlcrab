@@ -36,10 +36,14 @@ use gpui_kit::component::{
     resizable::ResizableState,
 };
 use gpui_kit::gpui::{
-    App, AsyncApp, ClipboardItem, Context, ElementId, Entity, FontWeight, IntoElement,
-    ParentElement, Render, ScrollHandle, Styled, Window, div, point, prelude::*, px,
+    App, AsyncApp, ClipboardItem, Context, ElementId, Entity, FontWeight, Image, ImageFormat,
+    IntoElement, ParentElement, Render, ScrollHandle, Styled, Window, div, img, point, prelude::*,
+    px,
 };
+use std::sync::Arc;
 use uuid::Uuid;
+
+const LOGO_PNG_BYTES: &[u8] = include_bytes!("../../assets/logo.png");
 
 gpui_kit::actions!(
     zqlcrab,
@@ -2521,6 +2525,12 @@ impl Render for CrabStudioApp {
 
         let app_handle = cx.entity().clone();
 
+        let logo_img = Arc::new(Image {
+            format: ImageFormat::Png,
+            bytes: LOGO_PNG_BYTES.to_vec(),
+            id: 0x7a716c63726162,
+        });
+
         // Header TitleBar
         let title_bar = TitleBar::new().child(
             h_flex()
@@ -2536,16 +2546,16 @@ impl Render for CrabStudioApp {
                         .gap_2()
                         .flex_shrink_0()
                         .child(
-                            Icon::new(IconName::Database)
-                                .size(px(16.0))
-                                .text_color(ThemeColors::PRIMARY_BORDER),
+                            img(logo_img)
+                                .size(px(18.0))
+                                .rounded(px(3.0)),
                         )
                         .child(
                             div()
                                 .text_sm()
                                 .font_weight(FontWeight::BOLD)
                                 .text_color(ThemeColors::TEXT_PRIMARY)
-                                .child("CrabStudio"),
+                                .child("zqlcrab"),
                         ),
                 )
                 .child(
@@ -3599,8 +3609,7 @@ impl Render for CrabStudioApp {
             .bg(ThemeColors::BG_APP)
             .child(title_bar)
             .child({
-                let show_act_bar = self.settings_manager.settings().appearance.show_activity_bar
-                    || self.active_nav == ActivityNav::Settings;
+                let show_act_bar = self.settings_manager.settings().appearance.show_activity_bar;
                 h_flex()
                     .items_stretch()
                     .flex_1()
@@ -3609,21 +3618,18 @@ impl Render for CrabStudioApp {
                     .when(show_act_bar, |this| {
                         this.child(activity_bar)
                     })
-                    .child(if self.active_nav == ActivityNav::Settings {
-                        settings_view.into_any_element()
-                    } else {
-                        h_flex()
-                            .items_stretch()
+                    .child(sidebar)
+                    .child(
+                        v_flex()
                             .flex_1()
-                            .w_full()
+                            .h_full()
+                            .min_w_0()
                             .min_h_0()
-                            .child(sidebar)
-                            .child(
+                            .child(if self.active_nav == ActivityNav::Settings {
+                                settings_view.into_any_element()
+                            } else {
                                 v_flex()
-                                    .flex_1()
-                                    .h_full()
-                                    .min_w_0()
-                                    .min_h_0()
+                                    .size_full()
                                     .child(tabs_bar)
                                     .child(
                                         v_flex()
@@ -3632,10 +3638,10 @@ impl Render for CrabStudioApp {
                                             .min_h_0()
                                             .w_full()
                                             .child(main_content),
-                                    ),
-                            )
-                            .into_any_element()
-                    })
+                                    )
+                                    .into_any_element()
+                            }),
+                    )
             })
             .when(self.settings_manager.settings().appearance.show_status_bar, |this| {
                 this.child(status_bar)

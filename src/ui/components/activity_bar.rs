@@ -75,6 +75,7 @@ impl ActivityBar {
             .w_full()
             .h(px(40.0))
             .items_center()
+            .justify_center()
             .relative()
             .bg(if is_active {
                 ThemeColors::BG_SURFACE_ACTIVE
@@ -83,6 +84,8 @@ impl ActivityBar {
             })
             .child(
                 div()
+                    .absolute()
+                    .left_0()
                     .w(px(3.0))
                     .h(px(22.0))
                     .rounded_r(px(2.0))
@@ -94,7 +97,7 @@ impl ActivityBar {
             )
             .child(
                 h_flex()
-                    .flex_1()
+                    .size_full()
                     .items_center()
                     .justify_center()
                     .child(btn),
@@ -125,6 +128,9 @@ impl RenderOnce for ActivityBar {
 
         v_flex()
             .w(px(48.0))
+            .min_w(px(48.0))
+            .max_w(px(48.0))
+            .flex_shrink_0()
             .h_full()
             .bg(ThemeColors::BG_SURFACE)
             .border_r_1()

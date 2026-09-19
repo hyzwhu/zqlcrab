@@ -769,6 +769,9 @@ impl RenderOnce for Sidebar {
 
         v_flex()
             .w(px(260.0))
+            .min_w(px(260.0))
+            .max_w(px(260.0))
+            .flex_shrink_0()
             .h_full()
             .bg(ThemeColors::BG_APP)
             .border_r_1()

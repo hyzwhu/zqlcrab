@@ -49,7 +49,7 @@ fn main() {
             let mut window_options = TitleBar::window_options();
             window_options.window_bounds = Some(WindowBounds::Windowed(bounds));
             if let Some(titlebar) = window_options.titlebar.as_mut() {
-                titlebar.title = Some("CrabStudio".into());
+                titlebar.title = Some("zqlcrab".into());
             }
 
             cx.spawn(async move |cx| {
@@ -57,7 +57,7 @@ fn main() {
                     let view = cx.new(|cx| CrabStudioApp::new(window, cx));
                     cx.new(|cx| Root::new(view, window, cx))
                 })
-                .expect("Failed to open CrabStudio window");
+                .expect("Failed to open zqlcrab window");
             })
             .detach();
         });
