@@ -759,26 +759,6 @@ impl CrabStudioApp {
             1
         };
 
-        // If a row is currently selected, borrow template values for NOT NULL columns without default
-        let selected_row_vals: Option<Vec<QueryValue>> = if let Some(coord) = self.grid_selected_cell {
-            if coord.is_inserted {
-                self.grid_changeset.inserted_rows.get(coord.row_idx).map(|r| r.values.clone())
-            } else if let Some(r) = res {
-                r.rows.get(coord.row_idx).map(|row| {
-                    (0..col_count)
-                        .map(|c_idx| {
-                            let orig = row.get(c_idx).unwrap_or(&QueryValue::Null);
-                            self.grid_changeset.get_effective_cell_value(coord.row_idx, c_idx, orig).clone()
-                        })
-                        .collect()
-                })
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
         let mut default_values = Vec::with_capacity(col_count);
         let mut first_editable_col = 0;
         let mut found_editable = false;
@@ -809,14 +789,10 @@ impl CrabStudioApp {
                     found_editable = true;
                 }
                 if let Some(def) = col_meta.and_then(|c| c.default_value.as_ref()) {
-                    default_values.push(QueryValue::String(def.clone()));
-                } else if let Some(ref sel_vals) = selected_row_vals {
-                    if let Some(v) = sel_vals.get(i) {
-                        default_values.push(v.clone());
-                    } else if col_meta.is_some_and(|c| !c.is_nullable) {
-                        default_values.push(QueryValue::String("0".to_string()));
-                    } else {
+                    if def.trim().eq_ignore_ascii_case("null") {
                         default_values.push(QueryValue::Null);
+                    } else {
+                        default_values.push(QueryValue::String(def.clone()));
                     }
                 } else {
                     default_values.push(QueryValue::Null);

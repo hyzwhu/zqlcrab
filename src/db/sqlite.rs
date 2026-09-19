@@ -677,5 +677,65 @@ mod tests {
         assert_eq!(reloaded.rows[1][1], QueryValue::String("SKU-1002".into()));
         assert_eq!(reloaded.rows[1][2], QueryValue::String("Widget Pro".into()));
     }
+
+    #[tokio::test]
+    async fn test_sqlite_empty_new_row_does_not_copy_selected_row() {
+        let config = ConnectionConfig::sqlite("test_empty_new_row", ":memory:");
+        let mut adapter = SqliteAdapter::new(config);
+        adapter.connect().await.expect("connect should succeed");
+
+        adapter
+            .execute_query("CREATE TABLE items (id INTEGER PRIMARY KEY AUTOINCREMENT, item_code TEXT NOT NULL, name TEXT NOT NULL);")
+            .await
+            .expect("create items table");
+
+        adapter
+            .execute_query("INSERT INTO items (item_code, name) VALUES ('ITEM-001', 'First Item');")
+            .await
+            .expect("insert initial item");
+
+        let initial = adapter
+            .execute_query("SELECT id, item_code, name FROM items;")
+            .await
+            .expect("query initial item");
+        let cols = adapter.list_columns(None, None, "items").await.expect("list columns");
+
+        let mut cs = crate::db::changeset::GridChangeset::new();
+        // A new row is initiated as blank / <auto> (empty waiting to be filled, NOT a copy of ITEM-001)
+        let new_row_values = vec![
+            QueryValue::String("<auto>".into()),
+            QueryValue::Null,
+            QueryValue::Null,
+        ];
+        let _temp_id = cs.add_inserted_row(new_row_values, crate::db::changeset::InsertAnchor::AfterRow(0));
+
+        // User fills in the cells manually
+        cs.set_inserted_cell_value(0, 1, QueryValue::String("ITEM-002".into()));
+        cs.set_inserted_cell_value(0, 2, QueryValue::String("Second Item".into()));
+
+        let plan = crate::db::sql_gen::generate_review_plan(
+            "items",
+            None,
+            crate::db::types::DatabaseFamily::Sqlite,
+            &cols,
+            &initial.columns,
+            &initial.rows,
+            &cs,
+        );
+
+        assert_eq!(plan.inserts_count, 1);
+        assert!(plan.full_script.contains("INSERT INTO \"items\" (\"item_code\", \"name\") VALUES ('ITEM-002', 'Second Item');"));
+
+        adapter.execute_batch(&plan.full_script).await.expect("execute_batch should succeed");
+
+        let reloaded = adapter
+            .execute_query("SELECT id, item_code, name FROM items ORDER BY id ASC;")
+            .await
+            .expect("query reloaded items");
+        assert_eq!(reloaded.rows.len(), 2);
+        assert_eq!(reloaded.rows[0][1], QueryValue::String("ITEM-001".into()));
+        assert_eq!(reloaded.rows[1][1], QueryValue::String("ITEM-002".into()));
+        assert_eq!(reloaded.rows[1][2], QueryValue::String("Second Item".into()));
+    }
 }
 
