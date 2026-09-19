@@ -1276,7 +1276,7 @@ impl RenderOnce for DataGrid {
 
         // Table header row
         let mut header_row = TableRow::new()
-            .w(px(total_table_width))
+            .w_full()
             .min_w(px(total_table_width))
             .bg(ThemeColors::BG_SURFACE)
             .border_b_1()
@@ -1321,6 +1321,7 @@ impl RenderOnce for DataGrid {
 
         for (i, col_name) in result.columns.iter().enumerate() {
             let col_w = col_widths.get(i).copied().unwrap_or(120.0);
+            let is_last = i + 1 == col_count;
             let sort_dir = if self.sort_column == Some(i) {
                 self.sort_direction
             } else {
@@ -1382,15 +1383,14 @@ impl RenderOnce for DataGrid {
 
             let head_cell = TableHead::new()
                 .h(px(32.0))
-                .w(px(col_w))
-                .min_w(px(col_w))
                 .px_0()
                 .py_0()
-                .flex_shrink_0()
                 .overflow_hidden()
                 .border_r_1()
                 .border_color(ThemeColors::BORDER_PROMINENT)
                 .bg(ThemeColors::BG_SURFACE)
+                .when(is_last, |this| this.min_w(px(col_w)).flex_1())
+                .when(!is_last, |this| this.w(px(col_w)).min_w(px(col_w)).flex_shrink_0())
                 .child(
                     h_flex()
                         .size_full()
@@ -1457,7 +1457,7 @@ impl RenderOnce for DataGrid {
                         );
 
                     let mut row = TableRow::new()
-                        .w(px(total_table_width))
+                        .w_full()
                         .min_w(px(total_table_width))
                         .border_b_1()
                         .border_color(rgba(0x10B98140))
@@ -1481,6 +1481,7 @@ impl RenderOnce for DataGrid {
                         );
 
                     for (col_idx, _col_name) in result.columns.iter().enumerate() {
+                        let is_last = col_idx + 1 == col_count;
                         let col_w = col_widths.get(col_idx).copied().unwrap_or(120.0);
                         let is_cell_selected = self
                             .selected_cell
@@ -1573,14 +1574,13 @@ impl RenderOnce for DataGrid {
                         row = row.child(
                             TableCell::new()
                                 .h(px(32.0))
-                                .w(px(col_w))
-                                .min_w(px(col_w))
                                 .px_0()
                                 .py_0()
-                                .flex_shrink_0()
                                 .overflow_hidden()
                                 .border_r_1()
                                 .border_color(rgba(0x10B98130))
+                                .when(is_last, |this| this.min_w(px(col_w)).flex_1())
+                                .when(!is_last, |this| this.w(px(col_w)).min_w(px(col_w)).flex_shrink_0())
                                 .child(cell_container),
                         );
                     }
@@ -1643,7 +1643,7 @@ impl RenderOnce for DataGrid {
                 );
 
             let mut row = TableRow::new()
-                .w(px(total_table_width))
+                .w_full()
                 .min_w(px(total_table_width))
                 .border_b_1()
                 .border_color(ThemeColors::BORDER.opacity(0.35))
@@ -1664,6 +1664,7 @@ impl RenderOnce for DataGrid {
                 );
 
             for (col_idx, orig_val) in row_data.iter().enumerate() {
+                let is_last = col_idx + 1 == col_count;
                 let col_w = col_widths.get(col_idx).copied().unwrap_or(120.0);
                 let is_cell_selected = self
                     .selected_cell
@@ -1786,14 +1787,13 @@ impl RenderOnce for DataGrid {
                 row = row.child(
                     TableCell::new()
                         .h(px(32.0))
-                        .w(px(col_w))
-                        .min_w(px(col_w))
                         .px_0()
                         .py_0()
-                        .flex_shrink_0()
                         .overflow_hidden()
                         .border_r_1()
                         .border_color(ThemeColors::BORDER.opacity(0.35))
+                        .when(is_last, |this| this.min_w(px(col_w)).flex_1())
+                        .when(!is_last, |this| this.w(px(col_w)).min_w(px(col_w)).flex_shrink_0())
                         .child(cell_container),
                 );
             }
@@ -1804,11 +1804,11 @@ impl RenderOnce for DataGrid {
 
         let table = Table::new()
             .small()
-            .w(px(total_table_width))
+            .w_full()
             .min_w(px(total_table_width))
             .child(
                 TableHeader::new()
-                    .w(px(total_table_width))
+                    .w_full()
                     .min_w(px(total_table_width))
                     .bg(ThemeColors::BG_SURFACE)
                     .border_b_1()
@@ -1816,7 +1816,7 @@ impl RenderOnce for DataGrid {
                     .child(header_row),
             )
             .child(
-                body.w(px(total_table_width))
+                body.w_full()
                     .min_w(px(total_table_width)),
             );
 
@@ -1833,11 +1833,9 @@ impl RenderOnce for DataGrid {
 
         let table_wrap = div()
             .id("data_grid_table_inner_wrap")
-            .w(px(total_table_width))
+            .w_full()
             .min_w(px(total_table_width))
-            .min_w_full()
             .min_h_full()
-            .flex_none()
             .child(table);
 
         let scroll_area = div()

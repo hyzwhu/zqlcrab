@@ -2138,42 +2138,6 @@ impl Render for CrabStudioApp {
                                     .text_color(ThemeColors::TEXT_MUTED)
                                     .child(msg.clone()),
                             )
-                        })
-                        .child({
-                            let handle = app_handle.clone();
-                            Button::new("title_new_conn")
-                                .outline()
-                                .xsmall()
-                                .flex_shrink(1.0)
-                                .min_w(px(32.0))
-                                .overflow_hidden()
-                                .icon(IconName::Plus)
-                                .label("New Connection")
-                                .tooltip("New Connection Profile")
-                                .on_click(move |_, window, cx| {
-                                    handle.update(cx, |this, cx| {
-                                        this.open_connection_dialog(window, cx);
-                                    });
-                                })
-                        })
-                        .when(is_connected, |this| {
-                            let handle = app_handle.clone();
-                            this.child(
-                                Button::new("title_create_table")
-                                    .outline()
-                                    .xsmall()
-                                    .flex_shrink(1.0)
-                                    .min_w(px(32.0))
-                                    .overflow_hidden()
-                                    .icon(IconName::Table)
-                                    .label("Create Table")
-                                    .tooltip("Create New Table")
-                                    .on_click(move |_, window, cx| {
-                                        handle.update(cx, |this, cx| {
-                                            this.open_create_table_modal(window, cx);
-                                        });
-                                    }),
-                            )
                         }),
                 ),
         );
