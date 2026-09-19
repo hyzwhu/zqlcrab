@@ -232,12 +232,19 @@ impl RenderOnce for SqlReviewModal {
                 .border_1()
                 .border_color(ThemeColors::ERROR)
                 .child(
-                    Icon::new(IconName::TriangleAlert)
-                        .size(px(14.0))
-                        .text_color(ThemeColors::ERROR),
+                    div()
+                        .flex_shrink_0()
+                        .pt_0p5()
+                        .child(
+                            Icon::new(IconName::TriangleAlert)
+                                .size(px(14.0))
+                                .text_color(ThemeColors::ERROR),
+                        ),
                 )
                 .child(
                     v_flex()
+                        .flex_1()
+                        .min_w_0()
                         .gap_0p5()
                         .child(
                             div()
@@ -248,6 +255,9 @@ impl RenderOnce for SqlReviewModal {
                         )
                         .child(
                             div()
+                                .id("sql_review_error_msg")
+                                .max_h(px(96.0))
+                                .overflow_y_scroll()
                                 .text_xs()
                                 .text_color(ThemeColors::ERROR)
                                 .child(err),
@@ -314,6 +324,7 @@ impl RenderOnce for SqlReviewModal {
             .border_1()
             .border_color(ThemeColors::BORDER)
             .shadow_lg()
+            .overflow_hidden()
             .child(
                 // Modal header
                 h_flex()
@@ -378,6 +389,7 @@ impl RenderOnce for SqlReviewModal {
                     .gap_3()
                     .flex_1()
                     .min_h_0()
+                    .min_w_0()
                     .child(
                         h_flex()
                             .w_full()

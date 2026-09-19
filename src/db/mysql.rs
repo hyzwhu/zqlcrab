@@ -780,7 +780,7 @@ mod tests {
         insert_vals[query_res.columns.iter().position(|c| c == "extra_meta").unwrap()] = QueryValue::String(r#"{"test_key": "val;with;semi"}"#.into());
         insert_vals[query_res.columns.iter().position(|c| c == "order_date").unwrap()] = QueryValue::DateTime("2025-05-20".into());
         insert_vals[query_res.columns.iter().position(|c| c == "delivery_time").unwrap()] = QueryValue::String("18:30:00".into());
-        let _temp_insert_id = cs.add_inserted_row(insert_vals);
+        let _temp_insert_id = cs.add_inserted_row(insert_vals, crate::db::changeset::InsertAnchor::default());
 
         assert!(cs.is_dirty());
         assert_eq!(cs.change_summary(), (2, 0, 1));

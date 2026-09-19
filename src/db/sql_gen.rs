@@ -934,21 +934,27 @@ mod tests {
 
         let mut cs = GridChangeset::new();
         // Row 1: id is Null (auto increment) -> should omit id
-        cs.add_inserted_row(vec![
-            QueryValue::Null,
-            QueryValue::String("David".into()),
-            QueryValue::String("david@example.com".into()),
-            QueryValue::Int(32),
-            QueryValue::Int(1),
-        ]);
+        cs.add_inserted_row(
+            vec![
+                QueryValue::Null,
+                QueryValue::String("David".into()),
+                QueryValue::String("david@example.com".into()),
+                QueryValue::Int(32),
+                QueryValue::Int(1),
+            ],
+            crate::db::changeset::InsertAnchor::default(),
+        );
         // Row 2: id is explicitly specified -> should include id
-        cs.add_inserted_row(vec![
-            QueryValue::Int(99),
-            QueryValue::String("Eve".into()),
-            QueryValue::Null,
-            QueryValue::Null,
-            QueryValue::Int(0),
-        ]);
+        cs.add_inserted_row(
+            vec![
+                QueryValue::Int(99),
+                QueryValue::String("Eve".into()),
+                QueryValue::Null,
+                QueryValue::Null,
+                QueryValue::Int(0),
+            ],
+            crate::db::changeset::InsertAnchor::default(),
+        );
 
         let plan = generate_review_plan(
             "users",
@@ -978,10 +984,13 @@ mod tests {
         let orig_rows = vec![];
 
         let mut cs = GridChangeset::new();
-        cs.add_inserted_row(vec![
-            QueryValue::String("<auto>".into()),
-            QueryValue::String("Frank's \"Gadgets\"".into()),
-        ]);
+        cs.add_inserted_row(
+            vec![
+                QueryValue::String("<auto>".into()),
+                QueryValue::String("Frank's \"Gadgets\"".into()),
+            ],
+            crate::db::changeset::InsertAnchor::default(),
+        );
 
         let plan = generate_review_plan(
             "products",
@@ -1014,18 +1023,21 @@ mod tests {
             .collect();
         let grid_cols: Vec<String> = (1..=10).map(|i| format!("col_{i}")).collect();
         let mut cs = GridChangeset::new();
-        cs.add_inserted_row(vec![
-            QueryValue::Int(1),
-            QueryValue::String("very long descriptive text title".into()),
-            QueryValue::String("detailed information content goes here".into()),
-            QueryValue::String("value_4".into()),
-            QueryValue::String("value_5".into()),
-            QueryValue::String("value_6".into()),
-            QueryValue::String("value_7".into()),
-            QueryValue::String("value_8".into()),
-            QueryValue::String("value_9".into()),
-            QueryValue::String("value_10".into()),
-        ]);
+        cs.add_inserted_row(
+            vec![
+                QueryValue::Int(1),
+                QueryValue::String("very long descriptive text title".into()),
+                QueryValue::String("detailed information content goes here".into()),
+                QueryValue::String("value_4".into()),
+                QueryValue::String("value_5".into()),
+                QueryValue::String("value_6".into()),
+                QueryValue::String("value_7".into()),
+                QueryValue::String("value_8".into()),
+                QueryValue::String("value_9".into()),
+                QueryValue::String("value_10".into()),
+            ],
+            crate::db::changeset::InsertAnchor::default(),
+        );
 
         let plan = generate_review_plan(
             "test_case",

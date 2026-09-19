@@ -20,11 +20,29 @@ pub struct RowDeletion {
     pub original_row: Vec<QueryValue>,
 }
 
+/// Specifies the anchor position of an uncommitted inserted row in the grid table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InsertAnchor {
+    /// Anchored below an existing table row (by original row index in result.rows)
+    AfterRow(usize),
+    /// Anchored below another inserted row (by temp_id)
+    AfterInserted(usize),
+    /// Anchored at the bottom of a specific page (0-indexed page)
+    PageEnd(usize),
+}
+
+impl Default for InsertAnchor {
+    fn default() -> Self {
+        Self::PageEnd(0)
+    }
+}
+
 /// Represents a newly inserted row not yet committed to the database.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RowInsertion {
     pub temp_id: usize,
     pub values: Vec<QueryValue>,
+    pub anchor: InsertAnchor,
 }
 
 /// Tracks pending local modifications (cell edits, row deletions & new rows) for an active grid.
@@ -61,26 +79,39 @@ impl GridChangeset {
         self.cell_updates.get(&(row_idx, col_idx))
     }
 
-    /// Adds a new inserted row with default values, returning its unique temp_id.
-    pub fn add_inserted_row(&mut self, default_values: Vec<QueryValue>) -> usize {
+    /// Adds a new inserted row with default values and placement anchor, returning its unique temp_id.
+    pub fn add_inserted_row(&mut self, default_values: Vec<QueryValue>, anchor: InsertAnchor) -> usize {
         let id = self.next_insert_id;
         self.next_insert_id += 1;
         self.inserted_rows.push(RowInsertion {
             temp_id: id,
             values: default_values,
+            anchor,
         });
         id
     }
 
     /// Removes an inserted row by its temp_id.
     pub fn remove_inserted_row(&mut self, temp_id: usize) {
-        self.inserted_rows.retain(|r| r.temp_id != temp_id);
+        if let Some(pos) = self.inserted_rows.iter().position(|r| r.temp_id == temp_id) {
+            let removed = self.inserted_rows.remove(pos);
+            for ins in &mut self.inserted_rows {
+                if ins.anchor == InsertAnchor::AfterInserted(removed.temp_id) {
+                    ins.anchor = removed.anchor;
+                }
+            }
+        }
     }
 
     /// Removes an inserted row by its position/index in `inserted_rows`.
     pub fn remove_inserted_row_by_index(&mut self, index: usize) {
         if index < self.inserted_rows.len() {
-            self.inserted_rows.remove(index);
+            let removed = self.inserted_rows.remove(index);
+            for ins in &mut self.inserted_rows {
+                if ins.anchor == InsertAnchor::AfterInserted(removed.temp_id) {
+                    ins.anchor = removed.anchor;
+                }
+            }
         }
     }
 
@@ -306,11 +337,14 @@ mod tests {
         assert_eq!(cs.affected_rows_count(), 1);
 
         // 5. Insert new row
-        let temp_id = cs.add_inserted_row(vec![
-            QueryValue::Null,
-            QueryValue::String("David".into()),
-            QueryValue::Int(28),
-        ]);
+        let temp_id = cs.add_inserted_row(
+            vec![
+                QueryValue::Null,
+                QueryValue::String("David".into()),
+                QueryValue::Int(28),
+            ],
+            InsertAnchor::PageEnd(0),
+        );
         assert_eq!(temp_id, 0);
         assert!(cs.is_dirty());
         assert_eq!(cs.change_summary(), (0, 1, 1));
@@ -330,5 +364,26 @@ mod tests {
         cs.revert_all();
         assert!(!cs.is_dirty());
         assert_eq!(cs.change_summary(), (0, 0, 0));
+    }
+
+    #[test]
+    fn test_insert_anchor_hierarchy_and_reparenting() {
+        let mut cs = GridChangeset::new();
+        // Insert row A anchored after original row 2
+        let id_a = cs.add_inserted_row(vec![QueryValue::Int(101)], InsertAnchor::AfterRow(2));
+        // Insert row B anchored after inserted row A
+        let id_b = cs.add_inserted_row(vec![QueryValue::Int(102)], InsertAnchor::AfterInserted(id_a));
+        // Insert row C anchored after inserted row B
+        let _id_c = cs.add_inserted_row(vec![QueryValue::Int(103)], InsertAnchor::AfterInserted(id_b));
+
+        assert_eq!(cs.inserted_rows[0].anchor, InsertAnchor::AfterRow(2));
+        assert_eq!(cs.inserted_rows[1].anchor, InsertAnchor::AfterInserted(id_a));
+        assert_eq!(cs.inserted_rows[2].anchor, InsertAnchor::AfterInserted(id_b));
+
+        // When row A is removed, row B should be reparented to row A's anchor (AfterRow(2))
+        cs.remove_inserted_row(id_a);
+        assert_eq!(cs.inserted_rows.len(), 2);
+        assert_eq!(cs.inserted_rows[0].anchor, InsertAnchor::AfterRow(2));
+        assert_eq!(cs.inserted_rows[1].anchor, InsertAnchor::AfterInserted(id_b));
     }
 }

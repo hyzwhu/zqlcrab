@@ -563,11 +563,14 @@ mod tests {
         );
 
         // 2. Stage a newly inserted row for Bob (leaving id as Null for auto-increment)
-        cs.add_inserted_row(vec![
-            QueryValue::Null,
-            QueryValue::String("Bob".into()),
-            QueryValue::String("bob@example.com".into()),
-        ]);
+        cs.add_inserted_row(
+            vec![
+                QueryValue::Null,
+                QueryValue::String("Bob".into()),
+                QueryValue::String("bob@example.com".into()),
+            ],
+            crate::db::changeset::InsertAnchor::default(),
+        );
 
         let (updates, deletes, inserts) = cs.change_summary();
         assert_eq!(updates, 1);
@@ -638,12 +641,15 @@ mod tests {
 
         let mut cs = crate::db::changeset::GridChangeset::new();
         // Duplicate row 0: ID reset to <auto>, other NOT NULL columns cloned and SKU tweaked
-        cs.add_inserted_row(vec![
-            QueryValue::String("<auto>".into()),
-            QueryValue::String("SKU-1002".into()),
-            initial.rows[0][2].clone(), // 'Widget Pro'
-            initial.rows[0][3].clone(), // 49.99
-        ]);
+        cs.add_inserted_row(
+            vec![
+                QueryValue::String("<auto>".into()),
+                QueryValue::String("SKU-1002".into()),
+                initial.rows[0][2].clone(), // 'Widget Pro'
+                initial.rows[0][3].clone(), // 49.99
+            ],
+            crate::db::changeset::InsertAnchor::default(),
+        );
 
         let plan = crate::db::sql_gen::generate_review_plan(
             "complex_products",

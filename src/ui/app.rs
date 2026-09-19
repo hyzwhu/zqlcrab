@@ -33,7 +33,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::gpui::{
     App, AsyncApp, ClipboardItem, Context, ElementId, Entity, FontWeight, IntoElement, ParentElement, Render,
-    Styled, Window, div, prelude::*, px, transparent_black,
+    ScrollHandle, Styled, Window, div, point, prelude::*, px, transparent_black,
 };
 use uuid::Uuid;
 
@@ -156,6 +156,7 @@ pub struct CrabStudioApp {
     grid_json_pretty: bool,
     grid_changeset: GridChangeset,
     grid_cell_edit_input: Entity<InputState>,
+    grid_scroll_handle: ScrollHandle,
     sql_review_modal_open: bool,
     sql_review_plan: Option<SqlReviewPlan>,
     sql_review_is_executing: bool,
@@ -334,6 +335,7 @@ impl CrabStudioApp {
             grid_json_pretty: true,
             grid_changeset: GridChangeset::new(),
             grid_cell_edit_input,
+            grid_scroll_handle: ScrollHandle::default(),
             sql_review_modal_open: false,
             sql_review_plan: None,
             sql_review_is_executing: false,
@@ -822,11 +824,36 @@ impl CrabStudioApp {
             }
         }
 
-        let insert_idx = self.grid_changeset.inserted_rows.len();
-        self.grid_changeset.add_inserted_row(default_values);
+        let anchor = if let Some(coord) = self.grid_selected_cell {
+            if coord.is_inserted {
+                if let Some(ins) = self.grid_changeset.inserted_rows.get(coord.row_idx) {
+                    crate::db::changeset::InsertAnchor::AfterInserted(ins.temp_id)
+                } else {
+                    crate::db::changeset::InsertAnchor::PageEnd(self.grid_page)
+                }
+            } else {
+                crate::db::changeset::InsertAnchor::AfterRow(coord.row_idx)
+            }
+        } else {
+            crate::db::changeset::InsertAnchor::PageEnd(self.grid_page)
+        };
+
+        let is_appended_at_end = self.grid_selected_cell.is_none();
+        let temp_id = self.grid_changeset.add_inserted_row(default_values, anchor);
+        let insert_idx = self
+            .grid_changeset
+            .inserted_rows
+            .iter()
+            .position(|r| r.temp_id == temp_id)
+            .unwrap_or(0);
         let new_coord = GridCellCoord::inserted(insert_idx, first_editable_col);
         self.grid_selected_cell = Some(new_coord);
         self.grid_inspector_open = true;
+
+        if is_appended_at_end {
+            let curr = self.grid_scroll_handle.offset();
+            self.grid_scroll_handle.set_offset(point(curr.x, -px(999999.0)));
+        }
 
         let cur_val = self.grid_changeset.get_inserted_cell_value(insert_idx, first_editable_col);
         let display_str = cur_val.map(|v| if v.is_null() { String::new() } else { v.to_display_string() }).unwrap_or_default();
@@ -901,8 +928,23 @@ impl CrabStudioApp {
             }
         }
 
-        let insert_idx = self.grid_changeset.inserted_rows.len();
-        self.grid_changeset.add_inserted_row(new_row_values);
+        let anchor = if coord.is_inserted {
+            if let Some(ins) = self.grid_changeset.inserted_rows.get(coord.row_idx) {
+                crate::db::changeset::InsertAnchor::AfterInserted(ins.temp_id)
+            } else {
+                crate::db::changeset::InsertAnchor::PageEnd(self.grid_page)
+            }
+        } else {
+            crate::db::changeset::InsertAnchor::AfterRow(coord.row_idx)
+        };
+
+        let temp_id = self.grid_changeset.add_inserted_row(new_row_values, anchor);
+        let insert_idx = self
+            .grid_changeset
+            .inserted_rows
+            .iter()
+            .position(|r| r.temp_id == temp_id)
+            .unwrap_or(0);
         let new_coord = GridCellCoord::inserted(insert_idx, first_editable_col);
         self.grid_selected_cell = Some(new_coord);
         self.grid_inspector_open = true;
@@ -2016,6 +2058,7 @@ impl CrabStudioApp {
 
         DataGrid::new(grid_data)
             .table_name(table_name)
+            .scroll_handle(self.grid_scroll_handle.clone())
             .page_size(self.grid_page_size)
             .current_page(self.grid_page)
             .sort(self.grid_sort_col, self.grid_sort_dir)

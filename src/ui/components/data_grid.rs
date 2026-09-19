@@ -1,6 +1,6 @@
 //! Tabular data viewer component for displaying query results and table records.
 
-use crate::db::changeset::GridChangeset;
+use crate::db::changeset::{GridChangeset, InsertAnchor, RowInsertion};
 use crate::db::export::ExportFormat;
 use crate::db::types::{QueryResult, QueryValue, SortDirection};
 use crate::ui::theme::ThemeColors;
@@ -19,6 +19,7 @@ use gpui_kit::gpui::{
     rgba,
 };
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 /// Helper function to convert a single row into a formatted JSON object string.
@@ -78,6 +79,110 @@ pub fn format_inspector_value(raw: &str, pretty_json: bool) -> (String, bool, us
         }
     }
     (raw.to_string(), false, char_count, line_count)
+}
+
+/// Represents an item in the displayed grid row sequence, either an existing table row or an inserted row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GridDisplayItem {
+    Original(usize, usize),
+    Inserted(usize),
+}
+
+/// Computes the interleaved display items taking into account row insertion anchors.
+pub fn compute_grid_display_items(
+    page_slice_indices: &[usize],
+    current_page: usize,
+    total_pages: usize,
+    inserted_rows: &[RowInsertion],
+) -> Vec<GridDisplayItem> {
+    let mut after_orig: HashMap<usize, Vec<usize>> = HashMap::new();
+    let mut after_ins: HashMap<usize, Vec<usize>> = HashMap::new();
+    let mut page_end: HashMap<usize, Vec<usize>> = HashMap::new();
+
+    for (ins_idx, ins) in inserted_rows.iter().enumerate() {
+        match ins.anchor {
+            InsertAnchor::AfterRow(orig_idx) => {
+                after_orig.entry(orig_idx).or_default().push(ins_idx);
+            }
+            InsertAnchor::AfterInserted(parent_temp_id) => {
+                after_ins.entry(parent_temp_id).or_default().push(ins_idx);
+            }
+            InsertAnchor::PageEnd(page_idx) => {
+                page_end.entry(page_idx).or_default().push(ins_idx);
+            }
+        }
+    }
+
+    fn append_inserted_subtree(
+        ins_idx: usize,
+        items: &mut Vec<GridDisplayItem>,
+        after_ins: &HashMap<usize, Vec<usize>>,
+        inserted_rows: &[RowInsertion],
+        visited: &mut std::collections::HashSet<usize>,
+    ) {
+        if !visited.insert(ins_idx) {
+            return;
+        }
+        items.push(GridDisplayItem::Inserted(ins_idx));
+        if let Some(ins) = inserted_rows.get(ins_idx) {
+            if let Some(children) = after_ins.get(&ins.temp_id) {
+                for &child_idx in children {
+                    append_inserted_subtree(child_idx, items, after_ins, inserted_rows, visited);
+                }
+            }
+        }
+    }
+
+    let mut display_items = Vec::new();
+    let mut visited_inserted = std::collections::HashSet::new();
+
+    for (rel_idx, &orig_row_idx) in page_slice_indices.iter().enumerate() {
+        display_items.push(GridDisplayItem::Original(rel_idx, orig_row_idx));
+        if let Some(children) = after_orig.get(&orig_row_idx) {
+            for &child_idx in children {
+                append_inserted_subtree(
+                    child_idx,
+                    &mut display_items,
+                    &after_ins,
+                    inserted_rows,
+                    &mut visited_inserted,
+                );
+            }
+        }
+    }
+
+    if let Some(children) = page_end.get(&current_page) {
+        for &child_idx in children {
+            append_inserted_subtree(
+                child_idx,
+                &mut display_items,
+                &after_ins,
+                inserted_rows,
+                &mut visited_inserted,
+            );
+        }
+    }
+
+    // Fallback for any unvisited inserted rows (e.g. empty table or page out of bounds)
+    for ins_idx in 0..inserted_rows.len() {
+        if !visited_inserted.contains(&ins_idx) {
+            let on_other_page = match inserted_rows[ins_idx].anchor {
+                InsertAnchor::PageEnd(p) => p != current_page && p < total_pages,
+                _ => false,
+            };
+            if !on_other_page {
+                append_inserted_subtree(
+                    ins_idx,
+                    &mut display_items,
+                    &after_ins,
+                    inserted_rows,
+                    &mut visited_inserted,
+                );
+            }
+        }
+    }
+
+    display_items
 }
 
 /// Unified coordinate identifying a cell in either an existing table row or an uncommitted new row.
@@ -141,6 +246,7 @@ pub struct DataGrid {
     on_discard_inserted_row: Option<Rc<dyn Fn(usize, &mut Window, &mut App)>>,
     on_discard_all_changes: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
     on_save_changes: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
+    scroll_handle: Option<ScrollHandle>,
 }
 
 impl DataGrid {
@@ -179,7 +285,13 @@ impl DataGrid {
             on_discard_inserted_row: None,
             on_discard_all_changes: None,
             on_save_changes: None,
+            scroll_handle: None,
         }
+    }
+
+    pub fn scroll_handle(mut self, handle: ScrollHandle) -> Self {
+        self.scroll_handle = Some(handle);
+        self
     }
 
     pub fn table_name(mut self, name: Option<String>) -> Self {
@@ -1235,175 +1347,182 @@ impl RenderOnce for DataGrid {
         // Table body rows
         let mut body = TableBody::new();
 
-        // 1. Render uncommitted inserted rows at the top of the table
-        for (ins_idx, insertion) in self.changeset.inserted_rows.iter().enumerate() {
-            let is_row_selected = self
-                .selected_cell
-                .map(|c| c.is_inserted && c.row_idx == ins_idx)
-                .unwrap_or(false);
-            let on_sel_row = self.on_select_cell.clone();
+        let display_items = compute_grid_display_items(
+            &page_slice_indices,
+            self.current_page,
+            total_pages,
+            &self.changeset.inserted_rows,
+        );
 
-            let index_cell_btn = div()
-                .size_full()
-                .h(px(32.0))
-                .flex()
-                .items_center()
-                .justify_center()
-                .cursor_pointer()
-                .id(ElementId::NamedInteger("grid_ins_row_idx".into(), ins_idx as u64))
-                .on_click(move |_, window, cx| {
-                    if let Some(ref h) = on_sel_row {
-                        h(GridCellCoord::inserted(ins_idx, 0), window, cx);
-                    }
-                })
-                .child(
-                    div()
-                        .px_1p5()
-                        .py_0p5()
-                        .rounded_xs()
-                        .bg(rgba(0x10B98122))
-                        .border_1()
-                        .border_color(rgba(0x10B98160))
-                        .text_xs()
-                        .font_weight(FontWeight::BOLD)
-                        .text_color(ThemeColors::SUCCESS)
-                        .child("+ NEW"),
-                );
+        for item in display_items {
+            match item {
+                GridDisplayItem::Inserted(ins_idx) => {
+                    let insertion = &self.changeset.inserted_rows[ins_idx];
+                    let is_row_selected = self
+                        .selected_cell
+                        .map(|c| c.is_inserted && c.row_idx == ins_idx)
+                        .unwrap_or(false);
+                    let on_sel_row = self.on_select_cell.clone();
 
-            let mut row = TableRow::new()
-                .w(px(total_table_width))
-                .min_w(px(total_table_width))
-                .border_b_1()
-                .border_color(rgba(0x10B98140))
-                .bg(if is_row_selected {
-                    rgba(0x10B98125)
-                } else {
-                    rgba(0x10B9810E)
-                })
-                .child(
-                    TableCell::new()
+                    let index_cell_btn = div()
+                        .size_full()
                         .h(px(32.0))
-                        .w(px(index_col_width))
-                        .min_w(px(index_col_width))
-                        .px_0()
-                        .py_0()
-                        .flex_shrink_0()
-                        .overflow_hidden()
-                        .border_r_1()
-                        .border_color(rgba(0x10B98140))
-                        .child(index_cell_btn),
-                );
-
-            for (col_idx, _col_name) in result.columns.iter().enumerate() {
-                let col_w = col_widths.get(col_idx).copied().unwrap_or(120.0);
-                let is_cell_selected = self
-                    .selected_cell
-                    .map(|c| c.is_inserted && c.row_idx == ins_idx && c.col_idx == col_idx)
-                    .unwrap_or(false);
-                let cur_val = insertion.values.get(col_idx).unwrap_or(&QueryValue::Null);
-
-                let val_element = match cur_val {
-                    QueryValue::Null => div()
-                        .w_full()
-                        .min_w_0()
-                        .truncate()
-                        .text_xs()
-                        .italic()
-                        .text_color(ThemeColors::TEXT_FAINT)
-                        .child("NULL"),
-                    QueryValue::Bool(b) => div()
-                        .w_full()
-                        .min_w_0()
-                        .truncate()
-                        .text_xs()
-                        .text_color(if *b {
-                            ThemeColors::SUCCESS
-                        } else {
-                            ThemeColors::WARNING
-                        })
-                        .child(if *b { "true" } else { "false" }),
-                    QueryValue::Int(i) => div()
-                        .w_full()
-                        .min_w_0()
-                        .truncate()
-                        .text_xs()
-                        .font_family("JetBrains Mono")
-                        .text_color(ThemeColors::TEXT_PRIMARY)
-                        .child(i.to_string()),
-                    QueryValue::Float(f) => div()
-                        .w_full()
-                        .min_w_0()
-                        .truncate()
-                        .text_xs()
-                        .font_family("JetBrains Mono")
-                        .text_color(ThemeColors::PRIMARY_BORDER)
-                        .child(format!("{f:.4}")),
-                    _ => div()
-                        .w_full()
-                        .min_w_0()
-                        .truncate()
-                        .text_xs()
-                        .font_family("JetBrains Mono")
-                        .text_color(ThemeColors::TEXT_PRIMARY)
-                        .child(cur_val.to_display_string().replace(['\r', '\n'], " ")),
-                };
-
-                let on_sel_cell = self.on_select_cell.clone();
-                let on_tog_modal = self.on_toggle_modal.clone();
-                let cell_container = div()
-                    .size_full()
-                    .h(px(32.0))
-                    .px_2()
-                    .flex()
-                    .items_center()
-                    .cursor_pointer()
-                    .overflow_hidden()
-                    .relative()
-                    .id(ElementId::NamedInteger(
-                        format!("grid_ins_cell_{ins_idx}").into(),
-                        col_idx as u64,
-                    ))
-                    .when(is_cell_selected, |this| {
-                        this.bg(ThemeColors::PRIMARY_BG)
-                            .border_2()
-                            .border_color(ThemeColors::PRIMARY_BORDER)
-                            .rounded_xs()
-                    })
-                    .when(!is_cell_selected, |this| {
-                        this.hover(|s| s.bg(rgba(0x10B98118)))
-                    })
-                    .on_click(move |event, window, cx| {
-                        if let Some(ref h) = on_sel_cell {
-                            h(GridCellCoord::inserted(ins_idx, col_idx), window, cx);
-                        }
-                        if event.click_count() >= 2 {
-                            if let Some(ref h_m) = on_tog_modal {
-                                h_m(true, window, cx);
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .cursor_pointer()
+                        .id(ElementId::NamedInteger("grid_ins_row_idx".into(), ins_idx as u64))
+                        .on_click(move |_, window, cx| {
+                            if let Some(ref h) = on_sel_row {
+                                h(GridCellCoord::inserted(ins_idx, 0), window, cx);
                             }
-                        }
-                    })
-                    .child(val_element);
+                        })
+                        .child(
+                            div()
+                                .px_1p5()
+                                .py_0p5()
+                                .rounded_xs()
+                                .bg(rgba(0x10B98122))
+                                .border_1()
+                                .border_color(rgba(0x10B98160))
+                                .text_xs()
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(ThemeColors::SUCCESS)
+                                .child("+ NEW"),
+                        );
 
-                row = row.child(
-                    TableCell::new()
-                        .h(px(32.0))
-                        .w(px(col_w))
-                        .min_w(px(col_w))
-                        .px_0()
-                        .py_0()
-                        .flex_shrink_0()
-                        .overflow_hidden()
-                        .border_r_1()
-                        .border_color(rgba(0x10B98130))
-                        .child(cell_container),
-                );
-            }
+                    let mut row = TableRow::new()
+                        .w(px(total_table_width))
+                        .min_w(px(total_table_width))
+                        .border_b_1()
+                        .border_color(rgba(0x10B98140))
+                        .bg(if is_row_selected {
+                            rgba(0x10B98125)
+                        } else {
+                            rgba(0x10B9810E)
+                        })
+                        .child(
+                            TableCell::new()
+                                .h(px(32.0))
+                                .w(px(index_col_width))
+                                .min_w(px(index_col_width))
+                                .px_0()
+                                .py_0()
+                                .flex_shrink_0()
+                                .overflow_hidden()
+                                .border_r_1()
+                                .border_color(rgba(0x10B98140))
+                                .child(index_cell_btn),
+                        );
 
-            body = body.child(row);
-        }
+                    for (col_idx, _col_name) in result.columns.iter().enumerate() {
+                        let col_w = col_widths.get(col_idx).copied().unwrap_or(120.0);
+                        let is_cell_selected = self
+                            .selected_cell
+                            .map(|c| c.is_inserted && c.row_idx == ins_idx && c.col_idx == col_idx)
+                            .unwrap_or(false);
+                        let cur_val = insertion.values.get(col_idx).unwrap_or(&QueryValue::Null);
 
-        // 2. Render existing rows
-        for (rel_idx, &orig_row_idx) in page_slice_indices.iter().enumerate() {
+                        let val_element = match cur_val {
+                            QueryValue::Null => div()
+                                .w_full()
+                                .min_w_0()
+                                .truncate()
+                                .text_xs()
+                                .italic()
+                                .text_color(ThemeColors::TEXT_FAINT)
+                                .child("NULL"),
+                            QueryValue::Bool(b) => div()
+                                .w_full()
+                                .min_w_0()
+                                .truncate()
+                                .text_xs()
+                                .text_color(if *b {
+                                    ThemeColors::SUCCESS
+                                } else {
+                                    ThemeColors::WARNING
+                                })
+                                .child(if *b { "true" } else { "false" }),
+                            QueryValue::Int(i) => div()
+                                .w_full()
+                                .min_w_0()
+                                .truncate()
+                                .text_xs()
+                                .font_family("JetBrains Mono")
+                                .text_color(ThemeColors::TEXT_PRIMARY)
+                                .child(i.to_string()),
+                            QueryValue::Float(f) => div()
+                                .w_full()
+                                .min_w_0()
+                                .truncate()
+                                .text_xs()
+                                .font_family("JetBrains Mono")
+                                .text_color(ThemeColors::PRIMARY_BORDER)
+                                .child(format!("{f:.4}")),
+                            _ => div()
+                                .w_full()
+                                .min_w_0()
+                                .truncate()
+                                .text_xs()
+                                .font_family("JetBrains Mono")
+                                .text_color(ThemeColors::TEXT_PRIMARY)
+                                .child(cur_val.to_display_string().replace(['\r', '\n'], " ")),
+                        };
+
+                        let on_sel_cell = self.on_select_cell.clone();
+                        let on_tog_modal = self.on_toggle_modal.clone();
+                        let cell_container = div()
+                            .size_full()
+                            .h(px(32.0))
+                            .px_2()
+                            .flex()
+                            .items_center()
+                            .cursor_pointer()
+                            .overflow_hidden()
+                            .relative()
+                            .id(ElementId::NamedInteger(
+                                format!("grid_ins_cell_{ins_idx}").into(),
+                                col_idx as u64,
+                            ))
+                            .when(is_cell_selected, |this| {
+                                this.bg(ThemeColors::PRIMARY_BG)
+                                    .border_2()
+                                    .border_color(ThemeColors::PRIMARY_BORDER)
+                                    .rounded_xs()
+                            })
+                            .when(!is_cell_selected, |this| {
+                                this.hover(|s| s.bg(rgba(0x10B98118)))
+                            })
+                            .on_click(move |event, window, cx| {
+                                if let Some(ref h) = on_sel_cell {
+                                    h(GridCellCoord::inserted(ins_idx, col_idx), window, cx);
+                                }
+                                if event.click_count() >= 2 {
+                                    if let Some(ref h_m) = on_tog_modal {
+                                        h_m(true, window, cx);
+                                    }
+                                }
+                            })
+                            .child(val_element);
+
+                        row = row.child(
+                            TableCell::new()
+                                .h(px(32.0))
+                                .w(px(col_w))
+                                .min_w(px(col_w))
+                                .px_0()
+                                .py_0()
+                                .flex_shrink_0()
+                                .overflow_hidden()
+                                .border_r_1()
+                                .border_color(rgba(0x10B98130))
+                                .child(cell_container),
+                        );
+                    }
+
+                    body = body.child(row);
+                }
+                GridDisplayItem::Original(rel_idx, orig_row_idx) => {
             let abs_idx = page_start + rel_idx + 1;
             let row_data = &result.rows[orig_row_idx];
             let is_row_selected = self
@@ -1615,6 +1734,8 @@ impl RenderOnce for DataGrid {
             }
             body = body.child(row);
         }
+        }
+    }
 
         let table = Table::new()
             .small()
@@ -1634,14 +1755,16 @@ impl RenderOnce for DataGrid {
                     .min_w(px(total_table_width)),
             );
 
-        let scroll_handle = window
-            .use_keyed_state(
-                ElementId::Name("data_grid_table_scroll_handle".into()),
-                cx,
-                |_, _| ScrollHandle::default(),
-            )
-            .read(cx)
-            .clone();
+        let scroll_handle = self.scroll_handle.clone().unwrap_or_else(|| {
+            window
+                .use_keyed_state(
+                    ElementId::Name("data_grid_table_scroll_handle".into()),
+                    cx,
+                    |_, _| ScrollHandle::default(),
+                )
+                .read(cx)
+                .clone()
+        });
 
         let table_wrap = div()
             .id("data_grid_table_inner_wrap")
@@ -2643,6 +2766,53 @@ mod tests {
         assert!(coord_inserted.is_inserted);
         assert_eq!(coord_inserted.row_idx, 0);
         assert_eq!(coord_inserted.col_idx, 1);
+    }
+
+    #[test]
+    fn test_compute_grid_display_items_interleaving() {
+        // Suppose page 0 has original rows [0, 1, 2]
+        let page_slice = vec![0, 1, 2];
+
+        // Inserted row 0 anchored after original row 0
+        // Inserted row 1 anchored after inserted row 0 (temp_id 0)
+        // Inserted row 2 anchored after original row 2
+        // Inserted row 3 anchored at PageEnd(0)
+        let inserted = vec![
+            RowInsertion {
+                temp_id: 0,
+                values: vec![QueryValue::Int(10)],
+                anchor: InsertAnchor::AfterRow(0),
+            },
+            RowInsertion {
+                temp_id: 1,
+                values: vec![QueryValue::Int(11)],
+                anchor: InsertAnchor::AfterInserted(0),
+            },
+            RowInsertion {
+                temp_id: 2,
+                values: vec![QueryValue::Int(12)],
+                anchor: InsertAnchor::AfterRow(2),
+            },
+            RowInsertion {
+                temp_id: 3,
+                values: vec![QueryValue::Int(13)],
+                anchor: InsertAnchor::PageEnd(0),
+            },
+        ];
+
+        let items = compute_grid_display_items(&page_slice, 0, 1, &inserted);
+        assert_eq!(
+            items,
+            vec![
+                GridDisplayItem::Original(0, 0),
+                GridDisplayItem::Inserted(0), // anchored after orig 0
+                GridDisplayItem::Inserted(1), // anchored after ins 0
+                GridDisplayItem::Original(1, 1),
+                GridDisplayItem::Original(2, 2),
+                GridDisplayItem::Inserted(2), // anchored after orig 2
+                GridDisplayItem::Inserted(3), // page end
+            ]
+        );
     }
 }
 
