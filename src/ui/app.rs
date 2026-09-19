@@ -43,7 +43,7 @@ use gpui_kit::gpui::{
 use std::sync::Arc;
 use uuid::Uuid;
 
-const LOGO_PNG_BYTES: &[u8] = include_bytes!("../../assets/logo.png");
+pub const LOGO_PNG_BYTES: &[u8] = include_bytes!("../../assets/logo.png");
 
 gpui_kit::actions!(
     zqlcrab,
@@ -3532,7 +3532,7 @@ impl Render for CrabStudioApp {
                         handle_for_task.update(cx, |app, cx| {
                             app.is_checking_update = false;
                             app.update_status_msg =
-                                Some("You are running the latest version (v0.1.0)".to_string());
+                                Some(format!("You are running the latest version (v{})", env!("CARGO_PKG_VERSION")));
                             app.status_message =
                                 Some("Check for updates completed: Up to date".to_string());
                             cx.notify();

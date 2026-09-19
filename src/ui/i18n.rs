@@ -58,7 +58,7 @@ fn translate_en(key: &'static str) -> &'static str {
 
         // Appearance tab
         "appearance.theme" => "Theme",
-        "appearance.theme_desc" => "Customize the visual theme and appearance of CrabStudio",
+        "appearance.theme_desc" => "Customize the visual theme and appearance of zqlcrab",
         "appearance.system" => "System",
         "appearance.system_desc" => "Follow operating system theme",
         "appearance.dark" => "Dark",
@@ -170,7 +170,7 @@ fn translate_zh(key: &'static str) -> &'static str {
 
         // Appearance tab
         "appearance.theme" => "界面主题",
-        "appearance.theme_desc" => "定制 CrabStudio 的视觉外观与色彩主题",
+        "appearance.theme_desc" => "定制 zqlcrab 的视觉外观与色彩主题",
         "appearance.system" => "跟随系统",
         "appearance.system_desc" => "自动匹配操作系统的明暗外观",
         "appearance.dark" => "深色模式",

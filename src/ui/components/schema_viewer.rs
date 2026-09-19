@@ -8,9 +8,10 @@ use gpui_kit::component::{
     Icon, Sizable as _,
     button::{Button, ButtonVariants as _},
     table::{Table, TableBody, TableCell, TableHead, TableHeader, TableRow},
+    tooltip::Tooltip,
 };
 use gpui_kit::gpui::{
-    App, FontWeight, InteractiveElement as _, IntoElement, ParentElement, RenderOnce,
+    App, ElementId, FontWeight, InteractiveElement as _, IntoElement, ParentElement, RenderOnce,
     StatefulInteractiveElement as _, Styled, Window, div, prelude::*, px,
 };
 use std::rc::Rc;
@@ -214,89 +215,166 @@ impl RenderOnce for SchemaViewer {
 
         // Columns section
         let col_header_row = TableRow::new()
-            .child(TableHead::new().child("Name"))
-            .child(TableHead::new().child("Type"))
-            .child(TableHead::new().child("Nullable"))
-            .child(TableHead::new().child("Key"))
-            .child(TableHead::new().child("Default"));
+            .w_full()
+            .child(
+                TableHead::new()
+                    .w(px(200.0))
+                    .flex_shrink_0()
+                    .overflow_hidden()
+                    .child("Name"),
+            )
+            .child(
+                TableHead::new()
+                    .flex_1()
+                    .min_w(px(240.0))
+                    .overflow_hidden()
+                    .child("Type"),
+            )
+            .child(
+                TableHead::new()
+                    .w(px(90.0))
+                    .flex_shrink_0()
+                    .overflow_hidden()
+                    .child("Nullable"),
+            )
+            .child(
+                TableHead::new()
+                    .w(px(100.0))
+                    .flex_shrink_0()
+                    .overflow_hidden()
+                    .child("Key"),
+            )
+            .child(
+                TableHead::new()
+                    .w(px(180.0))
+                    .min_w(px(120.0))
+                    .flex_shrink_0()
+                    .overflow_hidden()
+                    .child("Default"),
+            );
 
-        let mut col_body = TableBody::new();
-        for col in &self.columns {
+        let mut col_body = TableBody::new().w_full();
+        for (col_idx, col) in self.columns.iter().enumerate() {
+            let type_str = col.data_type.clone();
+            let default_str = col.default_value.clone().unwrap_or_else(|| "-".to_string());
+            let default_tooltip = default_str.clone();
+
             let row = TableRow::new()
+                .w_full()
                 .child(
-                    TableCell::new().child(
-                        div()
-                            .text_xs()
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(ThemeColors::TEXT_PRIMARY)
-                            .child(col.name.clone()),
-                    ),
+                    TableCell::new()
+                        .w(px(200.0))
+                        .flex_shrink_0()
+                        .overflow_hidden()
+                        .child(
+                            div()
+                                .w_full()
+                                .min_w_0()
+                                .truncate()
+                                .text_xs()
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(ThemeColors::TEXT_PRIMARY)
+                                .child(col.name.clone()),
+                        ),
                 )
                 .child(
-                    TableCell::new().child(
-                        div()
-                            .text_xs()
-                            .font_family("JetBrains Mono")
-                            .text_color(ThemeColors::PRIMARY_BORDER)
-                            .child(col.data_type.clone()),
-                    ),
+                    TableCell::new()
+                        .flex_1()
+                        .min_w(px(240.0))
+                        .overflow_hidden()
+                        .child(
+                            div()
+                                .id(ElementId::NamedInteger("col_type".into(), col_idx as u64))
+                                .w_full()
+                                .min_w_0()
+                                .truncate()
+                                .text_xs()
+                                .font_family("JetBrains Mono")
+                                .text_color(ThemeColors::PRIMARY_BORDER)
+                                .tooltip(move |window, cx| {
+                                    Tooltip::new(type_str.clone()).build(window, cx)
+                                })
+                                .child(col.data_type.clone()),
+                        ),
                 )
                 .child(
-                    TableCell::new().child(
-                        div()
-                            .text_xs()
-                            .text_color(if col.is_nullable {
-                                ThemeColors::TEXT_MUTED
-                            } else {
-                                ThemeColors::WARNING
-                            })
-                            .child(if col.is_nullable { "YES" } else { "NO" }),
-                    ),
+                    TableCell::new()
+                        .w(px(90.0))
+                        .flex_shrink_0()
+                        .overflow_hidden()
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(if col.is_nullable {
+                                    ThemeColors::TEXT_MUTED
+                                } else {
+                                    ThemeColors::WARNING
+                                })
+                                .child(if col.is_nullable { "YES" } else { "NO" }),
+                        ),
                 )
                 .child(
-                    TableCell::new().child(
-                        h_flex()
-                            .gap_1()
-                            .when(col.is_primary_key, |this| {
-                                this.child(
-                                    div()
-                                        .px_1p5()
-                                        .py_0p5()
-                                        .rounded_sm()
-                                        .bg(ThemeColors::PRIMARY)
-                                        .text_xs()
-                                        .text_color(ThemeColors::TEXT_PRIMARY)
-                                        .child("PK"),
-                                )
-                            })
-                            .when(col.is_auto_increment, |this| {
-                                this.child(
-                                    div()
-                                        .px_1p5()
-                                        .py_0p5()
-                                        .rounded_sm()
-                                        .bg(ThemeColors::BG_SURFACE_ACTIVE)
-                                        .text_xs()
-                                        .text_color(ThemeColors::TEXT_MUTED)
-                                        .child("AUTO"),
-                                )
-                            }),
-                    ),
+                    TableCell::new()
+                        .w(px(100.0))
+                        .flex_shrink_0()
+                        .overflow_hidden()
+                        .child(
+                            h_flex()
+                                .gap_1()
+                                .when(col.is_primary_key, |this| {
+                                    this.child(
+                                        div()
+                                            .px_1p5()
+                                            .py_0p5()
+                                            .rounded_sm()
+                                            .bg(ThemeColors::PRIMARY)
+                                            .text_xs()
+                                            .text_color(ThemeColors::TEXT_PRIMARY)
+                                            .child("PK"),
+                                    )
+                                })
+                                .when(col.is_auto_increment, |this| {
+                                    this.child(
+                                        div()
+                                            .px_1p5()
+                                            .py_0p5()
+                                            .rounded_sm()
+                                            .bg(ThemeColors::BG_SURFACE_ACTIVE)
+                                            .text_xs()
+                                            .text_color(ThemeColors::TEXT_MUTED)
+                                            .child("AUTO"),
+                                    )
+                                }),
+                        ),
                 )
                 .child(
-                    TableCell::new().child(
-                        div()
-                            .text_xs()
-                            .text_color(ThemeColors::TEXT_FAINT)
-                            .child(col.default_value.clone().unwrap_or_else(|| "-".to_string())),
-                    ),
+                    TableCell::new()
+                        .w(px(180.0))
+                        .min_w(px(120.0))
+                        .flex_shrink_0()
+                        .overflow_hidden()
+                        .child(
+                            div()
+                                .id(ElementId::NamedInteger("col_def".into(), col_idx as u64))
+                                .w_full()
+                                .min_w_0()
+                                .truncate()
+                                .text_xs()
+                                .text_color(ThemeColors::TEXT_FAINT)
+                                .tooltip(move |window, cx| {
+                                    Tooltip::new(default_tooltip.clone()).build(window, cx)
+                                })
+                                .child(default_str),
+                        ),
                 );
             col_body = col_body.child(row);
         }
 
         let columns_table = Table::new()
             .small()
-            .child(TableHeader::new().child(col_header_row))
+            .w_full()
+            .min_w(px(810.0))
+            .child(TableHeader::new().w_full().min_w(px(810.0)).child(col_header_row))
             .child(col_body);
 
         // Indexes section
@@ -392,7 +470,9 @@ impl RenderOnce for SchemaViewer {
             .child(header)
             .child(
                 div()
+                    .id("schema_columns_container")
                     .p_3()
+                    .overflow_x_scroll()
                     .child(
                         div()
                             .text_xs()

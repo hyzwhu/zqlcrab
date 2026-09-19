@@ -10,11 +10,12 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
 };
 use gpui_kit::gpui::{
-    App, ElementId, FontWeight, InteractiveElement as _, IntoElement, ParentElement,
-    RenderOnce, StatefulInteractiveElement as _, Styled, Window, div, hsla,
+    App, ElementId, FontWeight, Image, ImageFormat, InteractiveElement as _, IntoElement,
+    ParentElement, RenderOnce, StatefulInteractiveElement as _, Styled, Window, div, hsla, img,
     prelude::FluentBuilder as _, px,
 };
 use std::rc::Rc;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SettingsTab {
@@ -586,20 +587,26 @@ impl SettingsView {
                                 h_flex()
                                     .items_center()
                                     .gap_3()
-                                    .child(
+                                    .child({
+                                        let logo_img = Arc::new(Image {
+                                            format: ImageFormat::Png,
+                                            bytes: crate::ui::app::LOGO_PNG_BYTES.to_vec(),
+                                            id: 0x7a716c63726162,
+                                        });
                                         div()
                                             .w(px(40.0))
                                             .h(px(40.0))
-                                            .rounded_md()
+                                            .rounded_lg()
                                             .bg(ThemeColors::PRIMARY_BG)
                                             .items_center()
                                             .justify_center()
+                                            .flex_shrink_0()
                                             .child(
-                                                Icon::new(IconName::Database)
-                                                    .size(px(20.0))
-                                                    .text_color(ThemeColors::PRIMARY_BORDER),
-                                            ),
-                                    )
+                                                img(logo_img)
+                                                    .size(px(28.0))
+                                                    .rounded(px(4.0)),
+                                            )
+                                    })
                                     .child(
                                         v_flex()
                                             .gap_0p5()
@@ -609,30 +616,33 @@ impl SettingsView {
                                                     .gap_2()
                                                     .child(
                                                         div()
+                                                            .flex_shrink_0()
                                                             .text_sm()
                                                             .font_weight(FontWeight::BOLD)
                                                             .text_color(ThemeColors::TEXT_PRIMARY)
-                                                            .child("CrabStudio"),
+                                                            .child("zqlcrab"),
                                                     )
                                                     .child(
                                                         div()
+                                                            .flex_shrink_0()
                                                             .px_1p5()
                                                             .py_0p5()
                                                             .rounded_sm()
                                                             .bg(ThemeColors::BG_APP)
-                                                            .text_size(px(11.0))
+                                                            .text_xs()
                                                             .font_weight(FontWeight::MEDIUM)
                                                             .text_color(ThemeColors::PRIMARY_BORDER)
-                                                            .child("v0.1.0"),
+                                                            .child(format!("v{}", env!("CARGO_PKG_VERSION"))),
                                                     )
                                                     .child(
                                                         div()
-                                                            .px_1p5()
+                                                            .flex_shrink_0()
+                                                            .px_2()
                                                             .py_0p5()
                                                             .rounded_sm()
                                                             .bg(ThemeColors::BG_APP)
-                                                            .text_size(px(10.0))
-                                                            .text_color(ThemeColors::TEXT_FAINT)
+                                                            .text_xs()
+                                                            .text_color(ThemeColors::TEXT_MUTED)
                                                             .child(format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)),
                                                     ),
                                             )
