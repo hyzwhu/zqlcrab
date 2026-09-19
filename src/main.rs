@@ -1,6 +1,7 @@
 //! Desktop relational database client application entry point.
 
 pub mod db;
+pub mod settings;
 pub mod ui;
 
 use gpui_kit::AppContext;
@@ -19,7 +20,12 @@ fn main() {
         .with_assets(gpui_kit::assets::AllAssets)
         .run(|cx| {
             gpui_kit::init(cx);
-            Theme::change(ThemeMode::Dark, None, cx);
+            let settings = settings::SettingsManager::new();
+            let initial_theme = match settings.settings().appearance.theme {
+                settings::ThemePreference::Light => ThemeMode::Light,
+                _ => ThemeMode::Dark,
+            };
+            Theme::change(initial_theme, None, cx);
 
             cx.bind_keys([
                 KeyBinding::new("cmd-enter", RunQuery, Some("CrabStudio")),

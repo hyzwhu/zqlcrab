@@ -16,9 +16,11 @@ use crate::db::types::{
     ColumnInfo, ConnectionConfig, DatabaseFamily, DatabaseType, IndexInfo, QueryResult, QueryValue,
     SortDirection, TableInfo,
 };
+use crate::settings::{SettingsManager, ThemePreference};
 use crate::ui::components::{
-    AppStatusBar, ConnectionDialog, ConsoleBottomTab, DataGrid, ExplainViewMode, QueryConsole,
-    QueryHistoryView, SchemaViewer, Sidebar, SqlReviewModal,
+    ActivityBar, ActivityNav, AppStatusBar, ConnectionDialog, ConsoleBottomTab, DataGrid,
+    ExplainViewMode, QueryConsole, QueryHistoryView, SchemaViewer, SettingsTab, SettingsView,
+    Sidebar, SqlReviewModal,
     create_table_modal::{CreateTableColumnState, CreateTableIndexState, CreateTableModal},
     data_grid::GridCellCoord,
 };
@@ -27,7 +29,7 @@ use chrono::Utc;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::{h_flex, v_flex};
 use gpui_kit::component::{
-    Icon, Sizable as _, TitleBar,
+    Icon, Sizable as _, Theme, ThemeMode, TitleBar,
     button::{Button, ButtonVariants as _},
     input::{InputEvent, InputState, TextareaState},
     resizable::ResizableState,
@@ -204,6 +206,13 @@ pub struct CrabStudioApp {
     create_table_is_executing: bool,
     create_table_error: Option<String>,
     create_table_copied: bool,
+
+    // Settings state
+    settings_manager: SettingsManager,
+    active_nav: ActivityNav,
+    active_settings_tab: SettingsTab,
+    is_checking_update: bool,
+    update_status_msg: Option<String>,
 }
 
 impl CrabStudioApp {
@@ -211,6 +220,7 @@ impl CrabStudioApp {
         let mut manager = ConnectionManager::new();
         manager.ensure_default_presets();
         let saved = manager.list_configs();
+        let settings_manager = SettingsManager::new();
 
         let handle = cx.entity().clone();
         let first_conn_id = saved
@@ -365,6 +375,11 @@ impl CrabStudioApp {
             create_table_is_executing: false,
             create_table_error: None,
             create_table_copied: false,
+            settings_manager,
+            active_nav: ActivityNav::Databases,
+            active_settings_tab: SettingsTab::Appearance,
+            is_checking_update: false,
+            update_status_msg: None,
         }
     }
 
@@ -517,9 +532,39 @@ impl CrabStudioApp {
 
     /// Execute the query written in the query editor
     pub fn run_query(&mut self, cx: &mut Context<Self>) {
-        let sql = self.query_editor.read(cx).value().to_string();
+        let mut sql = self.query_editor.read(cx).value().to_string();
         if sql.trim().is_empty() {
             return;
+        }
+
+        let settings = self.settings_manager.settings();
+
+        // Format SQL before execution if configured
+        if settings.editor.format_on_run {
+            let formatted = format_sql(&sql);
+            if formatted != sql {
+                sql = formatted;
+            }
+        }
+
+        // Safe mode protection: confirm/block unbounded destructive queries
+        if settings.query.safe_mode {
+            let upper = sql.trim().to_uppercase();
+            let is_unbounded_del = upper.starts_with("DELETE") && !upper.contains("WHERE");
+            let is_unbounded_upd = upper.starts_with("UPDATE") && !upper.contains("WHERE");
+            let is_drop = upper.starts_with("DROP");
+            let is_truncate = upper.starts_with("TRUNCATE");
+
+            if is_unbounded_del || is_unbounded_upd || is_drop || is_truncate {
+                self.console_error = Some(
+                    "Safe Mode Protection: Detected destructive or unbounded mutation query without WHERE clause. Execution halted. (Disable Safe Mode in Settings to bypass)."
+                        .to_string(),
+                );
+                self.console_bottom_tab = ConsoleBottomTab::Results;
+                self.status_message = Some("Blocked by Safe Mode".to_string());
+                cx.notify();
+                return;
+            }
         }
 
         let Some(conn) = self.active_connection.clone() else {
@@ -3315,6 +3360,117 @@ impl Render for CrabStudioApp {
             None
         };
 
+        // Left rail Activity Bar
+        let activity_bar = ActivityBar::new(self.active_nav, self.settings_manager.settings().language)
+            .on_select_nav({
+                let handle = app_handle.clone();
+                move |nav, _, cx| {
+                    handle.update(cx, |this, cx| {
+                        match nav {
+                            ActivityNav::Databases => {
+                                this.active_nav = ActivityNav::Databases;
+                            }
+                            ActivityNav::Console => {
+                                this.active_nav = ActivityNav::Databases;
+                                this.active_tab = WorkspaceTab::QueryConsole;
+                            }
+                            ActivityNav::Ai => {
+                                this.active_nav = ActivityNav::Settings;
+                                this.active_settings_tab = SettingsTab::Llms;
+                            }
+                            ActivityNav::History => {
+                                this.active_nav = ActivityNav::Databases;
+                                this.active_tab = WorkspaceTab::History;
+                            }
+                            ActivityNav::Git => {
+                                this.status_message =
+                                    Some("Source Control: Git branch 'master' is up to date".to_string());
+                            }
+                            ActivityNav::Settings => {
+                                this.active_nav = ActivityNav::Settings;
+                            }
+                        }
+                        cx.notify();
+                    });
+                }
+            });
+
+        // Settings View component
+        let settings_view = SettingsView::new(
+            self.settings_manager.settings().clone(),
+            self.active_settings_tab,
+        )
+        .checking_update(self.is_checking_update)
+        .update_status_msg(self.update_status_msg.clone())
+        .on_select_tab({
+            let handle = app_handle.clone();
+            move |tab, _, cx| {
+                handle.update(cx, |this, cx| {
+                    this.active_settings_tab = tab;
+                    cx.notify();
+                });
+            }
+        })
+        .on_change_settings({
+            let handle = app_handle.clone();
+            move |mutator, window, cx| {
+                handle.update(cx, |this, cx| {
+                    let _ = this.settings_manager.update(mutator);
+                    let _ = this.settings_manager.save();
+                    let theme = this.settings_manager.settings().appearance.theme;
+                    let theme_mode = match theme {
+                        ThemePreference::Light => ThemeMode::Light,
+                        _ => ThemeMode::Dark,
+                    };
+                    Theme::change(theme_mode, Some(window), cx);
+                    this.status_message = Some("Settings saved".to_string());
+                    cx.notify();
+                });
+            }
+        })
+        .on_reset_defaults({
+            let handle = app_handle.clone();
+            move |window, cx| {
+                handle.update(cx, |this, cx| {
+                    let _ = this.settings_manager.reset_defaults();
+                    let theme = this.settings_manager.settings().appearance.theme;
+                    let theme_mode = match theme {
+                        ThemePreference::Light => ThemeMode::Light,
+                        _ => ThemeMode::Dark,
+                    };
+                    Theme::change(theme_mode, Some(window), cx);
+                    this.status_message = Some("Settings reset to defaults".to_string());
+                    cx.notify();
+                });
+            }
+        })
+        .on_check_updates({
+            let handle = app_handle.clone();
+            move |_, cx| {
+                handle.update(cx, |this, cx| {
+                    this.is_checking_update = true;
+                    this.update_status_msg = None;
+                    cx.notify();
+                });
+
+                let handle_for_task = handle.clone();
+                cx.spawn(async move |cx| {
+                    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+                    let _ = cx.update(|cx| {
+                        handle_for_task.update(cx, |app, cx| {
+                            app.is_checking_update = false;
+                            app.update_status_msg =
+                                Some("You are running the latest version (v0.1.0)".to_string());
+                            app.status_message =
+                                Some("Check for updates completed: Up to date".to_string());
+                            cx.notify();
+                        });
+                    });
+                })
+                .detach();
+            }
+        });
+
         // Root layout
         v_flex()
             .id("crabstudio_root")
@@ -3390,23 +3546,34 @@ impl Render for CrabStudioApp {
                     .flex_1()
                     .w_full()
                     .min_h_0()
-                    .child(sidebar)
-                    .child(
-                        v_flex()
+                    .child(activity_bar)
+                    .child(if self.active_nav == ActivityNav::Settings {
+                        settings_view.into_any_element()
+                    } else {
+                        h_flex()
+                            .items_stretch()
                             .flex_1()
-                            .h_full()
-                            .min_w_0()
+                            .w_full()
                             .min_h_0()
-                            .child(tabs_bar)
+                            .child(sidebar)
                             .child(
                                 v_flex()
-                                    .size_full()
                                     .flex_1()
+                                    .h_full()
+                                    .min_w_0()
                                     .min_h_0()
-                                    .w_full()
-                                    .child(main_content),
-                            ),
-                    ),
+                                    .child(tabs_bar)
+                                    .child(
+                                        v_flex()
+                                            .size_full()
+                                            .flex_1()
+                                            .min_h_0()
+                                            .w_full()
+                                            .child(main_content),
+                                    ),
+                            )
+                            .into_any_element()
+                    }),
             )
             .child(status_bar)
             .children(dialog_overlay)

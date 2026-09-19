@@ -1,3 +1,4 @@
+pub mod activity_bar;
 pub mod connection_dialog;
 pub mod create_table_modal;
 pub mod data_grid;
@@ -5,10 +6,12 @@ pub mod explain_panel;
 pub mod query_console;
 pub mod query_history;
 pub mod schema_viewer;
+pub mod settings_view;
 pub mod sidebar;
 pub mod sql_review_modal;
 pub mod status_bar;
 
+pub use activity_bar::{ActivityBar, ActivityNav};
 pub use connection_dialog::ConnectionDialog;
 pub use create_table_modal::{CreateTableColumnState, CreateTableModal};
 pub use data_grid::DataGrid;
@@ -16,6 +19,7 @@ pub use explain_panel::{ExplainPanel, ExplainViewMode};
 pub use query_console::{ConsoleBottomTab, QueryConsole};
 pub use query_history::QueryHistoryView;
 pub use schema_viewer::SchemaViewer;
+pub use settings_view::{SettingsTab, SettingsView};
 pub use sidebar::Sidebar;
 pub use sql_review_modal::SqlReviewModal;
 pub use status_bar::AppStatusBar;
