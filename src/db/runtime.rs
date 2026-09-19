@@ -60,6 +60,21 @@ mod tests {
         handle.join().expect("thread join should succeed");
     }
 
+    #[tokio::test]
+    async fn test_active_connection_connect_docker_mysql() {
+        let config = ConnectionConfig::mysql(
+            "Local Docker MySQL",
+            "127.0.0.1",
+            3306,
+            "skill_up_web",
+            "root",
+            Some("skillup_local_test".to_string()),
+        );
+        let res = ActiveConnection::connect_config(config).await;
+        println!("test_active_connection_connect_docker_mysql result: {:?}", res.is_ok());
+        assert!(res.is_ok());
+    }
+
     #[test]
     fn test_mysql_connection_does_not_panic_without_ambient_reactor() {
         let handle = std::thread::spawn(|| {

@@ -1642,8 +1642,8 @@ impl RenderOnce for DataGrid {
 
         let table_scroll_view = div()
             .id("data_grid_table_scroll")
-            .size_full()
             .flex_1()
+            .h_full()
             .min_w_0()
             .min_h_0()
             .relative()
@@ -1860,9 +1860,11 @@ impl RenderOnce for DataGrid {
 
                     Some(
                         v_flex()
-                            .w(px(380.0))
+                            .w(px(340.0))
+                            .min_w(px(340.0))
                             .h_full()
                             .flex_shrink_0()
+                            .overflow_hidden()
                             .border_l_1()
                             .border_color(ThemeColors::BORDER)
                             .bg(ThemeColors::BG_SURFACE)
@@ -1916,6 +1918,8 @@ impl RenderOnce for DataGrid {
                             .child(
                                 v_flex()
                                     .flex_1()
+                                    .w_full()
+                                    .min_w_0()
                                     .min_h_0()
                                     .overflow_scrollbar()
                                     .p_3()
@@ -1923,6 +1927,8 @@ impl RenderOnce for DataGrid {
                                     // Selected Field Overview Card
                                     .child(
                                         v_flex()
+                                            .w_full()
+                                            .min_w_0()
                                             .gap_2()
                                             .p_2p5()
                                             .rounded_md()
@@ -1972,8 +1978,9 @@ impl RenderOnce for DataGrid {
                                     .child(
                                         div()
                                             .w_full()
-                                            .min_h(px(140.0))
-                                            .max_h(px(240.0))
+                                            .min_w_0()
+                                            .min_h(px(120.0))
+                                            .max_h(px(200.0))
                                             .p_2p5()
                                             .rounded_md()
                                             .bg(ThemeColors::BG_APP)
@@ -2077,6 +2084,8 @@ impl RenderOnce for DataGrid {
                                             }
 
                                             div()
+                                                .w_full()
+                                                .min_w_0()
                                                 .p_2p5()
                                                 .rounded_md()
                                                 .bg(ThemeColors::BG_APP)
@@ -2175,6 +2184,8 @@ impl RenderOnce for DataGrid {
                                     // Row Record Fields Section
                                     .child(
                                         v_flex()
+                                            .w_full()
+                                            .min_w_0()
                                             .gap_2()
                                             .pt_2()
                                             .border_t_1()
@@ -2213,9 +2224,11 @@ impl RenderOnce for DataGrid {
                 // Empty selection placeholder in inspector
                 Some(
                     v_flex()
-                        .w(px(380.0))
+                        .w(px(340.0))
+                        .min_w(px(340.0))
                         .h_full()
                         .flex_shrink_0()
+                        .overflow_hidden()
                         .border_l_1()
                         .border_color(ThemeColors::BORDER)
                         .bg(ThemeColors::BG_SURFACE)
@@ -2272,16 +2285,21 @@ impl RenderOnce for DataGrid {
 
         // Main table and inspector layout
         let main_view = h_flex()
-            .size_full()
             .flex_1()
+            .h_full()
             .min_h_0()
+            .min_w_0()
             .w_full()
             .items_stretch()
+            .overflow_hidden()
             .child(table_scroll_view)
             .children(inspector_panel);
 
         let grid_content = v_flex()
             .size_full()
+            .min_h_0()
+            .min_w_0()
+            .overflow_hidden()
             .bg(ThemeColors::BG_APP)
             .child(toolbar)
             .children(dirty_bar)

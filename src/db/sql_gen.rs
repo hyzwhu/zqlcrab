@@ -79,7 +79,17 @@ pub fn generate_review_plan(
                 _ => false,
             };
 
-            if is_auto_placeholder {
+            let has_default_and_not_nullable = col_meta.map(|c| {
+                !c.is_nullable && (c.default_value.is_some() || c.is_auto_increment)
+            }).unwrap_or(false);
+
+            let is_default_placeholder = match val {
+                QueryValue::Null => has_default_and_not_nullable,
+                QueryValue::String(s) if s.trim().eq_ignore_ascii_case("<default>") => true,
+                _ => false,
+            };
+
+            if is_auto_placeholder || is_default_placeholder {
                 continue;
             }
 

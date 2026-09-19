@@ -188,7 +188,8 @@ impl CrabStudioApp {
         let handle = cx.entity().clone();
         let first_conn_id = saved
             .iter()
-            .find(|c| c.db_type == DatabaseType::Sqlite)
+            .find(|c| c.name.contains("Docker MySQL"))
+            .or_else(|| saved.iter().find(|c| c.db_type == DatabaseType::Sqlite))
             .or_else(|| saved.first())
             .map(|c| c.id.clone());
         if let Some(conn_id) = first_conn_id {
@@ -381,6 +382,9 @@ impl CrabStudioApp {
                         app.schema_indexes.clear();
                         app.schema_ddl = None;
                         app.status_message = Some(format!("Connected to {name}"));
+                        if let Some(target) = app.active_tables.first().cloned() {
+                            app.select_table(target, cx);
+                        }
                         cx.notify();
                     }).ok();
                 }
