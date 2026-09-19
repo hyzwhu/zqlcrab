@@ -8,10 +8,11 @@ use gpui_kit::base::{h_flex, v_flex};
 use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
     input::{Input, InputState},
+    menu::{DropdownMenu as _, PopupMenuItem},
     Disableable as _, Icon, Sizable as _,
 };
 use gpui_kit::gpui::{
-    div, px, rgba, App, Entity, FontWeight, IntoElement, ParentElement as _,
+    div, px, rgba, Anchor, App, ElementId, Entity, FontWeight, IntoElement, ParentElement as _,
     RenderOnce, Styled, Window, prelude::*,
 };
 use std::rc::Rc;
@@ -69,6 +70,7 @@ pub struct CreateTableModal {
     on_add_index: Option<ActionCallback>,
     on_remove_index: Option<IndexActionCallback>,
     on_toggle_index_type: Option<IndexActionCallback>,
+    on_toggle_index_column: Option<IndexStringCallback>,
 }
 
 impl CreateTableModal {
@@ -107,6 +109,7 @@ impl CreateTableModal {
             on_add_index: None,
             on_remove_index: None,
             on_toggle_index_type: None,
+            on_toggle_index_column: None,
         }
     }
 
@@ -136,6 +139,14 @@ impl CreateTableModal {
         F: Fn(usize, &mut Window, &mut App) + 'static,
     {
         self.on_toggle_index_type = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_toggle_index_column<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(usize, String, &mut Window, &mut App) + 'static,
+    {
+        self.on_toggle_index_column = Some(Rc::new(handler));
         self
     }
 
@@ -241,7 +252,7 @@ impl CreateTableModal {
 }
 
 impl RenderOnce for CreateTableModal {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let cancel_handler = self.on_cancel.clone();
         let execute_handler = self.on_execute.clone();
         let copy_handler = self.on_copy_sql.clone();
@@ -252,6 +263,18 @@ impl RenderOnce for CreateTableModal {
         let toggle_ai_handler = self.on_toggle_auto_inc.clone();
         let quick_type_handler = self.on_quick_type.clone();
         let remove_col_handler = self.on_remove_column.clone();
+        let toggle_idx_col_handler = self.on_toggle_index_column.clone();
+
+        let available_columns: Vec<(String, String)> = self
+            .columns
+            .iter()
+            .map(|c| {
+                let name = c.name.read(cx).value().trim().to_string();
+                let dt = c.data_type.read(cx).value().trim().to_string();
+                (name, dt)
+            })
+            .filter(|(name, _)| !name.is_empty())
+            .collect();
 
         let family_str = match self.database_family {
             DatabaseFamily::Sqlite => "SQLite",
@@ -580,6 +603,82 @@ impl RenderOnce for CreateTableModal {
                     });
                 }
 
+                let current_cols_raw = index_item.columns.read(cx).value().to_string();
+                let current_col_list: Vec<String> = current_cols_raw
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+
+                let mut chips_row = h_flex().items_center().gap_1();
+                for (col_i, (col_name, _col_type)) in available_columns.iter().take(4).enumerate() {
+                    let is_checked = current_col_list.iter().any(|c| c.eq_ignore_ascii_case(col_name));
+                    let chip_id = ElementId::Name(format!("idx_quick_col_{idx}_{col_i}").into());
+                    let mut chip = Button::new(chip_id).xsmall();
+                    if is_checked {
+                        chip = chip
+                            .primary()
+                            .icon(IconName::Check)
+                            .label(col_name.as_str())
+                            .tooltip(format!("Remove '{col_name}' from index columns"));
+                    } else {
+                        chip = chip
+                            .ghost()
+                            .icon(IconName::Plus)
+                            .label(col_name.as_str())
+                            .tooltip(format!("Add '{col_name}' to index columns"));
+                    }
+                    if let Some(ref on_tog) = toggle_idx_col_handler {
+                        let on_tog = on_tog.clone();
+                        let c_name = col_name.clone();
+                        chip = chip.on_click(move |_, window, cx| {
+                            on_tog(idx_row, c_name.clone(), window, cx);
+                        });
+                    }
+                    chips_row = chips_row.child(chip);
+                }
+
+                let avail_cols_for_menu = available_columns.clone();
+                let cur_cols_for_menu = current_col_list.clone();
+                let menu_toggle_handler = toggle_idx_col_handler.clone();
+
+                let col_menu_id = ElementId::Name(format!("idx_col_menu_{idx}").into());
+                let col_dropdown = Button::new(col_menu_id)
+                    .outline()
+                    .xsmall()
+                    .dropdown_caret(true)
+                    .icon(IconName::List)
+                    .label("Select")
+                    .tooltip("Select columns to include in this index")
+                    .dropdown_menu_with_anchor(Anchor::BottomRight, move |mut menu, _window, _cx| {
+                        menu = menu.max_h(px(260.0)).min_w(px(180.0)).scrollable(true);
+                        if avail_cols_for_menu.is_empty() {
+                            menu = menu.label("No columns defined");
+                        } else {
+                            menu = menu.label("Table Columns");
+                            for (c_name, c_type) in &avail_cols_for_menu {
+                                let is_checked = cur_cols_for_menu.iter().any(|c| c.eq_ignore_ascii_case(c_name));
+                                let on_tog = menu_toggle_handler.clone();
+                                let c_name_val = c_name.clone();
+                                let label_text = if c_type.is_empty() {
+                                    c_name.clone()
+                                } else {
+                                    format!("{c_name}  ({c_type})")
+                                };
+                                menu = menu.item(
+                                    PopupMenuItem::new(label_text)
+                                        .checked(is_checked)
+                                        .on_click(move |_, window, cx| {
+                                            if let Some(ref handler) = on_tog {
+                                                handler(idx_row, c_name_val.clone(), window, cx);
+                                            }
+                                        }),
+                                );
+                            }
+                        }
+                        menu
+                    });
+
                 let row = h_flex()
                     .w_full()
                     .items_center()
@@ -611,10 +710,23 @@ impl RenderOnce for CreateTableModal {
                             .child(type_btn),
                     )
                     .child(
-                        div()
+                        h_flex()
                             .flex_1()
-                            .min_w(px(180.0))
-                            .child(Input::new(&index_item.columns).small().w_full()),
+                            .min_w(px(260.0))
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w(px(120.0))
+                                    .child(
+                                        Input::new(&index_item.columns)
+                                            .small()
+                                            .w_full(),
+                                    ),
+                            )
+                            .child(chips_row)
+                            .child(col_dropdown),
                     )
                     .child(
                         div()
@@ -1001,7 +1113,7 @@ impl RenderOnce for CreateTableModal {
                                     .child(div().w(px(20.0)).text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("#"))
                                     .child(div().w(px(180.0)).text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("INDEX NAME"))
                                     .child(div().w(px(80.0)).items_center().justify_center().child(div().text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("TYPE")))
-                                    .child(div().flex_1().min_w(px(180.0)).text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("COLUMNS (comma-separated)"))
+                                    .child(div().flex_1().min_w(px(260.0)).text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("COLUMNS (select or type comma-separated)"))
                                     .child(div().w(px(32.0)).items_center().justify_center().child(div().text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("DEL"))),
                             )
                             .child(indexes_list),

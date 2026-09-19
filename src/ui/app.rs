@@ -1482,7 +1482,11 @@ impl CrabStudioApp {
         };
 
         let name_inp = cx.new(|cx| InputState::new(window, cx).default_value(&default_name));
-        let cols_inp = cx.new(|cx| InputState::new(window, cx).default_value(&default_target));
+        let cols_inp = cx.new(|cx| {
+            InputState::new(window, cx)
+                .default_value(&default_target)
+                .placeholder("e.g. col1, col2")
+        });
 
         self.create_table_indexes.push(CreateTableIndexState {
             name: name_inp,
@@ -1507,6 +1511,36 @@ impl CrabStudioApp {
                 TableIndexType::Normal => TableIndexType::Unique,
                 TableIndexType::Unique => TableIndexType::Normal,
             };
+            cx.notify();
+        }
+    }
+
+    /// Toggle a column name in an index's columns specification
+    pub fn toggle_create_table_index_column(
+        &mut self,
+        idx: usize,
+        column_name: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(index_item) = self.create_table_indexes.get(idx) {
+            let current_raw = index_item.columns.read(cx).value().to_string();
+            let mut cols: Vec<String> = current_raw
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+
+            if let Some(pos) = cols.iter().position(|c| c.eq_ignore_ascii_case(&column_name)) {
+                cols.remove(pos);
+            } else {
+                cols.push(column_name);
+            }
+
+            let new_val = cols.join(", ");
+            index_item.columns.update(cx, |inp, cx| {
+                inp.set_value(&new_val, window, cx);
+            });
             cx.notify();
         }
     }
@@ -2953,6 +2987,14 @@ impl Render for CrabStudioApp {
                         });
                     }
                 };
+                let on_toggle_idx_col = {
+                    let handle = app_handle.clone();
+                    move |idx: usize, col_name: String, window: &mut Window, cx: &mut App| {
+                        handle.update(cx, |this, cx| {
+                            this.toggle_create_table_index_column(idx, col_name, window, cx);
+                        });
+                    }
+                };
 
                 Some(
                     CreateTableModal::new(
@@ -2968,6 +3010,7 @@ impl Render for CrabStudioApp {
                     .on_add_index(on_add_idx)
                     .on_remove_index(on_remove_idx)
                     .on_toggle_index_type(on_toggle_idx_type)
+                    .on_toggle_index_column(on_toggle_idx_col)
                     .validation_error(validation_err)
                     .error(self.create_table_error.clone())
                     .executing(self.create_table_is_executing)
