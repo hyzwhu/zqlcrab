@@ -8,8 +8,9 @@ use crate::db::history::{QueryHistoryItem, QueryHistoryManager, QueryHistoryStat
 use crate::db::manager::ConnectionManager;
 use crate::db::sql_format::format_sql;
 use crate::db::sql_gen::{
-    extract_table_from_sql, generate_create_table_sql, generate_review_plan, ColumnDef,
-    CreateTableDef, SqlReviewPlan, TableIndexDef, TableIndexType,
+    column_matches_index_spec, extract_table_from_sql, generate_create_table_sql,
+    generate_review_plan, parse_sql_column_list, ColumnDef, CreateTableDef, SqlReviewPlan,
+    TableIndexDef, TableIndexType,
 };
 use crate::db::types::{
     ColumnInfo, ConnectionConfig, DatabaseFamily, DatabaseType, IndexInfo, QueryResult,
@@ -1482,11 +1483,24 @@ impl CrabStudioApp {
         };
 
         let name_inp = cx.new(|cx| InputState::new(window, cx).default_value(&default_name));
+        cx.subscribe(&name_inp, |_, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
+        })
+        .detach();
+
         let cols_inp = cx.new(|cx| {
             InputState::new(window, cx)
                 .default_value(&default_target)
                 .placeholder("e.g. col1, col2")
         });
+        cx.subscribe(&cols_inp, |_, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
+        })
+        .detach();
 
         self.create_table_indexes.push(CreateTableIndexState {
             name: name_inp,
@@ -1525,13 +1539,9 @@ impl CrabStudioApp {
     ) {
         if let Some(index_item) = self.create_table_indexes.get(idx) {
             let current_raw = index_item.columns.read(cx).value().to_string();
-            let mut cols: Vec<String> = current_raw
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
+            let mut cols = parse_sql_column_list(&current_raw);
 
-            if let Some(pos) = cols.iter().position(|c| c.eq_ignore_ascii_case(&column_name)) {
+            if let Some(pos) = cols.iter().position(|c| column_matches_index_spec(c, &column_name)) {
                 cols.remove(pos);
             } else {
                 cols.push(column_name);
@@ -1594,11 +1604,7 @@ impl CrabStudioApp {
         for idx_state in &self.create_table_indexes {
             let idx_name = idx_state.name.read(cx).value().to_string();
             let cols_raw = idx_state.columns.read(cx).value().to_string();
-            let cols: Vec<String> = cols_raw
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
+            let cols = parse_sql_column_list(&cols_raw);
             if !cols.is_empty() {
                 let idx_def = TableIndexDef::new(idx_name, cols)
                     .unique(idx_state.index_type == TableIndexType::Unique);

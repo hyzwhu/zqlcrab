@@ -420,6 +420,119 @@ fn strip_identifier_quotes(s: &str) -> String {
         .to_string()
 }
 
+/// Splits a comma-separated SQL column list respecting quotes (`"`, `` ` ``, `'`, `[`..`]`).
+/// Useful for parsing index column specifications where quoted identifiers or expressions may contain commas.
+pub fn parse_sql_column_list(s: &str) -> Vec<String> {
+    let mut cols = Vec::new();
+    let mut current = String::new();
+    let mut in_quote: Option<char> = None;
+    let mut in_bracket = false;
+
+    for ch in s.chars() {
+        match ch {
+            '"' | '`' | '\'' => {
+                if let Some(q) = in_quote {
+                    if q == ch {
+                        in_quote = None;
+                    }
+                } else if !in_bracket {
+                    in_quote = Some(ch);
+                }
+                current.push(ch);
+            }
+            '[' if in_quote.is_none() => {
+                in_bracket = true;
+                current.push(ch);
+            }
+            ']' if in_bracket && in_quote.is_none() => {
+                in_bracket = false;
+                current.push(ch);
+            }
+            ',' if in_quote.is_none() && !in_bracket => {
+                let trimmed = current.trim();
+                if !trimmed.is_empty() {
+                    cols.push(trimmed.to_string());
+                }
+                current.clear();
+            }
+            _ => {
+                current.push(ch);
+            }
+        }
+    }
+    let trimmed = current.trim();
+    if !trimmed.is_empty() {
+        cols.push(trimmed.to_string());
+    }
+
+    cols
+}
+
+/// Extracts the clean, unquoted base column identifier from an index column item,
+/// stripping enclosing identifier quotes and optional trailing order qualifiers (ASC / DESC).
+pub fn extract_base_column_name(item: &str) -> String {
+    let trimmed = item.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    // Check if ends with ASC or DESC
+    let mut clean_item = trimmed;
+    let upper = clean_item.to_ascii_uppercase();
+    if upper.ends_with(" ASC") {
+        clean_item = clean_item[..clean_item.len() - 4].trim();
+    } else if upper.ends_with(" DESC") {
+        clean_item = clean_item[..clean_item.len() - 5].trim();
+    }
+
+    strip_identifier_quotes(clean_item)
+}
+
+/// Determines whether an index column entry matches a given column name.
+/// Accurately differentiates quoted identifiers (case-sensitive) and unquoted identifiers (case-insensitive).
+pub fn column_matches_index_spec(item: &str, col_name: &str) -> bool {
+    let base = extract_base_column_name(item);
+    let trimmed = item.trim();
+    let is_quoted = trimmed.starts_with('"') || trimmed.starts_with('`') || trimmed.starts_with('[');
+
+    if is_quoted {
+        base == col_name
+    } else {
+        base.eq_ignore_ascii_case(col_name)
+    }
+}
+
+/// Formats an individual index column expression for DDL generation.
+/// If the expression includes order qualifiers (e.g. `col DESC`), the identifier part is quoted while preserving order.
+/// If already quoted, it is preserved. Otherwise, it is safely quoted with `quote_ident`.
+pub fn format_index_column_expr(expr: &str, family: DatabaseFamily) -> String {
+    let trimmed = expr.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    let upper = trimmed.to_ascii_uppercase();
+    let (ident_part, order_part) = if upper.ends_with(" ASC") {
+        (trimmed[..trimmed.len() - 4].trim(), " ASC")
+    } else if upper.ends_with(" DESC") {
+        (trimmed[..trimmed.len() - 5].trim(), " DESC")
+    } else {
+        (trimmed, "")
+    };
+
+    let already_quoted = (ident_part.starts_with('"') && ident_part.ends_with('"'))
+        || (ident_part.starts_with('`') && ident_part.ends_with('`'))
+        || (ident_part.starts_with('[') && ident_part.ends_with(']'));
+
+    let quoted_ident = if already_quoted {
+        ident_part.to_string()
+    } else {
+        quote_ident(ident_part, family)
+    };
+
+    format!("{quoted_ident}{order_part}")
+}
+
 /// Column definition for table creation DDL generation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ColumnDef {
@@ -675,14 +788,15 @@ pub fn generate_create_table_sql(
                 }
                 let idx_name = idx.name.trim();
                 let actual_name = if idx_name.is_empty() {
-                    format!("idx_{}_{}", table_name, valid_idx_cols.join("_"))
+                    let sanitized: Vec<String> = valid_idx_cols.iter().map(|c| extract_base_column_name(c)).collect();
+                    format!("idx_{}_{}", table_name, sanitized.join("_"))
                 } else {
                     idx_name.to_string()
                 };
                 let quoted_idx = quote_ident(&actual_name, family);
                 let cols_str = valid_idx_cols
                     .iter()
-                    .map(|c| quote_ident(c, family))
+                    .map(|c| format_index_column_expr(c, family))
                     .collect::<Vec<_>>()
                     .join(", ");
                 let unique_str = match idx.index_type {
@@ -774,14 +888,15 @@ pub fn generate_create_table_sql(
                 }
                 let idx_name = idx.name.trim();
                 let actual_name = if idx_name.is_empty() {
-                    format!("idx_{}_{}", table_name, valid_idx_cols.join("_"))
+                    let sanitized: Vec<String> = valid_idx_cols.iter().map(|c| extract_base_column_name(c)).collect();
+                    format!("idx_{}_{}", table_name, sanitized.join("_"))
                 } else {
                     idx_name.to_string()
                 };
                 let quoted_idx = quote_ident(&actual_name, family);
                 let cols_str = valid_idx_cols
                     .iter()
-                    .map(|c| quote_ident(c, family))
+                    .map(|c| format_index_column_expr(c, family))
                     .collect::<Vec<_>>()
                     .join(", ");
                 let unique_str = match idx.index_type {
@@ -859,14 +974,15 @@ pub fn generate_create_table_sql(
                 }
                 let idx_name = idx.name.trim();
                 let actual_name = if idx_name.is_empty() {
-                    format!("idx_{}_{}", table_name, valid_idx_cols.join("_"))
+                    let sanitized: Vec<String> = valid_idx_cols.iter().map(|c| extract_base_column_name(c)).collect();
+                    format!("idx_{}_{}", table_name, sanitized.join("_"))
                 } else {
                     idx_name.to_string()
                 };
                 let quoted_idx = quote_ident(&actual_name, family);
                 let cols_str = valid_idx_cols
                     .iter()
-                    .map(|c| quote_ident(c, family))
+                    .map(|c| format_index_column_expr(c, family))
                     .collect::<Vec<_>>()
                     .join(", ");
                 let key_type = match idx.index_type {
@@ -1373,5 +1489,31 @@ mod tests {
         // SQLite: standard columns without error
         let sqlite_ddl = generate_create_table_sql(&def, DatabaseFamily::Sqlite).unwrap();
         assert!(sqlite_ddl.contains("CREATE TABLE \"users\" ("));
+    }
+
+    #[test]
+    fn test_parse_sql_column_list_and_expressions() {
+        let raw = r#"id, "user,name", `first,last`, [created,at], updated_at DESC, "status" ASC"#;
+        let cols = parse_sql_column_list(raw);
+        assert_eq!(cols.len(), 6);
+        assert_eq!(cols[0], "id");
+        assert_eq!(cols[1], r#""user,name""#);
+        assert_eq!(cols[2], "`first,last`");
+        assert_eq!(cols[3], "[created,at]");
+        assert_eq!(cols[4], "updated_at DESC");
+        assert_eq!(cols[5], r#""status" ASC"#);
+
+        // Matching
+        assert!(column_matches_index_spec("id", "id"));
+        assert!(column_matches_index_spec("ID", "id"));
+        assert!(column_matches_index_spec("updated_at DESC", "updated_at"));
+        assert!(column_matches_index_spec(r#""status" ASC"#, "status"));
+        assert!(column_matches_index_spec(r#""CaseSensitive""#, "CaseSensitive"));
+        assert!(!column_matches_index_spec(r#""CaseSensitive""#, "casesensitive"));
+
+        // Formatting
+        assert_eq!(format_index_column_expr("id", DatabaseFamily::Sqlite), "\"id\"");
+        assert_eq!(format_index_column_expr("col DESC", DatabaseFamily::MySql), "`col` DESC");
+        assert_eq!(format_index_column_expr("\"col\" ASC", DatabaseFamily::Postgres), "\"col\" ASC");
     }
 }

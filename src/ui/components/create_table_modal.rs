@@ -1,6 +1,6 @@
 //! Create Table modal dialog for visual schema design and DDL execution.
 
-use crate::db::sql_gen::TableIndexType;
+use crate::db::sql_gen::{column_matches_index_spec, parse_sql_column_list, TableIndexType};
 use crate::db::types::DatabaseFamily;
 use crate::ui::theme::ThemeColors;
 use gpui_kit::assets::IconName;
@@ -604,15 +604,11 @@ impl RenderOnce for CreateTableModal {
                 }
 
                 let current_cols_raw = index_item.columns.read(cx).value().to_string();
-                let current_col_list: Vec<String> = current_cols_raw
-                    .split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
+                let current_col_list = parse_sql_column_list(&current_cols_raw);
 
-                let mut chips_row = h_flex().items_center().gap_1();
+                let mut chips_row = h_flex().items_center().gap_1().flex_shrink(1.0).overflow_hidden();
                 for (col_i, (col_name, _col_type)) in available_columns.iter().take(4).enumerate() {
-                    let is_checked = current_col_list.iter().any(|c| c.eq_ignore_ascii_case(col_name));
+                    let is_checked = current_col_list.iter().any(|c| column_matches_index_spec(c, col_name));
                     let chip_id = ElementId::Name(format!("idx_quick_col_{idx}_{col_i}").into());
                     let mut chip = Button::new(chip_id).xsmall();
                     if is_checked {
@@ -635,12 +631,17 @@ impl RenderOnce for CreateTableModal {
                             on_tog(idx_row, c_name.clone(), window, cx);
                         });
                     }
-                    chips_row = chips_row.child(chip);
+                    chips_row = chips_row.child(
+                        div()
+                            .max_w(px(70.0))
+                            .overflow_hidden()
+                            .child(chip),
+                    );
                 }
 
                 let avail_cols_for_menu = available_columns.clone();
-                let cur_cols_for_menu = current_col_list.clone();
                 let menu_toggle_handler = toggle_idx_col_handler.clone();
+                let cols_entity_for_menu = index_item.columns.clone();
 
                 let col_menu_id = ElementId::Name(format!("idx_col_menu_{idx}").into());
                 let col_dropdown = Button::new(col_menu_id)
@@ -650,14 +651,17 @@ impl RenderOnce for CreateTableModal {
                     .icon(IconName::List)
                     .label("Select")
                     .tooltip("Select columns to include in this index")
-                    .dropdown_menu_with_anchor(Anchor::BottomRight, move |mut menu, _window, _cx| {
+                    .dropdown_menu_with_anchor(Anchor::BottomRight, move |mut menu, _window, cx| {
                         menu = menu.max_h(px(260.0)).min_w(px(180.0)).scrollable(true);
                         if avail_cols_for_menu.is_empty() {
                             menu = menu.label("No columns defined");
                         } else {
+                            let live_cols_raw = cols_entity_for_menu.read(cx).value().to_string();
+                            let live_col_list = parse_sql_column_list(&live_cols_raw);
+
                             menu = menu.label("Table Columns");
                             for (c_name, c_type) in &avail_cols_for_menu {
-                                let is_checked = cur_cols_for_menu.iter().any(|c| c.eq_ignore_ascii_case(c_name));
+                                let is_checked = live_col_list.iter().any(|c| column_matches_index_spec(c, c_name));
                                 let on_tog = menu_toggle_handler.clone();
                                 let c_name_val = c_name.clone();
                                 let label_text = if c_type.is_empty() {
@@ -692,6 +696,7 @@ impl RenderOnce for CreateTableModal {
                     .child(
                         div()
                             .w(px(20.0))
+                            .flex_shrink_0()
                             .text_xs()
                             .font_weight(FontWeight::BOLD)
                             .text_color(ThemeColors::TEXT_FAINT)
@@ -700,11 +705,13 @@ impl RenderOnce for CreateTableModal {
                     .child(
                         div()
                             .w(px(180.0))
+                            .flex_shrink_0()
                             .child(Input::new(&index_item.name).small().w_full()),
                     )
                     .child(
                         div()
                             .w(px(80.0))
+                            .flex_shrink_0()
                             .items_center()
                             .justify_center()
                             .child(type_btn),
@@ -712,13 +719,14 @@ impl RenderOnce for CreateTableModal {
                     .child(
                         h_flex()
                             .flex_1()
-                            .min_w(px(260.0))
+                            .min_w_0()
                             .items_center()
                             .gap_2()
+                            .overflow_hidden()
                             .child(
                                 div()
                                     .flex_1()
-                                    .min_w(px(120.0))
+                                    .min_w(px(100.0))
                                     .child(
                                         Input::new(&index_item.columns)
                                             .small()
@@ -731,6 +739,7 @@ impl RenderOnce for CreateTableModal {
                     .child(
                         div()
                             .w(px(32.0))
+                            .flex_shrink_0()
                             .items_center()
                             .justify_center()
                             .child(del_btn),
@@ -1110,11 +1119,11 @@ impl RenderOnce for CreateTableModal {
                                     .border_1()
                                     .border_color(ThemeColors::BORDER)
                                     .rounded_t_md()
-                                    .child(div().w(px(20.0)).text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("#"))
-                                    .child(div().w(px(180.0)).text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("INDEX NAME"))
-                                    .child(div().w(px(80.0)).items_center().justify_center().child(div().text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("TYPE")))
-                                    .child(div().flex_1().min_w(px(260.0)).text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("COLUMNS (select or type comma-separated)"))
-                                    .child(div().w(px(32.0)).items_center().justify_center().child(div().text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("DEL"))),
+                                    .child(div().w(px(20.0)).flex_shrink_0().text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("#"))
+                                    .child(div().w(px(180.0)).flex_shrink_0().text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("INDEX NAME"))
+                                    .child(div().w(px(80.0)).flex_shrink_0().items_center().justify_center().child(div().text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("TYPE")))
+                                    .child(div().flex_1().min_w_0().text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("COLUMNS (select or type comma-separated)"))
+                                    .child(div().w(px(32.0)).flex_shrink_0().items_center().justify_center().child(div().text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("DEL"))),
                             )
                             .child(indexes_list),
                     )
