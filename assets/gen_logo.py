@@ -1,0 +1,230 @@
+import math
+
+# Final high-polish refinement:
+# 1. Silky-smooth, elegant pincer curves on the claws — no harsh bumps or awkward little wedges.
+# 2. Perfect, confident claw posture holding and framing the core database.
+# 3. Clean, crisp cyber optics and reactor lighting.
+
+svg = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="100%" height="100%">
+  <defs>
+    <!-- Deep Space Obsidian Gradient -->
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0F172A"/>
+      <stop offset="45%" stop-color="#0A0F1D"/>
+      <stop offset="100%" stop-color="#02050A"/>
+    </linearGradient>
+
+    <!-- Warm Atmospheric Center Glow -->
+    <radialGradient id="centerAura" cx="50%" cy="48%" r="52%">
+      <stop offset="0%" stop-color="#FF5722" stop-opacity="0.35"/>
+      <stop offset="45%" stop-color="#00E5FF" stop-opacity="0.10"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Vibrant Rust Orange Flame Gradient -->
+    <linearGradient id="crabBody" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FF7A50"/>
+      <stop offset="30%" stop-color="#FF5722"/>
+      <stop offset="70%" stop-color="#E64A19"/>
+      <stop offset="100%" stop-color="#BF360C"/>
+    </linearGradient>
+
+    <linearGradient id="clawGradL" x1="0%" y1="100%" x2="70%" y2="0%">
+      <stop offset="0%" stop-color="#C23600"/>
+      <stop offset="30%" stop-color="#E64A19"/>
+      <stop offset="70%" stop-color="#FF6E40"/>
+      <stop offset="100%" stop-color="#FFA270"/>
+    </linearGradient>
+
+    <linearGradient id="clawGradR" x1="100%" y1="100%" x2="30%" y2="0%">
+      <stop offset="0%" stop-color="#C23600"/>
+      <stop offset="30%" stop-color="#E64A19"/>
+      <stop offset="70%" stop-color="#FF6E40"/>
+      <stop offset="100%" stop-color="#FFA270"/>
+    </linearGradient>
+
+    <!-- Metallic Titanium Slate Disc Gradients -->
+    <linearGradient id="discSide" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#0F172A"/>
+      <stop offset="25%" stop-color="#1E293B"/>
+      <stop offset="50%" stop-color="#334155"/>
+      <stop offset="75%" stop-color="#1E293B"/>
+      <stop offset="100%" stop-color="#0F172A"/>
+    </linearGradient>
+
+    <linearGradient id="discTop" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#475569"/>
+      <stop offset="100%" stop-color="#1E293B"/>
+    </linearGradient>
+
+    <!-- Electric Cyan Z Monogram -->
+    <linearGradient id="cyanZ" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#E0F7FA"/>
+      <stop offset="20%" stop-color="#00E5FF"/>
+      <stop offset="70%" stop-color="#0284C7"/>
+      <stop offset="100%" stop-color="#0369A1"/>
+    </linearGradient>
+
+    <!-- Specular Gloss for Z -->
+    <linearGradient id="zGloss" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.0"/>
+    </linearGradient>
+
+    <!-- Filters -->
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="24" stdDeviation="26" flood-color="#000000" flood-opacity="0.8"/>
+    </filter>
+
+    <filter id="neonGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+
+    <filter id="dotGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- macOS Squircle Canvas Base -->
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <rect width="1024" height="1024" fill="url(#centerAura)"/>
+  <rect x="2" y="2" width="1020" height="1020" rx="224" ry="224" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="3"/>
+
+  <!-- ================= UNIFIED ZQLCRAB EMBLEM ================= -->
+  <g filter="url(#shadow)">
+
+    <!-- ================= 1. REAR STABILIZER FINS ================= -->
+    <path d="M 320 690 C 230 730 180 790 190 825 C 230 825 285 780 340 735 Z" fill="#BF360C"/>
+    <path d="M 704 690 C 794 730 844 790 834 825 C 794 825 739 780 684 735 Z" fill="#BF360C"/>
+
+    <!-- ================= 2. MAIN CRAB CARAPACE (BODY DOME) ================= -->
+    <path d="
+      M 300 360
+      C 300 190 400 140 512 140
+      C 624 140 724 190 724 360
+      C 774 470 784 610 734 720
+      C 704 790 320 790 290 720
+      C 240 610 250 470 300 360
+      Z"
+      fill="url(#crabBody)"
+    />
+
+    <!-- ================= 3. SOLID, SEAMLESS MUSCULAR CRAB CLAWS ================= -->
+    <!-- Left Claw: Pure single-loop solid contour with smooth, iconic pincer mouth -->
+    <path d="
+      M 280 480
+      C 160 480 100 395 100 290
+      C 100 160 200 95 300 95
+      C 340 95 370 115 370 150
+      C 350 190 305 230 270 255
+      C 255 265 255 275 270 285
+      C 310 305 355 325 365 360
+      C 375 390 345 420 300 425
+      C 260 430 250 455 280 480
+      Z"
+      fill="url(#clawGradL)"
+    />
+
+    <!-- Right Claw: Pure single-loop solid contour (Symmetric) -->
+    <path d="
+      M 744 480
+      C 864 480 924 395 924 290
+      C 924 160 824 95 724 95
+      C 684 95 654 115 654 150
+      C 674 190 719 230 754 255
+      C 769 265 769 275 754 285
+      C 714 305 669 325 659 360
+      C 649 390 679 420 724 425
+      C 764 430 774 455 744 480
+      Z"
+      fill="url(#clawGradR)"
+    />
+
+    <!-- ================= 4. ENERGETIC TECH OPTIC SENSORS (EYES) ================= -->
+    <g>
+      <!-- Left Eye -->
+      <ellipse cx="420" cy="195" rx="30" ry="32" fill="#D84315"/>
+      <ellipse cx="420" cy="191" rx="22" ry="24" fill="#0A0E17" stroke="#FF7043" stroke-width="4"/>
+      <circle cx="420" cy="191" r="12" fill="#00E5FF" filter="url(#dotGlow)"/>
+      <circle cx="416" cy="187" r="4.5" fill="#FFFFFF"/>
+
+      <!-- Right Eye -->
+      <ellipse cx="604" cy="195" rx="30" ry="32" fill="#D84315"/>
+      <ellipse cx="604" cy="191" rx="22" ry="24" fill="#0A0E17" stroke="#FF7043" stroke-width="4"/>
+      <circle cx="604" cy="191" r="12" fill="#00E5FF" filter="url(#dotGlow)"/>
+      <circle cx="600" cy="187" r="4.5" fill="#FFFFFF"/>
+    </g>
+
+    <!-- ================= 5. EMBEDDED DATABASE REACTOR STACK ================= -->
+    <!-- 3 High-Tech Storage Platters with Glowing Neon Activity LEDs -->
+
+    <!-- Platter 3 (Bottom) -->
+    <g>
+      <path d="M 284 635 L 284 710 C 284 775 740 775 740 710 L 740 635 Z" fill="url(#discSide)"/>
+      <path d="M 284 710 C 284 775 740 775 740 710" fill="none" stroke="#FF5722" stroke-width="3" stroke-linecap="round"/>
+      <ellipse cx="512" cy="635" rx="228" ry="46" fill="url(#discTop)" stroke="#334155" stroke-width="2"/>
+      <circle cx="336" cy="695" r="4" fill="#00E5FF" filter="url(#dotGlow)"/>
+    </g>
+
+    <!-- Platter 2 (Middle) -->
+    <g>
+      <path d="M 284 510 L 284 585 C 284 650 740 650 740 585 L 740 510 Z" fill="url(#discSide)"/>
+      <path d="M 284 585 C 284 650 740 650 740 585" fill="none" stroke="#FF5722" stroke-width="3" stroke-linecap="round"/>
+      <ellipse cx="512" cy="510" rx="228" ry="46" fill="url(#discTop)" stroke="#334155" stroke-width="2"/>
+      <circle cx="336" cy="570" r="4" fill="#00E5FF" filter="url(#dotGlow)"/>
+    </g>
+
+    <!-- Platter 1 (Top Carapace Interface) -->
+    <g>
+      <path d="M 284 385 L 284 460 C 284 525 740 525 740 460 L 740 385 Z" fill="url(#discSide)"/>
+      <path d="M 284 460 C 284 525 740 525 740 460" fill="none" stroke="#FF5722" stroke-width="3" stroke-linecap="round"/>
+      <ellipse cx="512" cy="385" rx="228" ry="46" fill="#0F172A" stroke="#00E5FF" stroke-width="3"/>
+      <ellipse cx="512" cy="385" rx="214" ry="40" fill="none" stroke="#38BDF8" stroke-width="1.5" opacity="0.6"/>
+      <circle cx="336" cy="445" r="4" fill="#00E5FF" filter="url(#dotGlow)"/>
+    </g>
+
+    <!-- ================= 6. THE ICONIC ELECTRIC "Z" ================= -->
+    <g filter="url(#neonGlow)">
+      <!-- Main Z Geometry -->
+      <polygon points="
+        375,410
+        649,410
+        649,475
+        485,610
+        649,610
+        649,675
+        375,675
+        375,610
+        539,475
+        375,475
+      "
+      fill="url(#cyanZ)"
+      stroke="#E0F7FA"
+      stroke-width="3.5"
+      stroke-linejoin="round"
+      />
+
+      <!-- Specular Gloss on Top Horizontal Bar -->
+      <polygon points="
+        395,420
+        629,420
+        629,450
+        530,450
+        395,450
+      "
+      fill="url(#zGloss)"
+      />
+
+      <!-- Dynamic Core Lightning Line -->
+      <line x1="560" y1="475" x2="464" y2="610" stroke="#FFFFFF" stroke-width="4.5" stroke-linecap="round" opacity="0.75"/>
+    </g>
+
+  </g>
+</svg>
+'''
+
+with open("assets/logo.svg", "w") as f:
+    f.write(svg)
+print("Updated assets/logo.svg")
