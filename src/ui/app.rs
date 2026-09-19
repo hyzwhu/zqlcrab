@@ -177,6 +177,7 @@ pub struct CrabStudioApp {
     grid_changeset: GridChangeset,
     grid_cell_edit_input: Entity<InputState>,
     grid_scroll_handle: ScrollHandle,
+    grid_inspector_split: Entity<ResizableState>,
     sql_review_modal_open: bool,
     sql_review_plan: Option<SqlReviewPlan>,
     sql_review_is_executing: bool,
@@ -251,6 +252,7 @@ impl CrabStudioApp {
         });
         let console_split = cx.new(|_cx| ResizableState::default());
         let sidebar_split = cx.new(|_cx| ResizableState::default());
+        let grid_inspector_split = cx.new(|_cx| ResizableState::default());
         let sidebar_conn_filter =
             cx.new(|cx| InputState::new(window, cx).placeholder("Search connections…"));
         cx.subscribe(&sidebar_conn_filter, |_, _, event: &InputEvent, cx| {
@@ -354,6 +356,7 @@ impl CrabStudioApp {
             grid_changeset: GridChangeset::new(),
             grid_cell_edit_input,
             grid_scroll_handle: ScrollHandle::default(),
+            grid_inspector_split,
             sql_review_modal_open: false,
             sql_review_plan: None,
             sql_review_is_executing: false,
@@ -2479,6 +2482,7 @@ impl CrabStudioApp {
             .changeset(self.grid_changeset.clone())
             .read_only(is_read_only)
             .cell_edit_input(Some(self.grid_cell_edit_input.clone()))
+            .inspector_split(Some(self.grid_inspector_split.clone()))
             .on_sort(on_sort)
             .on_page_change(on_page)
             .on_export(on_export)

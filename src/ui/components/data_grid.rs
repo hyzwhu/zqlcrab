@@ -10,6 +10,7 @@ use gpui_kit::component::{
     Icon, Sizable as _,
     button::{Button, ButtonVariants as _},
     input::{Input, InputState},
+    resizable::{ResizableState, h_resizable, resizable_panel},
     scroll::{ScrollableElement as _, ScrollbarAxis},
     table::{Table, TableBody, TableCell, TableHead, TableHeader, TableRow},
 };
@@ -227,6 +228,7 @@ pub struct DataGrid {
     changeset: GridChangeset,
     is_read_only: bool,
     cell_edit_input: Option<Entity<InputState>>,
+    inspector_split: Option<Entity<ResizableState>>,
     on_sort: Option<Rc<dyn Fn(usize, &mut Window, &mut App)>>,
     on_page_change: Option<Rc<dyn Fn(usize, &mut Window, &mut App)>>,
     on_export: Option<Rc<dyn Fn(ExportFormat, &mut Window, &mut App)>>,
@@ -266,6 +268,7 @@ impl DataGrid {
             changeset: GridChangeset::new(),
             is_read_only: false,
             cell_edit_input: None,
+            inspector_split: None,
             on_sort: None,
             on_page_change: None,
             on_export: None,
@@ -456,6 +459,11 @@ impl DataGrid {
 
     pub fn cell_edit_input(mut self, input: Option<Entity<InputState>>) -> Self {
         self.cell_edit_input = input;
+        self
+    }
+
+    pub fn inspector_split(mut self, split: Option<Entity<ResizableState>>) -> Self {
+        self.inspector_split = split;
         self
     }
 
@@ -2101,8 +2109,16 @@ impl RenderOnce for DataGrid {
                     for (c_idx, c_name) in result.columns.iter().enumerate() {
                         let is_active_col = c_idx == sel_col;
                         let field_val = row_vals.get(c_idx).unwrap_or(&QueryValue::Null);
-                        let field_str = field_val.to_display_string().replace(['\r', '\n'], " ");
-                        let field_raw_val = field_val.to_display_string();
+                        let field_str = if field_val.is_null() {
+                            "NULL".to_string()
+                        } else {
+                            field_val.to_display_string().replace(['\r', '\n'], " ")
+                        };
+                        let field_raw_val = if field_val.is_null() {
+                            String::new()
+                        } else {
+                            field_val.to_display_string()
+                        };
 
                         let on_sel = self.on_select_cell.clone();
                         let on_cp = self.on_copy_value.clone();
@@ -2110,7 +2126,8 @@ impl RenderOnce for DataGrid {
 
                         let field_row = h_flex()
                             .w_full()
-                            .p_1p5()
+                            .px_2()
+                            .py_1()
                             .rounded_sm()
                             .items_center()
                             .justify_between()
@@ -2140,11 +2157,17 @@ impl RenderOnce for DataGrid {
                                 }
                             })
                             .child(
-                                v_flex()
+                                h_flex()
                                     .flex_1()
                                     .min_w_0()
+                                    .items_center()
+                                    .gap_2()
                                     .child(
                                         div()
+                                            .w(px(100.0))
+                                            .min_w(px(80.0))
+                                            .flex_shrink_0()
+                                            .truncate()
                                             .text_xs()
                                             .font_weight(FontWeight::SEMIBOLD)
                                             .text_color(if is_active_col {
@@ -2156,11 +2179,16 @@ impl RenderOnce for DataGrid {
                                     )
                                     .child(
                                         div()
+                                            .flex_1()
                                             .min_w_0()
                                             .truncate()
                                             .text_xs()
                                             .font_family("JetBrains Mono")
-                                            .text_color(ThemeColors::TEXT_PRIMARY)
+                                            .text_color(if field_val.is_null() {
+                                                ThemeColors::TEXT_FAINT
+                                            } else {
+                                                ThemeColors::TEXT_PRIMARY
+                                            })
                                             .child(field_str),
                                     ),
                             )
@@ -2189,10 +2217,9 @@ impl RenderOnce for DataGrid {
 
                     Some(
                         v_flex()
-                            .w(px(340.0))
-                            .min_w(px(340.0))
+                            .size_full()
+                            .min_w_0()
                             .h_full()
-                            .flex_shrink_0()
                             .overflow_hidden()
                             .border_l_1()
                             .border_color(ThemeColors::BORDER)
@@ -2303,13 +2330,24 @@ impl RenderOnce for DataGrid {
                                                     .child(format!("{line_count} line(s)")),
                                             ),
                                     )
-                                    // Full Value Display Box
-                                    .child(
+                                    // Full Value Display Box with Adaptive Height
+                                    .child({
+                                        let preview_h = if current_val.is_null() || display_val_str.is_empty() {
+                                            px(38.0)
+                                        } else if line_count <= 1 && char_count <= 60 {
+                                            px(42.0)
+                                        } else if line_count <= 2 && char_count <= 120 {
+                                            px(64.0)
+                                        } else if line_count <= 4 {
+                                            px(90.0)
+                                        } else {
+                                            px(130.0)
+                                        };
+
                                         div()
                                             .w_full()
                                             .min_w_0()
-                                            .min_h(px(120.0))
-                                            .max_h(px(200.0))
+                                            .h(preview_h)
                                             .p_2p5()
                                             .rounded_md()
                                             .bg(ThemeColors::BG_APP)
@@ -2329,8 +2367,8 @@ impl RenderOnce for DataGrid {
                                                         .text_color(ThemeColors::TEXT_PRIMARY)
                                                         .child(display_val_str)
                                                 },
-                                            ),
-                                    )
+                                            )
+                                    })
                                     // Action Bar for Current Value
                                     .child(
                                         h_flex()
@@ -2554,10 +2592,9 @@ impl RenderOnce for DataGrid {
                 // Empty selection placeholder in inspector
                 Some(
                     v_flex()
-                        .w(px(340.0))
-                        .min_w(px(340.0))
+                        .size_full()
+                        .min_w_0()
                         .h_full()
-                        .flex_shrink_0()
                         .overflow_hidden()
                         .border_l_1()
                         .border_color(ThemeColors::BORDER)
@@ -2614,16 +2651,39 @@ impl RenderOnce for DataGrid {
         };
 
         // Main table and inspector layout
-        let main_view = h_flex()
-            .flex_1()
-            .h_full()
-            .min_h_0()
-            .min_w_0()
-            .w_full()
-            .items_stretch()
-            .overflow_hidden()
-            .child(table_scroll_view)
-            .children(inspector_panel);
+        let main_view = if self.inspector_open {
+            if let Some(panel) = inspector_panel {
+                if let Some(ref split) = self.inspector_split {
+                    h_resizable("data-grid-inspector-split")
+                        .with_state(split)
+                        .child(resizable_panel().child(table_scroll_view))
+                        .child(
+                            resizable_panel()
+                                .size(px(480.0))
+                                .size_range(px(320.0)..px(1200.0))
+                                .flex_none()
+                                .child(panel),
+                        )
+                        .into_any_element()
+                } else {
+                    h_flex()
+                        .flex_1()
+                        .h_full()
+                        .min_h_0()
+                        .min_w_0()
+                        .w_full()
+                        .items_stretch()
+                        .overflow_hidden()
+                        .child(table_scroll_view)
+                        .child(div().w(px(480.0)).flex_shrink_0().h_full().child(panel))
+                        .into_any_element()
+                }
+            } else {
+                table_scroll_view.into_any_element()
+            }
+        } else {
+            table_scroll_view.into_any_element()
+        };
 
         let grid_content = v_flex()
             .size_full()
