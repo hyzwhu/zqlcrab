@@ -8,12 +8,40 @@ use gpui_kit::component::{
     Icon, Sizable as _,
     button::{Button, ButtonVariants as _},
     input::{Input, InputState},
+    menu::{DropdownMenu as _, PopupMenuItem},
 };
 use gpui_kit::gpui::{
-    App, ElementId, Entity, FontWeight, InteractiveElement as _, IntoElement, ParentElement,
-    RenderOnce, StatefulInteractiveElement as _, Styled, Window, div, px, rgba,
+    Anchor, App, Entity, FontWeight, IntoElement, ParentElement,
+    RenderOnce, Styled, Window, div, px, rgba,
 };
 use std::rc::Rc;
+
+/// Helper to resolve standard icons for all supported database engines.
+pub fn database_icon(db_type: DatabaseType) -> IconName {
+    match db_type {
+        DatabaseType::Sqlite => IconName::Database,
+
+        // MySQL Protocol Ecosystem
+        DatabaseType::Mysql => IconName::Cpu,
+        DatabaseType::MariaDB => IconName::Server,
+        DatabaseType::TiDB => IconName::Layers,
+        DatabaseType::OceanBase => IconName::HardDrive,
+        DatabaseType::StarRocks | DatabaseType::Doris | DatabaseType::SelectDB => IconName::Activity,
+        DatabaseType::PolarDB | DatabaseType::TDSQL | DatabaseType::GoldenDB => IconName::Server,
+        DatabaseType::Databend | DatabaseType::SingleStore | DatabaseType::ManticoreSearch => IconName::Layers,
+        DatabaseType::CloudSQLMySQL => IconName::Server,
+
+        // PostgreSQL Protocol Ecosystem
+        DatabaseType::Postgres => IconName::Layers,
+        DatabaseType::CockroachDB => IconName::Cpu,
+        DatabaseType::TimescaleDB | DatabaseType::QuestDB | DatabaseType::Materialize => IconName::Activity,
+        DatabaseType::Redshift | DatabaseType::Greenplum => IconName::Layers,
+        DatabaseType::YugabyteDB => IconName::HardDrive,
+        DatabaseType::OpenGauss | DatabaseType::Kingbase | DatabaseType::GaussDB | DatabaseType::HighGo => IconName::Server,
+        DatabaseType::Vastbase | DatabaseType::YashanDB | DatabaseType::UXDB | DatabaseType::GBase8c => IconName::HardDrive,
+        DatabaseType::EnterpriseDB | DatabaseType::CrateDB | DatabaseType::AlloyDB | DatabaseType::CloudSQLPG | DatabaseType::FujitsuPG => IconName::Server,
+    }
+}
 
 #[derive(IntoElement)]
 pub struct ConnectionDialog {
@@ -173,100 +201,190 @@ impl RenderOnce for ConnectionDialog {
             });
         }
 
-        // Popular database engine selector grid
-        let popular_engines = [
-            (DatabaseType::Sqlite, "SQLite", IconName::Database),
-            (DatabaseType::Mysql, "MySQL", IconName::Cpu),
-            (DatabaseType::Postgres, "PostgreSQL", IconName::Layers),
-            (DatabaseType::MariaDB, "MariaDB", IconName::Server),
-            (DatabaseType::TiDB, "TiDB", IconName::Layers),
-            (DatabaseType::OceanBase, "OceanBase", IconName::HardDrive),
-            (DatabaseType::StarRocks, "StarRocks", IconName::Activity),
-            (DatabaseType::Doris, "Doris", IconName::Activity),
-            (DatabaseType::CockroachDB, "Cockroach", IconName::Cpu),
-            (DatabaseType::TimescaleDB, "Timescale", IconName::Activity),
-            (DatabaseType::OpenGauss, "openGauss", IconName::Server),
-            (DatabaseType::Redshift, "Redshift", IconName::Layers),
+        // Dropdown database engine selector supporting all 36 engines
+        let current_db_type = self.db_type;
+        let on_select_type = self.on_select_type.clone();
+
+        let embedded_dbs = [DatabaseType::Sqlite];
+
+        let mysql_ecosystem_dbs = [
+            DatabaseType::Mysql,
+            DatabaseType::MariaDB,
+            DatabaseType::TiDB,
+            DatabaseType::OceanBase,
+            DatabaseType::StarRocks,
+            DatabaseType::Doris,
+            DatabaseType::PolarDB,
+            DatabaseType::TDSQL,
+            DatabaseType::SelectDB,
+            DatabaseType::Databend,
+            DatabaseType::GoldenDB,
+            DatabaseType::SingleStore,
+            DatabaseType::ManticoreSearch,
+            DatabaseType::CloudSQLMySQL,
         ];
 
-        let mut row1 = h_flex().gap_1p5().w_full();
-        let mut row2 = h_flex().gap_1p5().w_full();
+        let postgres_ecosystem_dbs = [
+            DatabaseType::Postgres,
+            DatabaseType::CockroachDB,
+            DatabaseType::TimescaleDB,
+            DatabaseType::Redshift,
+            DatabaseType::YugabyteDB,
+            DatabaseType::OpenGauss,
+            DatabaseType::Kingbase,
+            DatabaseType::GaussDB,
+            DatabaseType::Greenplum,
+            DatabaseType::QuestDB,
+            DatabaseType::Vastbase,
+            DatabaseType::YashanDB,
+            DatabaseType::HighGo,
+            DatabaseType::UXDB,
+            DatabaseType::GBase8c,
+            DatabaseType::EnterpriseDB,
+            DatabaseType::CrateDB,
+            DatabaseType::Materialize,
+            DatabaseType::AlloyDB,
+            DatabaseType::CloudSQLPG,
+            DatabaseType::FujitsuPG,
+        ];
 
-        for (idx, (dtype, name, icon)) in popular_engines.into_iter().enumerate() {
-            let is_selected = self.db_type == dtype;
-            let on_select = self.on_select_type.clone();
-
-            let card = h_flex()
-                .id(ElementId::Name(format!("engine_{:?}", dtype).into()))
-                .flex_1()
-                .py_1p5()
-                .px_2()
-                .items_center()
-                .justify_center()
-                .gap_1p5()
-                .rounded_md()
-                .border_1()
-                .cursor_pointer()
-                .border_color(if is_selected {
-                    ThemeColors::PRIMARY_BORDER
-                } else {
-                    ThemeColors::BORDER
-                })
-                .bg(if is_selected {
-                    ThemeColors::BG_SURFACE_ACTIVE
-                } else {
-                    ThemeColors::BG_SURFACE
-                })
-                .hover(|s| s.bg(ThemeColors::BG_SURFACE_HOVER))
-                .child(
-                    Icon::new(icon)
-                        .size(px(14.0))
-                        .text_color(if is_selected {
-                            ThemeColors::PRIMARY_BORDER
-                        } else {
-                            ThemeColors::TEXT_MUTED
-                        }),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .font_weight(if is_selected {
-                            FontWeight::SEMIBOLD
-                        } else {
-                            FontWeight::NORMAL
-                        })
-                        .text_color(if is_selected {
-                            ThemeColors::TEXT_PRIMARY
-                        } else {
-                            ThemeColors::TEXT_MUTED
-                        })
-                        .child(name),
-                )
-                .on_click(move |_, window, cx| {
-                    if let Some(ref handler) = on_select {
-                        handler(dtype, window, cx);
-                    }
-                });
-
-            if idx < 6 {
-                row1 = row1.child(card);
-            } else {
-                row2 = row2.child(card);
-            }
-        }
-
-        // Protocol badge and category description
-        let protocol_desc = match self.db_type.family() {
-            DatabaseFamily::Sqlite => "SQLite file or in-memory database",
-            DatabaseFamily::MySql => "MySQL wire protocol (MySQL, MariaDB, TiDB, and compatible engines)",
-            DatabaseFamily::Postgres => "PostgreSQL wire protocol (Postgres, CockroachDB, and compatible engines)",
+        let family_badge_label = match current_db_type.family() {
+            DatabaseFamily::Sqlite => "SQLite Engine",
+            DatabaseFamily::MySql => "MySQL Protocol",
+            DatabaseFamily::Postgres => "PostgreSQL Protocol",
         };
+
+        let protocol_desc = match current_db_type.family() {
+            DatabaseFamily::Sqlite => "Embedded local database · Fast file or in-memory SQLite engine",
+            DatabaseFamily::MySql => "Native MySQL wire protocol · Compatible with MariaDB, TiDB, Doris, StarRocks & more",
+            DatabaseFamily::Postgres => "Native PostgreSQL wire protocol · Compatible with CockroachDB, Timescale, openGauss & more",
+        };
+
+        let on_sel_for_menu = on_select_type.clone();
+        let db_dropdown_btn = Button::new("db_type_select_btn")
+            .outline()
+            .w_full()
+            .dropdown_caret(true)
+            .icon(database_icon(current_db_type))
+            .label(format!("{}  ·  {}", current_db_type.display_name(), current_db_type.category().display_name()))
+            .dropdown_menu_with_anchor(Anchor::BottomLeft, move |mut menu, _window, _cx| {
+                menu = menu
+                    .scrollable(true)
+                    .max_h(px(380.0))
+                    .min_w(px(520.0));
+
+                menu = menu.label("Embedded / Local");
+                for dtype in embedded_dbs {
+                    let is_curr = dtype == current_db_type;
+                    let on_sel = on_sel_for_menu.clone();
+                    menu = menu.item(
+                        PopupMenuItem::new(dtype.display_name())
+                            .icon(database_icon(dtype))
+                            .checked(is_curr)
+                            .on_click(move |_, window, cx| {
+                                if let Some(ref handler) = on_sel {
+                                    handler(dtype, window, cx);
+                                }
+                            }),
+                    );
+                }
+
+                menu = menu.separator();
+                menu = menu.label("MySQL Wire Protocol Ecosystem");
+                for dtype in mysql_ecosystem_dbs {
+                    let is_curr = dtype == current_db_type;
+                    let on_sel = on_sel_for_menu.clone();
+                    menu = menu.item(
+                        PopupMenuItem::new(dtype.display_name())
+                            .icon(database_icon(dtype))
+                            .checked(is_curr)
+                            .on_click(move |_, window, cx| {
+                                if let Some(ref handler) = on_sel {
+                                    handler(dtype, window, cx);
+                                }
+                            }),
+                    );
+                }
+
+                menu = menu.separator();
+                menu = menu.label("PostgreSQL Wire Protocol Ecosystem");
+                for dtype in postgres_ecosystem_dbs {
+                    let is_curr = dtype == current_db_type;
+                    let on_sel = on_sel_for_menu.clone();
+                    menu = menu.item(
+                        PopupMenuItem::new(dtype.display_name())
+                            .icon(database_icon(dtype))
+                            .checked(is_curr)
+                            .on_click(move |_, window, cx| {
+                                if let Some(ref handler) = on_sel {
+                                    handler(dtype, window, cx);
+                                }
+                            }),
+                    );
+                }
+
+                menu
+            });
 
         let engine_selector = v_flex()
             .gap_1p5()
             .w_full()
-            .child(row1)
-            .child(row2)
+            .child(
+                h_flex()
+                    .w_full()
+                    .justify_between()
+                    .items_center()
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap_1p5()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(ThemeColors::TEXT_PRIMARY)
+                                    .child("Database Engine / Ecosystem"),
+                            )
+                            .child(
+                                div()
+                                    .px_1p5()
+                                    .py_0p5()
+                                    .rounded_sm()
+                                    .bg(ThemeColors::BG_SURFACE_HOVER)
+                                    .text_size(px(10.0))
+                                    .text_color(ThemeColors::TEXT_FAINT)
+                                    .child("36 Supported"),
+                            ),
+                    )
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap_1p5()
+                            .child(
+                                div()
+                                    .px_1p5()
+                                    .py_0p5()
+                                    .rounded_sm()
+                                    .bg(ThemeColors::PRIMARY_BG)
+                                    .text_size(px(10.0))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(ThemeColors::PRIMARY_LIGHT)
+                                    .child(family_badge_label),
+                            )
+                            .child(
+                                div()
+                                    .px_1p5()
+                                    .py_0p5()
+                                    .rounded_sm()
+                                    .bg(ThemeColors::BG_SURFACE_HOVER)
+                                    .text_size(px(10.0))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(ThemeColors::TEXT_MUTED)
+                                    .child(current_db_type.category().display_name()),
+                            ),
+                    ),
+            )
+            .child(db_dropdown_btn)
             .child(
                 h_flex()
                     .w_full()
@@ -282,9 +400,8 @@ impl RenderOnce for ConnectionDialog {
                     .child(
                         div()
                             .text_xs()
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(ThemeColors::PRIMARY_BORDER)
-                            .child(self.db_type.category().display_name()),
+                            .text_color(ThemeColors::TEXT_FAINT)
+                            .child(format!("Default Port: {}", if current_db_type.is_file_based() { "N/A".to_string() } else { current_db_type.default_port().to_string() })),
                     ),
             );
 

@@ -1,6 +1,6 @@
 //! Sidebar navigation displaying saved connection profiles and database schema tree.
 
-use crate::db::types::{ConnectionConfig, DatabaseFamily, DatabaseType, TableInfo};
+use crate::db::types::{ConnectionConfig, DatabaseFamily, TableInfo};
 use crate::ui::theme::ThemeColors;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::{h_flex, v_flex};
@@ -382,22 +382,7 @@ impl RenderOnce for Sidebar {
         for conn in filtered_connections {
             let is_active = self.active_connection_id.as_deref() == Some(&conn.id);
 
-            let engine_icon = match conn.db_type {
-                DatabaseType::Sqlite => IconName::Database,
-                DatabaseType::Mysql => IconName::Cpu,
-                DatabaseType::MariaDB => IconName::Server,
-                DatabaseType::TiDB => IconName::Layers,
-                DatabaseType::OceanBase => IconName::HardDrive,
-                DatabaseType::StarRocks | DatabaseType::Doris => IconName::Activity,
-                DatabaseType::PolarDB => IconName::Server,
-                DatabaseType::Postgres => IconName::Layers,
-                DatabaseType::CockroachDB => IconName::Cpu,
-                DatabaseType::TimescaleDB => IconName::Activity,
-                DatabaseType::Redshift => IconName::Layers,
-                DatabaseType::YugabyteDB => IconName::HardDrive,
-                DatabaseType::OpenGauss | DatabaseType::Kingbase => IconName::Server,
-                DatabaseType::Greenplum => IconName::Layers,
-            };
+            let engine_icon = crate::ui::components::connection_dialog::database_icon(conn.db_type);
 
             let conn_clone = conn.clone();
             let is_conn_active = is_active;

@@ -48,6 +48,13 @@ pub enum DatabaseType {
     StarRocks,
     Doris,
     PolarDB,
+    TDSQL,
+    SelectDB,
+    Databend,
+    GoldenDB,
+    SingleStore,
+    ManticoreSearch,
+    CloudSQLMySQL,
 
     // PostgreSQL Protocol Ecosystem
     Postgres,
@@ -57,7 +64,20 @@ pub enum DatabaseType {
     YugabyteDB,
     OpenGauss,
     Kingbase,
+    GaussDB,
     Greenplum,
+    QuestDB,
+    Vastbase,
+    YashanDB,
+    HighGo,
+    UXDB,
+    GBase8c,
+    EnterpriseDB,
+    CrateDB,
+    Materialize,
+    AlloyDB,
+    CloudSQLPG,
+    FujitsuPG,
 }
 
 impl DatabaseType {
@@ -72,7 +92,14 @@ impl DatabaseType {
             | Self::OceanBase
             | Self::StarRocks
             | Self::Doris
-            | Self::PolarDB => DatabaseFamily::MySql,
+            | Self::PolarDB
+            | Self::TDSQL
+            | Self::SelectDB
+            | Self::Databend
+            | Self::GoldenDB
+            | Self::SingleStore
+            | Self::ManticoreSearch
+            | Self::CloudSQLMySQL => DatabaseFamily::MySql,
 
             Self::Postgres
             | Self::CockroachDB
@@ -81,7 +108,20 @@ impl DatabaseType {
             | Self::YugabyteDB
             | Self::OpenGauss
             | Self::Kingbase
-            | Self::Greenplum => DatabaseFamily::Postgres,
+            | Self::GaussDB
+            | Self::Greenplum
+            | Self::QuestDB
+            | Self::Vastbase
+            | Self::YashanDB
+            | Self::HighGo
+            | Self::UXDB
+            | Self::GBase8c
+            | Self::EnterpriseDB
+            | Self::CrateDB
+            | Self::Materialize
+            | Self::AlloyDB
+            | Self::CloudSQLPG
+            | Self::FujitsuPG => DatabaseFamily::Postgres,
         }
     }
 
@@ -89,13 +129,44 @@ impl DatabaseType {
     pub fn category(&self) -> DatabaseCategory {
         match self {
             Self::Sqlite => DatabaseCategory::Embedded,
-            Self::Mysql | Self::MariaDB | Self::Postgres | Self::Kingbase => DatabaseCategory::Relational,
-            Self::TiDB | Self::OceanBase | Self::CockroachDB | Self::YugabyteDB | Self::OpenGauss | Self::PolarDB => {
-                DatabaseCategory::Distributed
-            }
-            Self::StarRocks | Self::Doris | Self::TimescaleDB | Self::Redshift | Self::Greenplum => {
-                DatabaseCategory::Analytical
-            }
+
+            Self::Mysql
+            | Self::MariaDB
+            | Self::PolarDB
+            | Self::CloudSQLMySQL
+            | Self::Postgres
+            | Self::OpenGauss
+            | Self::Kingbase
+            | Self::Vastbase
+            | Self::YashanDB
+            | Self::HighGo
+            | Self::UXDB
+            | Self::EnterpriseDB
+            | Self::AlloyDB
+            | Self::CloudSQLPG
+            | Self::FujitsuPG => DatabaseCategory::Relational,
+
+            Self::StarRocks
+            | Self::Doris
+            | Self::SelectDB
+            | Self::Databend
+            | Self::SingleStore
+            | Self::ManticoreSearch
+            | Self::TimescaleDB
+            | Self::Redshift
+            | Self::Greenplum
+            | Self::QuestDB
+            | Self::Materialize => DatabaseCategory::Analytical,
+
+            Self::TiDB
+            | Self::OceanBase
+            | Self::TDSQL
+            | Self::GoldenDB
+            | Self::CockroachDB
+            | Self::YugabyteDB
+            | Self::GaussDB
+            | Self::GBase8c
+            | Self::CrateDB => DatabaseCategory::Distributed,
         }
     }
 
@@ -103,17 +174,39 @@ impl DatabaseType {
     pub fn default_port(&self) -> u16 {
         match self {
             Self::Sqlite => 0,
-            Self::Mysql | Self::MariaDB | Self::PolarDB => 3306,
+            Self::Mysql
+            | Self::MariaDB
+            | Self::PolarDB
+            | Self::TDSQL
+            | Self::GoldenDB
+            | Self::SingleStore
+            | Self::CloudSQLMySQL => 3306,
             Self::TiDB => 4000,
             Self::OceanBase => 2881,
-            Self::StarRocks => 9030,
-            Self::Doris => 9030,
-            Self::Postgres | Self::TimescaleDB | Self::Greenplum => 5432,
+            Self::StarRocks | Self::Doris | Self::SelectDB => 9030,
+            Self::Databend => 3307,
+            Self::ManticoreSearch => 9306,
+            Self::Postgres
+            | Self::TimescaleDB
+            | Self::Greenplum
+            | Self::OpenGauss
+            | Self::GaussDB
+            | Self::Vastbase
+            | Self::UXDB
+            | Self::GBase8c
+            | Self::CrateDB
+            | Self::AlloyDB
+            | Self::CloudSQLPG
+            | Self::FujitsuPG => 5432,
+            Self::HighGo => 5866,
             Self::CockroachDB => 26257,
             Self::Redshift => 5439,
             Self::YugabyteDB => 5433,
-            Self::OpenGauss => 5432,
             Self::Kingbase => 54321,
+            Self::QuestDB => 8812,
+            Self::YashanDB => 1688,
+            Self::EnterpriseDB => 5444,
+            Self::Materialize => 6875,
         }
     }
 
@@ -128,6 +221,13 @@ impl DatabaseType {
             Self::StarRocks => "StarRocks",
             Self::Doris => "Apache Doris",
             Self::PolarDB => "PolarDB",
+            Self::TDSQL => "Tencent TDSQL",
+            Self::SelectDB => "SelectDB",
+            Self::Databend => "Databend",
+            Self::GoldenDB => "GoldenDB",
+            Self::SingleStore => "SingleStore",
+            Self::ManticoreSearch => "Manticore Search",
+            Self::CloudSQLMySQL => "Cloud SQL (MySQL)",
             Self::Postgres => "PostgreSQL",
             Self::CockroachDB => "CockroachDB",
             Self::TimescaleDB => "TimescaleDB",
@@ -135,16 +235,60 @@ impl DatabaseType {
             Self::YugabyteDB => "YugabyteDB",
             Self::OpenGauss => "openGauss",
             Self::Kingbase => "KingbaseES",
+            Self::GaussDB => "GaussDB",
             Self::Greenplum => "Greenplum",
+            Self::QuestDB => "QuestDB",
+            Self::Vastbase => "Vastbase",
+            Self::YashanDB => "YashanDB",
+            Self::HighGo => "HighGo",
+            Self::UXDB => "UXDB",
+            Self::GBase8c => "GBase 8c",
+            Self::EnterpriseDB => "EnterpriseDB",
+            Self::CrateDB => "CrateDB",
+            Self::Materialize => "Materialize",
+            Self::AlloyDB => "Google Cloud AlloyDB",
+            Self::CloudSQLPG => "Cloud SQL (PG)",
+            Self::FujitsuPG => "Fujitsu Enterprise Postgres",
         }
     }
 
     /// Default database name.
     pub fn default_database(&self) -> &'static str {
-        match self.family() {
-            DatabaseFamily::Sqlite => ":memory:",
-            DatabaseFamily::MySql => "mysql",
-            DatabaseFamily::Postgres => "postgres",
+        match self {
+            Self::Sqlite => ":memory:",
+            Self::TiDB | Self::OceanBase => "test",
+            Self::StarRocks => "default_cluster",
+            Self::Doris | Self::SelectDB | Self::SingleStore => "information_schema",
+            Self::Databend => "default",
+            Self::Mysql
+            | Self::MariaDB
+            | Self::PolarDB
+            | Self::TDSQL
+            | Self::GoldenDB
+            | Self::ManticoreSearch
+            | Self::CloudSQLMySQL => "mysql",
+
+            Self::CockroachDB => "defaultdb",
+            Self::Redshift => "dev",
+            Self::YugabyteDB => "yugabyte",
+            Self::Kingbase => "kingbase",
+            Self::QuestDB => "qdb",
+            Self::Vastbase => "vastbase",
+            Self::YashanDB => "yashan",
+            Self::HighGo => "highgo",
+            Self::UXDB => "uxdb",
+            Self::EnterpriseDB => "edb",
+            Self::CrateDB => "crate",
+            Self::Materialize => "materialize",
+            Self::Postgres
+            | Self::TimescaleDB
+            | Self::OpenGauss
+            | Self::GaussDB
+            | Self::Greenplum
+            | Self::GBase8c
+            | Self::AlloyDB
+            | Self::CloudSQLPG
+            | Self::FujitsuPG => "postgres",
         }
     }
 
@@ -152,14 +296,42 @@ impl DatabaseType {
     pub fn default_user(&self) -> &'static str {
         match self {
             Self::Sqlite => "",
-            Self::Mysql | Self::MariaDB | Self::TiDB | Self::OceanBase | Self::StarRocks | Self::Doris | Self::PolarDB => {
-                "root"
-            }
-            Self::Postgres | Self::TimescaleDB | Self::YugabyteDB | Self::Greenplum => "postgres",
+            Self::Mysql
+            | Self::MariaDB
+            | Self::TiDB
+            | Self::OceanBase
+            | Self::StarRocks
+            | Self::Doris
+            | Self::PolarDB
+            | Self::TDSQL
+            | Self::SelectDB
+            | Self::Databend
+            | Self::GoldenDB
+            | Self::SingleStore
+            | Self::ManticoreSearch
+            | Self::CloudSQLMySQL => "root",
+
+            Self::Postgres
+            | Self::TimescaleDB
+            | Self::AlloyDB
+            | Self::CloudSQLPG
+            | Self::FujitsuPG => "postgres",
             Self::CockroachDB => "root",
             Self::Redshift => "awsuser",
+            Self::YugabyteDB => "yugabyte",
             Self::OpenGauss => "omm",
             Self::Kingbase => "system",
+            Self::GaussDB => "gaussdb",
+            Self::Greenplum => "gpadmin",
+            Self::QuestDB => "admin",
+            Self::Vastbase => "vastbase",
+            Self::YashanDB => "sys",
+            Self::HighGo => "highgo",
+            Self::UXDB => "uxdb",
+            Self::GBase8c => "gbase",
+            Self::EnterpriseDB => "enterprisedb",
+            Self::CrateDB => "crate",
+            Self::Materialize => "materialize",
         }
     }
 
@@ -171,7 +343,10 @@ impl DatabaseType {
     /// All supported databases.
     pub fn all() -> &'static [DatabaseType] {
         &[
+            // Embedded
             Self::Sqlite,
+
+            // MySQL Ecosystem
             Self::Mysql,
             Self::MariaDB,
             Self::TiDB,
@@ -179,6 +354,15 @@ impl DatabaseType {
             Self::StarRocks,
             Self::Doris,
             Self::PolarDB,
+            Self::TDSQL,
+            Self::SelectDB,
+            Self::Databend,
+            Self::GoldenDB,
+            Self::SingleStore,
+            Self::ManticoreSearch,
+            Self::CloudSQLMySQL,
+
+            // PostgreSQL Ecosystem
             Self::Postgres,
             Self::CockroachDB,
             Self::TimescaleDB,
@@ -186,7 +370,20 @@ impl DatabaseType {
             Self::YugabyteDB,
             Self::OpenGauss,
             Self::Kingbase,
+            Self::GaussDB,
             Self::Greenplum,
+            Self::QuestDB,
+            Self::Vastbase,
+            Self::YashanDB,
+            Self::HighGo,
+            Self::UXDB,
+            Self::GBase8c,
+            Self::EnterpriseDB,
+            Self::CrateDB,
+            Self::Materialize,
+            Self::AlloyDB,
+            Self::CloudSQLPG,
+            Self::FujitsuPG,
         ]
     }
 }
@@ -628,6 +825,13 @@ mod tests {
             DatabaseType::StarRocks,
             DatabaseType::Doris,
             DatabaseType::PolarDB,
+            DatabaseType::TDSQL,
+            DatabaseType::SelectDB,
+            DatabaseType::Databend,
+            DatabaseType::GoldenDB,
+            DatabaseType::SingleStore,
+            DatabaseType::ManticoreSearch,
+            DatabaseType::CloudSQLMySQL,
         ];
         for d in mysql_types {
             assert_eq!(d.family(), DatabaseFamily::MySql);
@@ -637,6 +841,7 @@ mod tests {
         assert_eq!(DatabaseType::TiDB.default_port(), 4000);
         assert_eq!(DatabaseType::OceanBase.default_port(), 2881);
         assert_eq!(DatabaseType::StarRocks.default_port(), 9030);
+        assert_eq!(DatabaseType::Databend.default_port(), 3307);
 
         // PostgreSQL Family
         let pg_types = [
@@ -647,7 +852,20 @@ mod tests {
             DatabaseType::YugabyteDB,
             DatabaseType::OpenGauss,
             DatabaseType::Kingbase,
+            DatabaseType::GaussDB,
             DatabaseType::Greenplum,
+            DatabaseType::QuestDB,
+            DatabaseType::Vastbase,
+            DatabaseType::YashanDB,
+            DatabaseType::HighGo,
+            DatabaseType::UXDB,
+            DatabaseType::GBase8c,
+            DatabaseType::EnterpriseDB,
+            DatabaseType::CrateDB,
+            DatabaseType::Materialize,
+            DatabaseType::AlloyDB,
+            DatabaseType::CloudSQLPG,
+            DatabaseType::FujitsuPG,
         ];
         for d in pg_types {
             assert_eq!(d.family(), DatabaseFamily::Postgres);
@@ -656,6 +874,7 @@ mod tests {
         assert_eq!(DatabaseType::CockroachDB.default_port(), 26257);
         assert_eq!(DatabaseType::Redshift.default_port(), 5439);
         assert_eq!(DatabaseType::OpenGauss.default_port(), 5432);
+        assert_eq!(DatabaseType::QuestDB.default_port(), 8812);
 
         let table = TableInfo {
             name: "ecrm_yb".into(),
@@ -674,7 +893,7 @@ mod tests {
         );
 
         // All supported count
-        assert_eq!(DatabaseType::all().len(), 16);
+        assert_eq!(DatabaseType::all().len(), 36);
     }
 
     #[test]
