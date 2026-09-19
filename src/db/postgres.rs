@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::Mutex;
-use tokio_postgres::{types::Type, Client, Config, NoTls, Row};
+use tokio_postgres::{Client, Config, NoTls, Row, types::Type};
 
 pub struct PostgresAdapter {
     config: ConnectionConfig,
@@ -59,7 +59,11 @@ impl PostgresAdapter {
             if let Ok(val) = row.try_get::<_, Vec<u8>>(idx) {
                 return QueryValue::Bytes(val);
             }
-        } else if *col_type == Type::TEXT || *col_type == Type::VARCHAR || *col_type == Type::BPCHAR || *col_type == Type::NAME {
+        } else if *col_type == Type::TEXT
+            || *col_type == Type::VARCHAR
+            || *col_type == Type::BPCHAR
+            || *col_type == Type::NAME
+        {
             if let Ok(val) = row.try_get::<_, String>(idx) {
                 return QueryValue::String(val);
             }
@@ -100,7 +104,9 @@ impl DatabaseAdapter for PostgresAdapter {
         if let Some(ref pwd) = self.config.password {
             pg_config.password(pwd);
         }
-        pg_config.connect_timeout(std::time::Duration::from_secs(self.config.connect_timeout_secs));
+        pg_config.connect_timeout(std::time::Duration::from_secs(
+            self.config.connect_timeout_secs,
+        ));
 
         let (client, connection) = pg_config
             .connect(NoTls)
@@ -129,7 +135,10 @@ impl DatabaseAdapter for PostgresAdapter {
 
     async fn test_connection(&self) -> DbResult<ConnectionStatus> {
         let start = Instant::now();
-        let client_arc = self.client.as_ref().ok_or_else(|| DbError::connection("Not connected"))?;
+        let client_arc = self
+            .client
+            .as_ref()
+            .ok_or_else(|| DbError::connection("Not connected"))?;
         let client = client_arc.lock().await;
 
         let row = client
@@ -151,7 +160,10 @@ impl DatabaseAdapter for PostgresAdapter {
 
     async fn execute_query(&self, sql: &str) -> DbResult<QueryResult> {
         let start = Instant::now();
-        let client_arc = self.client.as_ref().ok_or_else(|| DbError::connection("Not connected"))?;
+        let client_arc = self
+            .client
+            .as_ref()
+            .ok_or_else(|| DbError::connection("Not connected"))?;
         let client = client_arc.lock().await;
 
         let is_select = crate::db::safety::QuerySafetyValidator::is_result_set_query(sql);
@@ -163,7 +175,11 @@ impl DatabaseAdapter for PostgresAdapter {
                 .map_err(|e| DbError::query(format!("Query failed: {e}")))?;
 
             let columns: Vec<String> = if let Some(first) = rows.first() {
-                first.columns().iter().map(|c| c.name().to_string()).collect()
+                first
+                    .columns()
+                    .iter()
+                    .map(|c| c.name().to_string())
+                    .collect()
             } else {
                 Vec::new()
             };
@@ -213,7 +229,10 @@ impl DatabaseAdapter for PostgresAdapter {
     }
 
     async fn execute_batch(&self, sql: &str) -> DbResult<()> {
-        let client_arc = self.client.as_ref().ok_or_else(|| DbError::connection("Not connected"))?;
+        let client_arc = self
+            .client
+            .as_ref()
+            .ok_or_else(|| DbError::connection("Not connected"))?;
         let client = client_arc.lock().await;
         client
             .batch_execute(sql)
@@ -223,7 +242,10 @@ impl DatabaseAdapter for PostgresAdapter {
     }
 
     async fn list_databases(&self) -> DbResult<Vec<DatabaseSchema>> {
-        let client_arc = self.client.as_ref().ok_or_else(|| DbError::connection("Not connected"))?;
+        let client_arc = self
+            .client
+            .as_ref()
+            .ok_or_else(|| DbError::connection("Not connected"))?;
         let client = client_arc.lock().await;
 
         let sql = "SELECT datname, datistemplate FROM pg_database WHERE datallowconn = true ORDER BY datname;";
@@ -245,7 +267,10 @@ impl DatabaseAdapter for PostgresAdapter {
     }
 
     async fn list_schemas(&self, _database: Option<&str>) -> DbResult<Vec<String>> {
-        let client_arc = self.client.as_ref().ok_or_else(|| DbError::connection("Not connected"))?;
+        let client_arc = self
+            .client
+            .as_ref()
+            .ok_or_else(|| DbError::connection("Not connected"))?;
         let client = client_arc.lock().await;
 
         let sql = "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT LIKE 'pg_%' AND schema_name != 'information_schema' ORDER BY schema_name;";
@@ -270,7 +295,10 @@ impl DatabaseAdapter for PostgresAdapter {
         _database: Option<&str>,
         schema: Option<&str>,
     ) -> DbResult<Vec<TableInfo>> {
-        let client_arc = self.client.as_ref().ok_or_else(|| DbError::connection("Not connected"))?;
+        let client_arc = self
+            .client
+            .as_ref()
+            .ok_or_else(|| DbError::connection("Not connected"))?;
         let client = client_arc.lock().await;
 
         let rows = if let Some(schema_name) = schema {
@@ -316,7 +344,10 @@ impl DatabaseAdapter for PostgresAdapter {
         schema: Option<&str>,
         table: &str,
     ) -> DbResult<Vec<ColumnInfo>> {
-        let client_arc = self.client.as_ref().ok_or_else(|| DbError::connection("Not connected"))?;
+        let client_arc = self
+            .client
+            .as_ref()
+            .ok_or_else(|| DbError::connection("Not connected"))?;
         let client = client_arc.lock().await;
 
         let schema_name = schema.unwrap_or("public");
@@ -355,7 +386,10 @@ impl DatabaseAdapter for PostgresAdapter {
         schema: Option<&str>,
         table: &str,
     ) -> DbResult<Vec<IndexInfo>> {
-        let client_arc = self.client.as_ref().ok_or_else(|| DbError::connection("Not connected"))?;
+        let client_arc = self
+            .client
+            .as_ref()
+            .ok_or_else(|| DbError::connection("Not connected"))?;
         let client = client_arc.lock().await;
 
         let schema_name = schema.unwrap_or("public");

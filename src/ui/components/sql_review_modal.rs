@@ -9,9 +9,8 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
 };
 use gpui_kit::gpui::{
-    prelude::*,
-    App, FontWeight, IntoElement, ParentElement, RenderOnce,
-    Styled, Window, div, px, rgba,
+    App, FontWeight, IntoElement, ParentElement, RenderOnce, Styled, Window, div, prelude::*, px,
+    rgba,
 };
 use std::rc::Rc;
 
@@ -232,14 +231,11 @@ impl RenderOnce for SqlReviewModal {
                 .border_1()
                 .border_color(ThemeColors::ERROR)
                 .child(
-                    div()
-                        .flex_shrink_0()
-                        .pt_0p5()
-                        .child(
-                            Icon::new(IconName::TriangleAlert)
-                                .size(px(14.0))
-                                .text_color(ThemeColors::ERROR),
-                        ),
+                    div().flex_shrink_0().pt_0p5().child(
+                        Icon::new(IconName::TriangleAlert)
+                            .size(px(14.0))
+                            .text_color(ThemeColors::ERROR),
+                    ),
                 )
                 .child(
                     v_flex()

@@ -47,11 +47,9 @@ impl ActiveConnection {
             let conn = Self::new(config);
             conn.adapter.lock().await.connect().await?;
             let status = conn.adapter.lock().await.test_connection().await.ok();
-            Ok(Self {
-                status,
-                ..conn
-            })
-        }).await
+            Ok(Self { status, ..conn })
+        })
+        .await
     }
 
     /// Tests a configuration without keeping an active handle open.
@@ -63,7 +61,8 @@ impl ActiveConnection {
             let status = conn.adapter.lock().await.test_connection().await;
             let _ = conn.adapter.lock().await.disconnect().await;
             status
-        }).await
+        })
+        .await
     }
 
     pub async fn connect(&self) -> DbResult<()> {
@@ -71,7 +70,8 @@ impl ActiveConnection {
         crate::db::runtime::run_on_tokio(async move {
             let mut adapter = adapter.lock().await;
             adapter.connect().await
-        }).await
+        })
+        .await
     }
 
     pub async fn disconnect(&self) -> DbResult<()> {
@@ -79,7 +79,8 @@ impl ActiveConnection {
         crate::db::runtime::run_on_tokio(async move {
             let mut adapter = adapter.lock().await;
             adapter.disconnect().await
-        }).await
+        })
+        .await
     }
 
     pub async fn is_connected(&self) -> bool {
@@ -87,7 +88,9 @@ impl ActiveConnection {
         crate::db::runtime::run_on_tokio(async move {
             let adapter = adapter.lock().await;
             Ok(adapter.is_connected())
-        }).await.unwrap_or(false)
+        })
+        .await
+        .unwrap_or(false)
     }
 
     pub async fn test_connection(&self) -> DbResult<ConnectionStatus> {
@@ -95,7 +98,8 @@ impl ActiveConnection {
         crate::db::runtime::run_on_tokio(async move {
             let adapter = adapter.lock().await;
             adapter.test_connection().await
-        }).await
+        })
+        .await
     }
 
     pub async fn execute_query(&self, sql: &str) -> DbResult<QueryResult> {
@@ -105,7 +109,8 @@ impl ActiveConnection {
         crate::db::runtime::run_on_tokio(async move {
             let adapter = adapter.lock().await;
             adapter.execute_query(&sql).await
-        }).await
+        })
+        .await
     }
 
     pub async fn execute_batch(&self, sql: &str) -> DbResult<()> {
@@ -119,7 +124,8 @@ impl ActiveConnection {
         crate::db::runtime::run_on_tokio(async move {
             let adapter = adapter.lock().await;
             adapter.execute_batch(&sql).await
-        }).await
+        })
+        .await
     }
 
     pub async fn list_databases(&self) -> DbResult<Vec<DatabaseSchema>> {
@@ -127,7 +133,8 @@ impl ActiveConnection {
         crate::db::runtime::run_on_tokio(async move {
             let adapter = adapter.lock().await;
             adapter.list_databases().await
-        }).await
+        })
+        .await
     }
 
     pub async fn list_schemas(&self, database: Option<&str>) -> DbResult<Vec<String>> {
@@ -136,7 +143,8 @@ impl ActiveConnection {
         crate::db::runtime::run_on_tokio(async move {
             let adapter = adapter.lock().await;
             adapter.list_schemas(database.as_deref()).await
-        }).await
+        })
+        .await
     }
 
     pub async fn list_tables(
@@ -149,8 +157,11 @@ impl ActiveConnection {
         let schema = schema.map(|s| s.to_string());
         crate::db::runtime::run_on_tokio(async move {
             let adapter = adapter.lock().await;
-            adapter.list_tables(database.as_deref(), schema.as_deref()).await
-        }).await
+            adapter
+                .list_tables(database.as_deref(), schema.as_deref())
+                .await
+        })
+        .await
     }
 
     pub async fn list_columns(
@@ -165,8 +176,11 @@ impl ActiveConnection {
         let table = table.to_string();
         crate::db::runtime::run_on_tokio(async move {
             let adapter = adapter.lock().await;
-            adapter.list_columns(database.as_deref(), schema.as_deref(), &table).await
-        }).await
+            adapter
+                .list_columns(database.as_deref(), schema.as_deref(), &table)
+                .await
+        })
+        .await
     }
 
     pub async fn list_indexes(
@@ -181,8 +195,11 @@ impl ActiveConnection {
         let table = table.to_string();
         crate::db::runtime::run_on_tokio(async move {
             let adapter = adapter.lock().await;
-            adapter.list_indexes(database.as_deref(), schema.as_deref(), &table).await
-        }).await
+            adapter
+                .list_indexes(database.as_deref(), schema.as_deref(), &table)
+                .await
+        })
+        .await
     }
 
     pub async fn get_table_ddl(
@@ -197,7 +214,10 @@ impl ActiveConnection {
         let table = table.to_string();
         crate::db::runtime::run_on_tokio(async move {
             let adapter = adapter.lock().await;
-            adapter.get_table_ddl(database.as_deref(), schema.as_deref(), &table).await
-        }).await
+            adapter
+                .get_table_ddl(database.as_deref(), schema.as_deref(), &table)
+                .await
+        })
+        .await
     }
 }

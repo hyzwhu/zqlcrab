@@ -208,12 +208,15 @@ impl RenderOnce for QueryHistoryView {
                         .child("ERR")
                 });
 
-            let mut load_btn = Button::new(gpui_kit::gpui::ElementId::NamedInteger("load_hist".into(), idx as u64))
-                .ghost()
-                .xsmall()
-                .icon(IconName::FileText)
-                .tooltip("Load into SQL Editor")
-                .child("Load");
+            let mut load_btn = Button::new(gpui_kit::gpui::ElementId::NamedInteger(
+                "load_hist".into(),
+                idx as u64,
+            ))
+            .ghost()
+            .xsmall()
+            .icon(IconName::FileText)
+            .tooltip("Load into SQL Editor")
+            .child("Load");
 
             if let Some(handler) = on_load {
                 load_btn = load_btn.on_click(move |_, window, cx| {
@@ -221,12 +224,15 @@ impl RenderOnce for QueryHistoryView {
                 });
             }
 
-            let mut run_btn = Button::new(gpui_kit::gpui::ElementId::NamedInteger("run_hist".into(), idx as u64))
-                .primary()
-                .xsmall()
-                .icon(IconName::Play)
-                .tooltip("Run Query Now")
-                .child("Run");
+            let mut run_btn = Button::new(gpui_kit::gpui::ElementId::NamedInteger(
+                "run_hist".into(),
+                idx as u64,
+            ))
+            .primary()
+            .xsmall()
+            .icon(IconName::Play)
+            .tooltip("Run Query Now")
+            .child("Run");
 
             if let Some(handler) = on_run {
                 run_btn = run_btn.on_click(move |_, window, cx| {
@@ -234,11 +240,14 @@ impl RenderOnce for QueryHistoryView {
                 });
             }
 
-            let mut copy_btn = Button::new(gpui_kit::gpui::ElementId::NamedInteger("copy_hist".into(), idx as u64))
-                .ghost()
-                .xsmall()
-                .icon(IconName::Copy)
-                .tooltip("Copy SQL");
+            let mut copy_btn = Button::new(gpui_kit::gpui::ElementId::NamedInteger(
+                "copy_hist".into(),
+                idx as u64,
+            ))
+            .ghost()
+            .xsmall()
+            .icon(IconName::Copy)
+            .tooltip("Copy SQL");
 
             if let Some(handler) = on_copy {
                 copy_btn = copy_btn.on_click(move |_, window, cx| {

@@ -1,161 +1,174 @@
-# CrabStudio (zqlcrab)
+<p align="center">
+  <img src="assets/logo.png" width="160" height="160" alt="zqlcrab Logo" />
+</p>
 
-A high-performance, cross-platform relational database desktop client built in Rust using GPUI and [gpui-kit](https://github.com/longbridge/gpui-kit). Designed for software engineers, database administrators, and data practitioners who value speed, responsiveness, and a polished visual experience.
+<h1 align="center">zqlcrab</h1>
+
+<p align="center">
+  <strong>Fast, lightweight, GPU-accelerated database desktop client built with Rust & GPUI</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/zqlcrab/zqlcrab/releases"><img src="https://img.shields.io/github/v/release/zqlcrab/zqlcrab?include_prereleases&color=orange" alt="Release"></a>
+  <a href="LICENSE-MIT"><img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg" alt="License"></a>
+  <img src="https://img.shields.io/badge/rust-2024%20edition-lightgrey.svg?logo=rust" alt="Rust 2024">
+  <img src="https://img.shields.io/badge/UI-GPUI%20120%20FPS-cyan.svg" alt="GPUI">
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg" alt="Platforms">
+</p>
 
 ---
 
-## Highlights & Features
+**zqlcrab** is a modern, high-performance database desktop client engineered in Rust using [GPUI](https://github.com/zed-industries/zed) and [gpui-kit](https://github.com/longbridge/gpui-kit). Designed for software developers, DBAs, and data engineers who value speed, responsive zero-latency input, and a polished developer experience without webview or Electron overhead.
 
-- ⚡ **Blazing Fast GPU-Accelerated UI**: Powered by GPUI and `gpui-kit`, delivering instant 120 FPS rendering, zero webview bloat, and minimal memory footprint.
-- 🌐 **True Cross-Platform Support**: Seamlessly runs on **macOS**, **Linux** (X11 & Wayland), and **Windows**.
+---
+
+## ✨ Features
+
+- ⚡ **GPU-Accelerated 120 FPS UI**: Powered by Zed's GPUI framework. Instant startup, sub-millisecond input response, and minuscule memory consumption.
 - 🔌 **Multi-Engine Relational Database Connectivity**:
-  - **SQLite** (bundled with WAL mode, in-memory databases, and custom file paths)
-  - **PostgreSQL** (high-performance asynchronous driver with SSL and pool support)
-  - **MySQL** (asynchronous connection pooling and schema reflection)
+  - **SQLite**: Bundled with WAL mode, in-memory databases, and file explorer integration.
+  - **PostgreSQL**: Asynchronous client driver supporting TLS/SSL, schemas, and connection pools.
+  - **MySQL**: Full async driver lifecycle, schema reflection, and multi-statement transactions.
+  - **Catalog Selector**: Extensible database catalog supporting 36+ database engine connection profiles and custom driver adapters.
+- 🎨 **Visual Table Designer**:
+  - Intuitive schema creation dialog with real-time dialect DDL preview (PostgreSQL, MySQL, SQLite).
+  - Column configuration: Primary Key, Auto Increment / Serial, Nullable, Default Values, and Column Comments.
+  - Interactive Index Designer: Create normal or unique multi-column indexes with quick-pick chips and searchable column dropdowns.
+  - Direct execution or "Open in Console" for customized DDL adjustments.
+- 📊 **Interactive Data Grid & In-Place Editing**:
+  - Double-click cell editing with immediate visual dirty-state markers.
+  - Insert new blank rows or clone existing rows as starting templates.
+  - Contextual row deletion with visual strike-through tracking.
+  - **Staged Changeset Review**: Review all pending INSERTs, UPDATEs, and DELETEs in an atomic transaction script before committing to disk.
+- 💻 **SQL Console & Developer Ergonomics**:
+  - Multi-line query editor with execution history tracking and search.
+  - One-click query formatting via `sqlformat`.
+  - Visual query execution plan tree viewer (`EXPLAIN` / `EXPLAIN QUERY PLAN`).
+  - Read-only safe mode toggle to protect production instances from accidental writes.
+  - Fast result export to **CSV**, **JSON**, **Markdown**, and **SQL INSERT** statements.
 - 🗄️ **Persistent Connection Profiles**:
-  - Save and organize connection configurations securely on local disk (`~/.config/zqlcrab/connections.json` or platform equivalent).
-  - One-click profile switching, live connection testing, latency ping tracking, and graceful disconnection.
-- 💻 **Interactive SQL Console**:
-  - Multi-line editor with keyboard execution shortcuts (`⌘↵` / `Ctrl+Enter`).
-  - Execution duration timer and returned row counter.
-  - Formatted query error reporting and diagnostics.
-- 📊 **Tabular Data Grid**:
-  - Inspect query results and table contents with column type headers, row indices, and numeric/text formatting.
-  - Clean empty states and scrollable data regions.
-- 🔍 **Database Schema & DDL Inspector**:
-  - Column specifications (data types, primary keys, auto-increment badges, nullability, default values).
-  - Index definitions (index name, unique flags, indexed column names).
-  - Generated native `CREATE TABLE` DDL statement viewer with syntax contrast.
-- 🎨 **Design System Driven Aesthetics**:
-  - Implements the complete design specifications defined in `DESIGN.md`.
-  - Obsidian & Slate dark theme palette (`#0F172A`, `#1E293B`, `#334155`) with Electric Ocean interactive accents (`#0EA5E9`, `#38BDF8`).
-  - Strict typography scale, 8px spacing grid, and subtle elevation tokens.
+  - Secure local configuration (`~/.config/zqlcrab/connections.json` on macOS/Linux or `%APPDATA%\zqlcrab` on Windows).
+  - Latency ping indicator, test connection diagnostics, and instant database switching.
+- 🖥️ **Responsive Desktop Layout**:
+  - Fluid titlebar navigation that gracefully collapses and preserves critical action controls on smaller screens.
+  - Dark obsidian theme tuned for long-session coding comfort.
 
 ---
 
-## Architectural Overview
+## 🚀 Getting Started
 
-CrabStudio separates low-level asynchronous database drivers from GPUI's retained presentation layer:
+### Pre-built Binaries
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                 GPUI Presentation Layer                     │
-│  (CrabStudioApp, Sidebar, QueryConsole, DataGrid, Schema)   │
-└──────────────────────────────┬──────────────────────────────┘
-                               │ cx.spawn (Async tasks)
-┌──────────────────────────────▼──────────────────────────────┐
-│                    ActiveConnection Handle                  │
-│       (Thread-safe Arc<Mutex<Box<dyn DatabaseAdapter>>>)    │
-└──────────────────────────────┬──────────────────────────────┘
-                               │ Asynchronous operations
-        ┌──────────────────────┼──────────────────────┐
-        ▼                      ▼                      ▼
-┌───────────────┐      ┌───────────────┐      ┌───────────────┐
-│ SqliteAdapter │      │PostgresAdapter│      │ MysqlAdapter  │
-│  (rusqlite)   │      │(tokio-postgres│      │ (mysql_async) │
-└───────────────┘      └───────────────┘      └───────────────┘
-```
+Download pre-compiled release packages for your operating system from [GitHub Releases](https://github.com/zqlcrab/zqlcrab/releases):
 
-- **`DatabaseAdapter` Trait**: Unified abstraction for connection lifecycle, query execution, metadata discovery, and DDL generation.
-- **`ActiveConnection`**: Thread-safe active handle holding connection metadata and server ping health.
-- **`ConnectionManager`**: Encapsulates disk serialization and active session registry.
-- **`CrabStudioApp`**: Root GPUI entity managing window state, asynchronous command execution, workspace tab switching, and dialog overlays.
+| OS | Architecture | Package |
+| :--- | :--- | :--- |
+| **macOS** | Apple Silicon (M1/M2/M3/M4) | `zqlcrab-aarch64-apple-darwin.tar.gz` |
+| **macOS** | Intel x86_64 | `zqlcrab-x86_64-apple-darwin.tar.gz` |
+| **Linux** | x86_64 | `zqlcrab-x86_64-unknown-linux-gnu.tar.gz` |
+| **Windows** | x86_64 | `zqlcrab-x86_64-pc-windows-msvc.zip` |
 
 ---
 
-## Installation & Building
+### Building from Source
 
-### Prerequisites
+#### Prerequisites
+- Rust toolchain (version 1.85+ recommended, 2024 edition compatible):
+  ```bash
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+  ```
 
-Ensure you have Rust (edition 2024 / 1.85+) and Cargo installed:
-
+#### 1. Clone the Repository
 ```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+git clone https://github.com/zqlcrab/zqlcrab.git
+cd zqlcrab
 ```
 
-### Platform-Specific Setup
+#### 2. Platform Dependencies
 
-#### macOS
-No additional system dependencies are required. Build directly:
+##### macOS
+No additional system dependencies required.
 ```bash
 cargo build --release
 ```
 
-#### Linux (Ubuntu / Debian / Fedora / Arch)
-Install standard GPUI and graphics build dependencies:
-
+##### Linux (Ubuntu / Debian / Arch / Fedora)
+Install X11, Wayland, and font development packages:
 ```bash
 # Ubuntu / Debian
 sudo apt-get update && sudo apt-get install -y \
-    build-essential \
-    libfontconfig1-dev \
-    libfreetype6-dev \
-    libx11-dev \
-    libx11-xcb-dev \
-    libxkbcommon-x11-dev \
-    libwayland-dev \
-    libgl1-mesa-dev \
-    pkg-config
-
-# Fedora
-sudo dnf install -y \
-    fontconfig-devel \
-    freetype-devel \
-    libX11-devel \
-    libxkbcommon-x11-devel \
-    wayland-devel \
-    mesa-libGL-devel
+    pkg-config libssl-dev libx11-dev libxcb1-dev \
+    libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+    libxkbcommon-dev libxkbcommon-x11-dev libasound2-dev \
+    libfontconfig1-dev libfreetype6-dev libvulkan1
 
 # Arch Linux
 sudo pacman -S fontconfig freetype2 libx11 libxkbcommon wayland mesa
 ```
 
-#### Windows
-Install Visual Studio C++ Build Tools and Windows SDK.
+##### Windows
+Install [Visual Studio C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with the Windows SDK component.
 
----
-
-## Running the Application
-
-### Development Mode
-
+#### 3. Run
 ```bash
-cargo run
-```
-
-When started for the first time, CrabStudio automatically boots with an in-memory SQLite demo database pre-populated with sample tables (`users`, `products`) so you can explore the interface immediately.
-
-### Running Automated Tests
-
-```bash
-cargo test
+cargo run --release
 ```
 
 ---
 
-## Design System
+## ⌨️ Keyboard Shortcuts
 
-All user interface styling, layout geometries, colors, and component contracts are defined in [`DESIGN.md`](./DESIGN.md) and validated via `designmd`:
+| Shortcut (macOS) | Shortcut (Win / Linux) | Action |
+| :--- | :--- | :--- |
+| `⌘ + ↵` | `Ctrl + Enter` | Execute SQL Query in Console |
+| `⌘ + S` | `Ctrl + S` | Open Staged Review & Commit Dialog |
+| `⌘ + F` | `Ctrl + F` | Format SQL Query |
+| `Esc` | `Esc` | Close Active Modal Dialog / Deselect |
 
-```bash
-designmd lint DESIGN.md
+---
+
+## 📂 Project Architecture
+
+```
+zqlcrab/
+├── assets/                  # High-res logos, vectors, and database engine icons
+├── src/
+│   ├── main.rs              # Application entrypoint & GPUI window initialization
+│   ├── db/                  # Database abstraction layer
+│   │   ├── adapter.rs       # Async DatabaseAdapter trait
+│   │   ├── changeset.rs     # Tabular grid mutation tracker (Insert/Update/Delete)
+│   │   ├── sql_gen.rs       # Dialect DDL and atomic transaction generator
+│   │   ├── explain.rs       # Query execution plan parser
+│   │   ├── export.rs        # CSV, JSON, Markdown, and SQL formatters
+│   │   ├── sqlite.rs        # SQLite engine implementation
+│   │   ├── postgres.rs      # PostgreSQL client adapter
+│   │   ├── mysql.rs         # MySQL async client adapter
+│   │   └── types.rs         # Database metadata and value representations
+│   └── ui/                  # GPUI user interface components
+│       ├── app.rs           # Root application view & state machine
+│       ├── theme.rs         # Theme tokens & obsidian color palette
+│       └── components/      # Data grid, console, table designer, connection modal
+└── .github/workflows/       # Automated CI and multi-platform release pipelines
 ```
 
 ---
 
-## Keyboard Shortcuts
+## 🤝 Contributing
 
-| Shortcut | Action |
-| :--- | :--- |
-| `⌘ + ↵` (Mac) / `Ctrl + Enter` (Win/Linux) | Run SQL Query in Console |
-| `Esc` | Close New Connection Dialog |
+Contributions, bug reports, and feature suggestions are warmly welcomed!
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Ensure tests pass (`cargo test`)
+4. Commit your changes (`git commit -m 'feat: add amazing feature'`)
+5. Push to the branch (`git push origin feature/amazing-feature`)
+6. Open a Pull Request
 
 ---
 
-## License
+## 📄 License
 
-Dual-licensed under either of:
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
-- MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
+Licensed under either of:
+- **Apache License, Version 2.0** ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+- **MIT License** ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
 
 at your option.

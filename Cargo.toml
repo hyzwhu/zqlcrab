@@ -2,6 +2,14 @@
 name = "zqlcrab"
 version = "0.1.0"
 edition = "2024"
+description = "A modern, high-performance database IDE built with Rust & GPUI"
+authors = ["zqlcrab contributors"]
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/zqlcrab/zqlcrab"
+homepage = "https://github.com/zqlcrab/zqlcrab"
+keywords = ["database", "sql", "sqlite", "postgres", "mysql"]
+categories = ["development-tools", "database-utilities", "gui"]
 
 [dependencies]
 gpui-kit = "0.6"

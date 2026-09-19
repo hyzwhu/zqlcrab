@@ -163,7 +163,11 @@ impl RenderOnce for SchemaViewer {
                             .child("Select 100")
                             .when_some(on_quick_sel, |btn, handler| {
                                 btn.on_click(move |_, window, cx| {
-                                    handler(format!("SELECT * FROM \"{}\" LIMIT 100;", tbl_for_sel), window, cx);
+                                    handler(
+                                        format!("SELECT * FROM \"{}\" LIMIT 100;", tbl_for_sel),
+                                        window,
+                                        cx,
+                                    );
                                 })
                             }),
                     )
@@ -175,7 +179,14 @@ impl RenderOnce for SchemaViewer {
                             .child("Count (*)")
                             .when_some(on_quick_cnt, |btn, handler| {
                                 btn.on_click(move |_, window, cx| {
-                                    handler(format!("SELECT COUNT(*) AS total_count FROM \"{}\";", tbl_for_cnt), window, cx);
+                                    handler(
+                                        format!(
+                                            "SELECT COUNT(*) AS total_count FROM \"{}\";",
+                                            tbl_for_cnt
+                                        ),
+                                        window,
+                                        cx,
+                                    );
                                 })
                             }),
                     )
@@ -187,7 +198,14 @@ impl RenderOnce for SchemaViewer {
                             .child("Explain Plan")
                             .when_some(on_quick_exp, |btn, handler| {
                                 btn.on_click(move |_, window, cx| {
-                                    handler(format!("EXPLAIN SELECT * FROM \"{}\" LIMIT 100;", tbl_for_exp), window, cx);
+                                    handler(
+                                        format!(
+                                            "EXPLAIN SELECT * FROM \"{}\" LIMIT 100;",
+                                            tbl_for_exp
+                                        ),
+                                        window,
+                                        cx,
+                                    );
                                 })
                             }),
                     )
@@ -344,30 +362,27 @@ impl RenderOnce for SchemaViewer {
             });
 
         // DDL section
-        let ddl_section = v_flex()
-            .gap_2()
-            .p_3()
-            .when_some(self.ddl, |this, sql| {
-                this.child(
-                    div()
-                        .text_xs()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(ThemeColors::TEXT_MUTED)
-                        .child("DDL STATEMENT"),
-                )
-                .child(
-                    div()
-                        .p_3()
-                        .rounded_md()
-                        .bg(ThemeColors::BG_SURFACE)
-                        .border_1()
-                        .border_color(ThemeColors::BORDER)
-                        .font_family("JetBrains Mono")
-                        .text_xs()
-                        .text_color(ThemeColors::TEXT_PRIMARY)
-                        .child(sql),
-                )
-            });
+        let ddl_section = v_flex().gap_2().p_3().when_some(self.ddl, |this, sql| {
+            this.child(
+                div()
+                    .text_xs()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(ThemeColors::TEXT_MUTED)
+                    .child("DDL STATEMENT"),
+            )
+            .child(
+                div()
+                    .p_3()
+                    .rounded_md()
+                    .bg(ThemeColors::BG_SURFACE)
+                    .border_1()
+                    .border_color(ThemeColors::BORDER)
+                    .font_family("JetBrains Mono")
+                    .text_xs()
+                    .text_color(ThemeColors::TEXT_PRIMARY)
+                    .child(sql),
+            )
+        });
 
         v_flex()
             .id("schema_viewer_scroll")

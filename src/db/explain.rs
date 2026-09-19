@@ -65,7 +65,10 @@ impl ExplainPlan {
     }
 
     pub fn estimated_total_cost(&self) -> Option<f64> {
-        self.roots.iter().filter_map(|n| n.total_cost).reduce(f64::max)
+        self.roots
+            .iter()
+            .filter_map(|n| n.total_cost)
+            .reduce(f64::max)
     }
 
     pub fn most_expensive(&self) -> Option<&ExplainNode> {
@@ -88,7 +91,11 @@ impl ExplainPlan {
     }
 
     pub fn flatten(&self) -> Vec<(usize, &ExplainNode)> {
-        fn walk<'a>(nodes: &'a [ExplainNode], depth: usize, out: &mut Vec<(usize, &'a ExplainNode)>) {
+        fn walk<'a>(
+            nodes: &'a [ExplainNode],
+            depth: usize,
+            out: &mut Vec<(usize, &'a ExplainNode)>,
+        ) {
             for node in nodes {
                 out.push((depth, node));
                 walk(&node.children, depth + 1, out);
@@ -136,7 +143,9 @@ pub fn wrap_explain_sql(sql: &str, family: DatabaseFamily) -> String {
 pub fn parse_explain_result(family: DatabaseFamily, result: &QueryResult) -> ExplainPlan {
     let raw = result_to_raw(result);
     let roots = match family {
-        DatabaseFamily::Sqlite => parse_sqlite_plan(result).unwrap_or_else(|| parse_json_plan(&raw)),
+        DatabaseFamily::Sqlite => {
+            parse_sqlite_plan(result).unwrap_or_else(|| parse_json_plan(&raw))
+        }
         DatabaseFamily::Postgres | DatabaseFamily::MySql => {
             let from_json = parse_json_plan(&raw);
             if from_json.is_empty() {
@@ -246,9 +255,7 @@ fn parse_postgres_node(value: &JsonValue) -> ExplainNode {
 }
 
 fn parse_mysql_block(value: &JsonValue) -> ExplainNode {
-    let cost = value
-        .pointer("/cost_info/query_cost")
-        .and_then(json_f64);
+    let cost = value.pointer("/cost_info/query_cost").and_then(json_f64);
     let mut children = Vec::new();
 
     if let Some(table) = value.get("table") {
@@ -261,7 +268,11 @@ fn parse_mysql_block(value: &JsonValue) -> ExplainNode {
             }
         }
     }
-    for wrapper in ["ordering_operation", "grouping_operation", "duplicates_removal"] {
+    for wrapper in [
+        "ordering_operation",
+        "grouping_operation",
+        "duplicates_removal",
+    ] {
         if let Some(inner) = value.get(wrapper) {
             children.push(parse_mysql_block(inner));
         }
@@ -346,7 +357,9 @@ fn parse_sqlite_plan(result: &QueryResult) -> Option<Vec<ExplainNode>> {
         .collect();
     let id_ix = cols.iter().position(|c| c == "id" || c == "selectid");
     let parent_ix = cols.iter().position(|c| c == "parent" || c == "from");
-    let detail_ix = cols.iter().position(|c| c == "detail" || c == "comment" || c.ends_with("detail"));
+    let detail_ix = cols
+        .iter()
+        .position(|c| c == "detail" || c == "comment" || c.ends_with("detail"));
 
     if let (Some(id_ix), Some(parent_ix), Some(detail_ix)) = (id_ix, parent_ix, detail_ix) {
         #[derive(Clone)]
@@ -388,16 +401,19 @@ fn parse_sqlite_plan(result: &QueryResult) -> Option<Vec<ExplainNode>> {
         }
 
         let roots = build(-1, &rows);
-        let roots = if roots.is_empty() { build(0, &rows) } else { roots };
-        if roots.is_empty() {
-            None
+        let roots = if roots.is_empty() {
+            build(0, &rows)
         } else {
-            Some(roots)
-        }
+            roots
+        };
+        if roots.is_empty() { None } else { Some(roots) }
     } else if result.columns.len() == 1 {
         None
     } else {
-        let detail_ix = cols.iter().position(|c| c.contains("detail")).unwrap_or(result.columns.len().saturating_sub(1));
+        let detail_ix = cols
+            .iter()
+            .position(|c| c.contains("detail"))
+            .unwrap_or(result.columns.len().saturating_sub(1));
         Some(
             result
                 .rows
@@ -497,7 +513,10 @@ mod tests {
         assert_eq!(plan.node_count(), 2);
         assert_eq!(plan.roots[0].node_type, "Limit");
         assert_eq!(plan.roots[0].plan_rows, Some(100.0));
-        assert_eq!(plan.roots[0].children[0].relation.as_deref(), Some("ecrm_yb"));
+        assert_eq!(
+            plan.roots[0].children[0].relation.as_deref(),
+            Some("ecrm_yb")
+        );
         assert_eq!(plan.estimated_total_cost(), Some(3.80));
         let expensive = plan.most_expensive().unwrap();
         assert_eq!(expensive.node_type, "Seq Scan");
@@ -507,16 +526,19 @@ mod tests {
     #[test]
     fn parses_sqlite_query_plan() {
         let result = QueryResult::rows(
-            vec!["id".into(), "parent".into(), "notused".into(), "detail".into()],
-            vec!["INT".into(), "INT".into(), "INT".into(), "TEXT".into()],
             vec![
-                vec![
-                    QueryValue::Int(2),
-                    QueryValue::Int(0),
-                    QueryValue::Int(0),
-                    QueryValue::String("SCAN users".into()),
-                ],
+                "id".into(),
+                "parent".into(),
+                "notused".into(),
+                "detail".into(),
             ],
+            vec!["INT".into(), "INT".into(), "INT".into(), "TEXT".into()],
+            vec![vec![
+                QueryValue::Int(2),
+                QueryValue::Int(0),
+                QueryValue::Int(0),
+                QueryValue::String("SCAN users".into()),
+            ]],
         );
         let plan = parse_explain_result(DatabaseFamily::Sqlite, &result);
         assert_eq!(plan.roots.len(), 1);

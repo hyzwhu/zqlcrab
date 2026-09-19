@@ -1,7 +1,7 @@
 //! SQL statement generator for atomic tabular updates and deletions across database dialects.
 
 use crate::db::changeset::GridChangeset;
-use crate::db::types::{quote_ident, ColumnInfo, DatabaseFamily, QueryValue};
+use crate::db::types::{ColumnInfo, DatabaseFamily, QueryValue, quote_ident};
 use std::collections::BTreeMap;
 
 /// Detailed review plan generated from pending changeset modifications.
@@ -51,7 +51,11 @@ pub fn generate_review_plan(
     // Qualified table identifier (e.g. "public"."users" or `mydb`.`users`)
     let qualified_table = match schema_name {
         Some(s) if !s.trim().is_empty() => {
-            format!("{}.{}", quote_ident(s, family), quote_ident(table_name, family))
+            format!(
+                "{}.{}",
+                quote_ident(s, family),
+                quote_ident(table_name, family)
+            )
         }
         _ => quote_ident(table_name, family),
     };
@@ -64,14 +68,20 @@ pub fn generate_review_plan(
 
         for (col_idx, col_name) in grid_columns.iter().enumerate() {
             let val = insertion.values.get(col_idx).unwrap_or(&QueryValue::Null);
-            let col_meta = columns.iter().find(|c| c.name.eq_ignore_ascii_case(col_name));
+            let col_meta = columns
+                .iter()
+                .find(|c| c.name.eq_ignore_ascii_case(col_name));
 
             // Determine whether to omit an auto-increment or serial column when value is Null or <auto>
-            let is_auto = col_meta.map(|c| {
-                c.is_auto_increment
-                    || c.data_type.to_lowercase().contains("serial")
-                    || (c.is_primary_key && (c.data_type.to_lowercase().contains("int") || family == DatabaseFamily::Sqlite))
-            }).unwrap_or(false);
+            let is_auto = col_meta
+                .map(|c| {
+                    c.is_auto_increment
+                        || c.data_type.to_lowercase().contains("serial")
+                        || (c.is_primary_key
+                            && (c.data_type.to_lowercase().contains("int")
+                                || family == DatabaseFamily::Sqlite))
+                })
+                .unwrap_or(false);
 
             let is_auto_placeholder = match val {
                 QueryValue::Null => is_auto,
@@ -79,9 +89,9 @@ pub fn generate_review_plan(
                 _ => false,
             };
 
-            let has_default_and_not_nullable = col_meta.map(|c| {
-                !c.is_nullable && (c.default_value.is_some() || c.is_auto_increment)
-            }).unwrap_or(false);
+            let has_default_and_not_nullable = col_meta
+                .map(|c| !c.is_nullable && (c.default_value.is_some() || c.is_auto_increment))
+                .unwrap_or(false);
 
             let is_default_placeholder = match val {
                 QueryValue::Null => has_default_and_not_nullable,
@@ -139,10 +149,11 @@ pub fn generate_review_plan(
         if changeset.is_row_deleted(r_idx) {
             continue; // Deletion takes precedence
         }
-        row_updates
-            .entry(r_idx)
-            .or_default()
-            .push((c_idx, edit.column_name.clone(), edit.new_value.clone()));
+        row_updates.entry(r_idx).or_default().push((
+            c_idx,
+            edit.column_name.clone(),
+            edit.new_value.clone(),
+        ));
     }
 
     let mut updates_count = 0;
@@ -162,13 +173,8 @@ pub fn generate_review_plan(
         }
 
         // WHERE clause
-        let where_clause = build_row_where_clause(
-            family,
-            columns,
-            grid_columns,
-            orig_row,
-            &pk_names,
-        );
+        let where_clause =
+            build_row_where_clause(family, columns, grid_columns, orig_row, &pk_names);
 
         let set_str = set_clauses.join(", ");
         statements.push(format!(
@@ -193,7 +199,9 @@ pub fn generate_review_plan(
             &pk_names,
         );
 
-        statements.push(format!("DELETE FROM {qualified_table}\nWHERE {where_clause};"));
+        statements.push(format!(
+            "DELETE FROM {qualified_table}\nWHERE {where_clause};"
+        ));
         deletes_count += 1;
     }
 
@@ -229,7 +237,9 @@ fn build_row_where_clause(
         // Match only primary key columns
         for pk in pk_names {
             // Find column index
-            let col_idx = grid_columns.iter().position(|c| c.eq_ignore_ascii_case(pk))
+            let col_idx = grid_columns
+                .iter()
+                .position(|c| c.eq_ignore_ascii_case(pk))
                 .or_else(|| columns.iter().position(|c| c.name.eq_ignore_ascii_case(pk)));
 
             if let Some(idx) = col_idx {
@@ -238,7 +248,10 @@ fn build_row_where_clause(
                     if val.is_null() {
                         clauses.push(format!("{col_quoted} IS NULL"));
                     } else {
-                        clauses.push(format!("{col_quoted} = {}", format_query_value(val, family)));
+                        clauses.push(format!(
+                            "{col_quoted} = {}",
+                            format_query_value(val, family)
+                        ));
                     }
                 }
             }
@@ -257,7 +270,10 @@ fn build_row_where_clause(
                 if val.is_null() {
                     clauses.push(format!("{col_quoted} IS NULL"));
                 } else {
-                    clauses.push(format!("{col_quoted} = {}", format_query_value(val, family)));
+                    clauses.push(format!(
+                        "{col_quoted} = {}",
+                        format_query_value(val, family)
+                    ));
                 }
             }
         }
@@ -276,16 +292,14 @@ pub fn format_query_value(val: &QueryValue, family: DatabaseFamily) -> String {
         QueryValue::Null => "NULL".to_string(),
         QueryValue::Bool(b) => match family {
             DatabaseFamily::Postgres => if *b { "TRUE" } else { "FALSE" }.to_string(),
-            DatabaseFamily::MySql | DatabaseFamily::Sqlite => if *b { "1" } else { "0" }.to_string(),
+            DatabaseFamily::MySql | DatabaseFamily::Sqlite => {
+                if *b { "1" } else { "0" }.to_string()
+            }
         },
         QueryValue::Int(i) => i.to_string(),
         QueryValue::Float(f) => {
             let s = format!("{f}");
-            if s.contains('.') {
-                s
-            } else {
-                format!("{f}.0")
-            }
+            if s.contains('.') { s } else { format!("{f}.0") }
         }
         QueryValue::String(s) => match family {
             DatabaseFamily::MySql => {
@@ -327,14 +341,10 @@ fn build_transaction_script(family: DatabaseFamily, statements: &[String]) -> St
 
     match family {
         DatabaseFamily::MySql => {
-            format!(
-                "START TRANSACTION;\n\n{joined_stmts}\n\nCOMMIT;"
-            )
+            format!("START TRANSACTION;\n\n{joined_stmts}\n\nCOMMIT;")
         }
         DatabaseFamily::Postgres | DatabaseFamily::Sqlite => {
-            format!(
-                "BEGIN;\n\n{joined_stmts}\n\nCOMMIT;"
-            )
+            format!("BEGIN;\n\n{joined_stmts}\n\nCOMMIT;")
         }
     }
 }
@@ -372,7 +382,9 @@ pub fn extract_table_from_sql(sql: &str) -> Option<(Option<String>, String)> {
     }
 
     let raw_target = target_token?;
-    let trimmed = raw_target.trim_matches(|c| c == ';' || c == ',' || c == ')' || c == '(').trim();
+    let trimmed = raw_target
+        .trim_matches(|c| c == ';' || c == ',' || c == ')' || c == '(')
+        .trim();
     if trimmed.is_empty() || trimmed.starts_with('(') {
         return None;
     }
@@ -401,7 +413,14 @@ fn parse_qualified_identifier(ident: &str) -> Option<(Option<String>, String)> {
         if tbl.is_empty() {
             None
         } else {
-            Some((if schema.is_empty() { None } else { Some(schema) }, tbl))
+            Some((
+                if schema.is_empty() {
+                    None
+                } else {
+                    Some(schema)
+                },
+                tbl,
+            ))
         }
     } else {
         let schema = strip_identifier_quotes(parts[parts.len() - 2]);
@@ -409,7 +428,14 @@ fn parse_qualified_identifier(ident: &str) -> Option<(Option<String>, String)> {
         if tbl.is_empty() {
             None
         } else {
-            Some((if schema.is_empty() { None } else { Some(schema) }, tbl))
+            Some((
+                if schema.is_empty() {
+                    None
+                } else {
+                    Some(schema)
+                },
+                tbl,
+            ))
         }
     }
 }
@@ -493,7 +519,8 @@ pub fn extract_base_column_name(item: &str) -> String {
 pub fn column_matches_index_spec(item: &str, col_name: &str) -> bool {
     let base = extract_base_column_name(item);
     let trimmed = item.trim();
-    let is_quoted = trimmed.starts_with('"') || trimmed.starts_with('`') || trimmed.starts_with('[');
+    let is_quoted =
+        trimmed.starts_with('"') || trimmed.starts_with('`') || trimmed.starts_with('[');
 
     if is_quoted {
         base == col_name
@@ -709,7 +736,11 @@ pub fn generate_create_table_sql(
     let quoted_table = if let Some(schema) = &def.schema {
         let schema_trimmed = schema.trim();
         if !schema_trimmed.is_empty() && !schema_trimmed.eq_ignore_ascii_case("main") {
-            format!("{}.{}", quote_ident(schema_trimmed, family), quote_ident(table_name, family))
+            format!(
+                "{}.{}",
+                quote_ident(schema_trimmed, family),
+                quote_ident(table_name, family)
+            )
         } else {
             quote_ident(table_name, family)
         }
@@ -717,7 +748,11 @@ pub fn generate_create_table_sql(
         quote_ident(table_name, family)
     };
 
-    let pks: Vec<&ColumnDef> = valid_cols.iter().filter(|c| c.is_primary_key).copied().collect();
+    let pks: Vec<&ColumnDef> = valid_cols
+        .iter()
+        .filter(|c| c.is_primary_key)
+        .copied()
+        .collect();
 
     let mut col_clauses = Vec::new();
     let mut post_statements = Vec::new();
@@ -734,7 +769,9 @@ pub fn generate_create_table_sql(
 
                 if single_pk_auto && col.is_primary_key {
                     // SQLite requires INTEGER PRIMARY KEY AUTOINCREMENT
-                    col_clauses.push(format!("    {quoted_col} INTEGER PRIMARY KEY AUTOINCREMENT"));
+                    col_clauses.push(format!(
+                        "    {quoted_col} INTEGER PRIMARY KEY AUTOINCREMENT"
+                    ));
                     continue;
                 }
 
@@ -788,7 +825,10 @@ pub fn generate_create_table_sql(
                 }
                 let idx_name = idx.name.trim();
                 let actual_name = if idx_name.is_empty() {
-                    let sanitized: Vec<String> = valid_idx_cols.iter().map(|c| extract_base_column_name(c)).collect();
+                    let sanitized: Vec<String> = valid_idx_cols
+                        .iter()
+                        .map(|c| extract_base_column_name(c))
+                        .collect();
                     format!("idx_{}_{}", table_name, sanitized.join("_"))
                 } else {
                     idx_name.to_string()
@@ -888,7 +928,10 @@ pub fn generate_create_table_sql(
                 }
                 let idx_name = idx.name.trim();
                 let actual_name = if idx_name.is_empty() {
-                    let sanitized: Vec<String> = valid_idx_cols.iter().map(|c| extract_base_column_name(c)).collect();
+                    let sanitized: Vec<String> = valid_idx_cols
+                        .iter()
+                        .map(|c| extract_base_column_name(c))
+                        .collect();
                     format!("idx_{}_{}", table_name, sanitized.join("_"))
                 } else {
                     idx_name.to_string()
@@ -974,7 +1017,10 @@ pub fn generate_create_table_sql(
                 }
                 let idx_name = idx.name.trim();
                 let actual_name = if idx_name.is_empty() {
-                    let sanitized: Vec<String> = valid_idx_cols.iter().map(|c| extract_base_column_name(c)).collect();
+                    let sanitized: Vec<String> = valid_idx_cols
+                        .iter()
+                        .map(|c| extract_base_column_name(c))
+                        .collect();
                     format!("idx_{}_{}", table_name, sanitized.join("_"))
                 } else {
                     idx_name.to_string()
@@ -1051,8 +1097,16 @@ mod tests {
         let cols = sample_columns();
         let grid_cols = vec!["id".to_string(), "name".to_string(), "note".to_string()];
         let orig_rows = vec![
-            vec![QueryValue::Int(1), QueryValue::String("Alice".into()), QueryValue::Null],
-            vec![QueryValue::Int(2), QueryValue::String("Bob".into()), QueryValue::String("Hello".into())],
+            vec![
+                QueryValue::Int(1),
+                QueryValue::String("Alice".into()),
+                QueryValue::Null,
+            ],
+            vec![
+                QueryValue::Int(2),
+                QueryValue::String("Bob".into()),
+                QueryValue::String("Hello".into()),
+            ],
         ];
 
         let mut cs = GridChangeset::new();
@@ -1116,9 +1170,7 @@ mod tests {
             },
         ];
         let grid_cols = vec!["tag".to_string(), "active".to_string()];
-        let orig_rows = vec![
-            vec![QueryValue::Null, QueryValue::Int(1)],
-        ];
+        let orig_rows = vec![vec![QueryValue::Null, QueryValue::Int(1)]];
 
         let mut cs = GridChangeset::new();
         cs.set_cell_value(
@@ -1154,9 +1206,11 @@ mod tests {
     fn test_mysql_transaction_and_escaping() {
         let cols = sample_columns();
         let grid_cols = vec!["id".to_string(), "name".to_string(), "note".to_string()];
-        let orig_rows = vec![
-            vec![QueryValue::Int(10), QueryValue::String("O'Reilly".into()), QueryValue::Null],
-        ];
+        let orig_rows = vec![vec![
+            QueryValue::Int(10),
+            QueryValue::String("O'Reilly".into()),
+            QueryValue::Null,
+        ]];
 
         let mut cs = GridChangeset::new();
         cs.set_cell_value(
@@ -1187,7 +1241,13 @@ mod tests {
     #[test]
     fn test_insert_into_generation_sqlite_and_auto_increment() {
         let cols = sample_columns();
-        let grid_cols = vec!["id".to_string(), "name".to_string(), "email".to_string(), "age".to_string(), "active".to_string()];
+        let grid_cols = vec![
+            "id".to_string(),
+            "name".to_string(),
+            "email".to_string(),
+            "age".to_string(),
+            "active".to_string(),
+        ];
         let orig_rows = vec![];
 
         let mut cs = GridChangeset::new();
@@ -1263,7 +1323,9 @@ mod tests {
         assert_eq!(plan.inserts_count, 1);
         let script = plan.full_script;
         assert!(script.starts_with("START TRANSACTION;"));
-        assert!(script.contains("INSERT INTO `shop_db`.`products` (`name`) VALUES ('Frank\\'s \"Gadgets\"');"));
+        assert!(script.contains(
+            "INSERT INTO `shop_db`.`products` (`name`) VALUES ('Frank\\'s \"Gadgets\"');"
+        ));
     }
 
     #[test]
@@ -1321,7 +1383,9 @@ mod tests {
         assert_eq!(res, Some((Some("skill_up_web".into()), "test_case".into())));
 
         // Postgres with double quotes
-        let res = extract_table_from_sql("SELECT id, name FROM \"public\".\"users\" WHERE active = true;");
+        let res = extract_table_from_sql(
+            "SELECT id, name FROM \"public\".\"users\" WHERE active = true;",
+        );
         assert_eq!(res, Some((Some("public".into()), "users".into())));
 
         // SQLite simple table
@@ -1356,7 +1420,10 @@ mod tests {
             .column(ColumnDef::new("username", "TEXT").nullable(false))
             .column(ColumnDef::new("email", "TEXT").nullable(false))
             .column(ColumnDef::new("status", "TEXT").default_value(Some("'active'".into())))
-            .column(ColumnDef::new("created_at", "DATETIME").default_value(Some("CURRENT_TIMESTAMP".into())));
+            .column(
+                ColumnDef::new("created_at", "DATETIME")
+                    .default_value(Some("CURRENT_TIMESTAMP".into())),
+            );
 
         let ddl = generate_create_table_sql(&def, DatabaseFamily::Sqlite).unwrap();
         assert!(ddl.contains("CREATE TABLE \"users\" ("));
@@ -1386,7 +1453,11 @@ mod tests {
         let def = CreateTableDef::new("customers")
             .schema(Some("public".into()))
             .comment(Some("Customer records".into()))
-            .column(ColumnDef::new("id", "BIGINT").auto_increment(true).comment(Some("Unique ID".into())))
+            .column(
+                ColumnDef::new("id", "BIGINT")
+                    .auto_increment(true)
+                    .comment(Some("Unique ID".into())),
+            )
             .column(ColumnDef::new("name", "VARCHAR(255)").nullable(false))
             .column(ColumnDef::new("balance", "NUMERIC(10,2)").default_value(Some("0.00".into())));
 
@@ -1405,7 +1476,11 @@ mod tests {
             .schema(Some("shop_db".into()))
             .comment(Some("Catalog table".into()))
             .column(ColumnDef::new("id", "INT").auto_increment(true))
-            .column(ColumnDef::new("title", "VARCHAR(255)").nullable(false).comment(Some("Item name".into())))
+            .column(
+                ColumnDef::new("title", "VARCHAR(255)")
+                    .nullable(false)
+                    .comment(Some("Item name".into())),
+            )
             .column(ColumnDef::new("price", "DECIMAL(10,2)").default_value(Some("0.0".into())));
 
         let ddl = generate_create_table_sql(&def, DatabaseFamily::MySql).unwrap();
@@ -1426,25 +1501,34 @@ mod tests {
             .column(ColumnDef::new("tenant_id", "INT").nullable(false))
             .column(ColumnDef::new("status", "VARCHAR(50)").default_value(Some("'active'".into())))
             .index(TableIndexDef::new("uk_accounts_email", vec!["email".into()]).unique(true))
-            .index(TableIndexDef::new("", vec!["tenant_id".into(), "status".into()])); // Auto name idx_accounts_tenant_id_status
+            .index(TableIndexDef::new(
+                "",
+                vec!["tenant_id".into(), "status".into()],
+            )); // Auto name idx_accounts_tenant_id_status
 
         // SQLite
         let sqlite_ddl = generate_create_table_sql(&def, DatabaseFamily::Sqlite).unwrap();
         assert!(sqlite_ddl.contains("CREATE TABLE \"core\".\"accounts\" ("));
-        assert!(sqlite_ddl.contains("CREATE UNIQUE INDEX \"uk_accounts_email\" ON \"core\".\"accounts\" (\"email\");"));
+        assert!(sqlite_ddl.contains(
+            "CREATE UNIQUE INDEX \"uk_accounts_email\" ON \"core\".\"accounts\" (\"email\");"
+        ));
         assert!(sqlite_ddl.contains("CREATE INDEX \"idx_accounts_tenant_id_status\" ON \"core\".\"accounts\" (\"tenant_id\", \"status\");"));
 
         // PostgreSQL
         let pg_ddl = generate_create_table_sql(&def, DatabaseFamily::Postgres).unwrap();
         assert!(pg_ddl.contains("CREATE TABLE \"core\".\"accounts\" ("));
-        assert!(pg_ddl.contains("CREATE UNIQUE INDEX \"uk_accounts_email\" ON \"core\".\"accounts\" (\"email\");"));
+        assert!(pg_ddl.contains(
+            "CREATE UNIQUE INDEX \"uk_accounts_email\" ON \"core\".\"accounts\" (\"email\");"
+        ));
         assert!(pg_ddl.contains("CREATE INDEX \"idx_accounts_tenant_id_status\" ON \"core\".\"accounts\" (\"tenant_id\", \"status\");"));
 
         // MySQL
         let mysql_ddl = generate_create_table_sql(&def, DatabaseFamily::MySql).unwrap();
         assert!(mysql_ddl.contains("CREATE TABLE `core`.`accounts` ("));
         assert!(mysql_ddl.contains("    UNIQUE KEY `uk_accounts_email` (`email`),"));
-        assert!(mysql_ddl.contains("    KEY `idx_accounts_tenant_id_status` (`tenant_id`, `status`)"));
+        assert!(
+            mysql_ddl.contains("    KEY `idx_accounts_tenant_id_status` (`tenant_id`, `status`)")
+        );
     }
 
     #[test]
@@ -1468,8 +1552,16 @@ mod tests {
     fn test_generate_create_table_sql_with_column_comments() {
         let def = CreateTableDef::new("users")
             .comment(Some("Table description".into()))
-            .column(ColumnDef::new("id", "BIGINT").auto_increment(true).comment(Some("User primary key".into())))
-            .column(ColumnDef::new("email", "VARCHAR(255)").nullable(false).comment(Some("Login email".into())))
+            .column(
+                ColumnDef::new("id", "BIGINT")
+                    .auto_increment(true)
+                    .comment(Some("User primary key".into())),
+            )
+            .column(
+                ColumnDef::new("email", "VARCHAR(255)")
+                    .nullable(false)
+                    .comment(Some("Login email".into())),
+            )
             .column(ColumnDef::new("bio", "TEXT").comment(Some("User's profile bio".into())));
 
         // PostgreSQL: comments generated as COMMENT ON statements
@@ -1482,7 +1574,9 @@ mod tests {
         // MySQL: comments generated inline
         let mysql_ddl = generate_create_table_sql(&def, DatabaseFamily::MySql).unwrap();
         assert!(mysql_ddl.contains("COMMENT='Table description';"));
-        assert!(mysql_ddl.contains("`id` BIGINT NOT NULL AUTO_INCREMENT COMMENT 'User primary key',"));
+        assert!(
+            mysql_ddl.contains("`id` BIGINT NOT NULL AUTO_INCREMENT COMMENT 'User primary key',")
+        );
         assert!(mysql_ddl.contains("`email` VARCHAR(255) NOT NULL COMMENT 'Login email',"));
         assert!(mysql_ddl.contains("`bio` TEXT COMMENT 'User''s profile bio'"));
 
@@ -1508,12 +1602,27 @@ mod tests {
         assert!(column_matches_index_spec("ID", "id"));
         assert!(column_matches_index_spec("updated_at DESC", "updated_at"));
         assert!(column_matches_index_spec(r#""status" ASC"#, "status"));
-        assert!(column_matches_index_spec(r#""CaseSensitive""#, "CaseSensitive"));
-        assert!(!column_matches_index_spec(r#""CaseSensitive""#, "casesensitive"));
+        assert!(column_matches_index_spec(
+            r#""CaseSensitive""#,
+            "CaseSensitive"
+        ));
+        assert!(!column_matches_index_spec(
+            r#""CaseSensitive""#,
+            "casesensitive"
+        ));
 
         // Formatting
-        assert_eq!(format_index_column_expr("id", DatabaseFamily::Sqlite), "\"id\"");
-        assert_eq!(format_index_column_expr("col DESC", DatabaseFamily::MySql), "`col` DESC");
-        assert_eq!(format_index_column_expr("\"col\" ASC", DatabaseFamily::Postgres), "\"col\" ASC");
+        assert_eq!(
+            format_index_column_expr("id", DatabaseFamily::Sqlite),
+            "\"id\""
+        );
+        assert_eq!(
+            format_index_column_expr("col DESC", DatabaseFamily::MySql),
+            "`col` DESC"
+        );
+        assert_eq!(
+            format_index_column_expr("\"col\" ASC", DatabaseFamily::Postgres),
+            "\"col\" ASC"
+        );
     }
 }

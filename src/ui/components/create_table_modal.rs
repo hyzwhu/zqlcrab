@@ -1,19 +1,19 @@
 //! Create Table modal dialog for visual schema design and DDL execution.
 
-use crate::db::sql_gen::{column_matches_index_spec, parse_sql_column_list, TableIndexType};
+use crate::db::sql_gen::{TableIndexType, column_matches_index_spec, parse_sql_column_list};
 use crate::db::types::DatabaseFamily;
 use crate::ui::theme::ThemeColors;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::{h_flex, v_flex};
 use gpui_kit::component::{
+    Disableable as _, Icon, Sizable as _,
     button::{Button, ButtonVariants as _},
     input::{Input, InputState},
     menu::{DropdownMenu as _, PopupMenuItem},
-    Disableable as _, Icon, Sizable as _,
 };
 use gpui_kit::gpui::{
-    div, px, rgba, Anchor, App, ElementId, Entity, FontWeight, IntoElement, ParentElement as _,
-    RenderOnce, Styled, Window, prelude::*,
+    Anchor, App, ElementId, Entity, FontWeight, IntoElement, ParentElement as _, RenderOnce,
+    Styled, Window, div, prelude::*, px, rgba,
 };
 use std::rc::Rc;
 
@@ -307,9 +307,7 @@ impl RenderOnce for CreateTableModal {
         }
 
         // Footer execute create table button
-        let mut exec_btn = Button::new("confirm_create_table_btn")
-            .primary()
-            .small();
+        let mut exec_btn = Button::new("confirm_create_table_btn").primary().small();
         if self.is_executing {
             exec_btn = exec_btn.icon(IconName::Loader).label("Creating Table...");
         } else {
@@ -510,11 +508,29 @@ impl RenderOnce for CreateTableModal {
                         .child(Input::new(&col.data_type).small().w_full()),
                 )
                 // PK Toggle
-                .child(div().w(px(42.0)).items_center().justify_center().child(pk_btn))
+                .child(
+                    div()
+                        .w(px(42.0))
+                        .items_center()
+                        .justify_center()
+                        .child(pk_btn),
+                )
                 // Not Null Toggle
-                .child(div().w(px(48.0)).items_center().justify_center().child(nn_btn))
+                .child(
+                    div()
+                        .w(px(48.0))
+                        .items_center()
+                        .justify_center()
+                        .child(nn_btn),
+                )
                 // Auto Increment Toggle
-                .child(div().w(px(42.0)).items_center().justify_center().child(ai_btn))
+                .child(
+                    div()
+                        .w(px(42.0))
+                        .items_center()
+                        .justify_center()
+                        .child(ai_btn),
+                )
                 // Default Value Input
                 .child(
                     div()
@@ -529,7 +545,13 @@ impl RenderOnce for CreateTableModal {
                         .child(Input::new(&col.comment).small().w_full()),
                 )
                 // Actions
-                .child(div().w(px(32.0)).items_center().justify_center().child(del_btn));
+                .child(
+                    div()
+                        .w(px(32.0))
+                        .items_center()
+                        .justify_center()
+                        .child(del_btn),
+                );
 
             columns_list = columns_list.child(row);
         }
@@ -606,9 +628,15 @@ impl RenderOnce for CreateTableModal {
                 let current_cols_raw = index_item.columns.read(cx).value().to_string();
                 let current_col_list = parse_sql_column_list(&current_cols_raw);
 
-                let mut chips_row = h_flex().items_center().gap_1().flex_shrink(1.0).overflow_hidden();
+                let mut chips_row = h_flex()
+                    .items_center()
+                    .gap_1()
+                    .flex_shrink(1.0)
+                    .overflow_hidden();
                 for (col_i, (col_name, _col_type)) in available_columns.iter().take(4).enumerate() {
-                    let is_checked = current_col_list.iter().any(|c| column_matches_index_spec(c, col_name));
+                    let is_checked = current_col_list
+                        .iter()
+                        .any(|c| column_matches_index_spec(c, col_name));
                     let chip_id = ElementId::Name(format!("idx_quick_col_{idx}_{col_i}").into());
                     let mut chip = Button::new(chip_id).xsmall();
                     if is_checked {
@@ -631,12 +659,8 @@ impl RenderOnce for CreateTableModal {
                             on_tog(idx_row, c_name.clone(), window, cx);
                         });
                     }
-                    chips_row = chips_row.child(
-                        div()
-                            .max_w(px(70.0))
-                            .overflow_hidden()
-                            .child(chip),
-                    );
+                    chips_row =
+                        chips_row.child(div().max_w(px(70.0)).overflow_hidden().child(chip));
                 }
 
                 let avail_cols_for_menu = available_columns.clone();
@@ -651,37 +675,48 @@ impl RenderOnce for CreateTableModal {
                     .icon(IconName::List)
                     .label("Select")
                     .tooltip("Select columns to include in this index")
-                    .dropdown_menu_with_anchor(Anchor::BottomRight, move |mut menu, _window, cx| {
-                        menu = menu.max_h(px(260.0)).min_w(px(180.0)).scrollable(true);
-                        if avail_cols_for_menu.is_empty() {
-                            menu = menu.label("No columns defined");
-                        } else {
-                            let live_cols_raw = cols_entity_for_menu.read(cx).value().to_string();
-                            let live_col_list = parse_sql_column_list(&live_cols_raw);
+                    .dropdown_menu_with_anchor(
+                        Anchor::BottomRight,
+                        move |mut menu, _window, cx| {
+                            menu = menu.max_h(px(260.0)).min_w(px(180.0)).scrollable(true);
+                            if avail_cols_for_menu.is_empty() {
+                                menu = menu.label("No columns defined");
+                            } else {
+                                let live_cols_raw =
+                                    cols_entity_for_menu.read(cx).value().to_string();
+                                let live_col_list = parse_sql_column_list(&live_cols_raw);
 
-                            menu = menu.label("Table Columns");
-                            for (c_name, c_type) in &avail_cols_for_menu {
-                                let is_checked = live_col_list.iter().any(|c| column_matches_index_spec(c, c_name));
-                                let on_tog = menu_toggle_handler.clone();
-                                let c_name_val = c_name.clone();
-                                let label_text = if c_type.is_empty() {
-                                    c_name.clone()
-                                } else {
-                                    format!("{c_name}  ({c_type})")
-                                };
-                                menu = menu.item(
-                                    PopupMenuItem::new(label_text)
-                                        .checked(is_checked)
-                                        .on_click(move |_, window, cx| {
-                                            if let Some(ref handler) = on_tog {
-                                                handler(idx_row, c_name_val.clone(), window, cx);
-                                            }
-                                        }),
-                                );
+                                menu = menu.label("Table Columns");
+                                for (c_name, c_type) in &avail_cols_for_menu {
+                                    let is_checked = live_col_list
+                                        .iter()
+                                        .any(|c| column_matches_index_spec(c, c_name));
+                                    let on_tog = menu_toggle_handler.clone();
+                                    let c_name_val = c_name.clone();
+                                    let label_text = if c_type.is_empty() {
+                                        c_name.clone()
+                                    } else {
+                                        format!("{c_name}  ({c_type})")
+                                    };
+                                    menu = menu.item(
+                                        PopupMenuItem::new(label_text)
+                                            .checked(is_checked)
+                                            .on_click(move |_, window, cx| {
+                                                if let Some(ref handler) = on_tog {
+                                                    handler(
+                                                        idx_row,
+                                                        c_name_val.clone(),
+                                                        window,
+                                                        cx,
+                                                    );
+                                                }
+                                            }),
+                                    );
+                                }
                             }
-                        }
-                        menu
-                    });
+                            menu
+                        },
+                    );
 
                 let row = h_flex()
                     .w_full()
@@ -727,11 +762,7 @@ impl RenderOnce for CreateTableModal {
                                 div()
                                     .flex_1()
                                     .min_w(px(100.0))
-                                    .child(
-                                        Input::new(&index_item.columns)
-                                            .small()
-                                            .w_full(),
-                                    ),
+                                    .child(Input::new(&index_item.columns).small().w_full()),
                             )
                             .child(chips_row)
                             .child(col_dropdown),
@@ -751,70 +782,79 @@ impl RenderOnce for CreateTableModal {
 
         // Live SQL Preview lines
         let preview_lines: Vec<&str> = self.preview_sql.lines().collect();
-        let code_lines = v_flex()
-            .w_full()
-            .gap_0p5()
-            .children(preview_lines.into_iter().enumerate().map(|(idx, line)| {
-                let color = if line.starts_with("CREATE TABLE") || line.starts_with("COMMENT ON") {
-                    ThemeColors::PRIMARY_LIGHT
-                } else if line.contains("PRIMARY KEY") || line.contains("SERIAL") || line.contains("AUTO_INCREMENT") {
-                    ThemeColors::SUCCESS
-                } else if line.contains("NOT NULL") || line.contains("DEFAULT") {
-                    ThemeColors::WARNING
-                } else {
-                    ThemeColors::TEXT_PRIMARY
-                };
+        let code_lines =
+            v_flex()
+                .w_full()
+                .gap_0p5()
+                .children(preview_lines.into_iter().enumerate().map(|(idx, line)| {
+                    let color =
+                        if line.starts_with("CREATE TABLE") || line.starts_with("COMMENT ON") {
+                            ThemeColors::PRIMARY_LIGHT
+                        } else if line.contains("PRIMARY KEY")
+                            || line.contains("SERIAL")
+                            || line.contains("AUTO_INCREMENT")
+                        {
+                            ThemeColors::SUCCESS
+                        } else if line.contains("NOT NULL") || line.contains("DEFAULT") {
+                            ThemeColors::WARNING
+                        } else {
+                            ThemeColors::TEXT_PRIMARY
+                        };
 
-                h_flex()
-                    .min_w_full()
-                    .w_auto()
-                    .items_start()
-                    .gap_3()
-                    .child(
-                        div()
-                            .w(px(24.0))
-                            .flex_none()
-                            .text_right()
-                            .text_xs()
-                            .font_family(".AppleSystemUIFontMonospaced")
-                            .text_color(ThemeColors::TEXT_FAINT)
-                            .child(format!("{}", idx + 1)),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .text_xs()
-                            .font_family(".AppleSystemUIFontMonospaced")
-                            .text_color(color)
-                            .whitespace_nowrap()
-                            .child(line.to_string()),
-                    )
-            }));
+                    h_flex()
+                        .min_w_full()
+                        .w_auto()
+                        .items_start()
+                        .gap_3()
+                        .child(
+                            div()
+                                .w(px(24.0))
+                                .flex_none()
+                                .text_right()
+                                .text_xs()
+                                .font_family(".AppleSystemUIFontMonospaced")
+                                .text_color(ThemeColors::TEXT_FAINT)
+                                .child(format!("{}", idx + 1)),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .text_xs()
+                                .font_family(".AppleSystemUIFontMonospaced")
+                                .text_color(color)
+                                .whitespace_nowrap()
+                                .child(line.to_string()),
+                        )
+                }));
 
         // Error banner if any
-        let err_banner = self.error_message.as_ref().or(self.validation_error.as_ref()).map(|err| {
-            h_flex()
-                .w_full()
-                .items_center()
-                .gap_2()
-                .p_2p5()
-                .rounded_md()
-                .bg(rgba(0xEF444415))
-                .border_1()
-                .border_color(rgba(0xEF444440))
-                .child(
-                    Icon::new(IconName::TriangleAlert)
-                        .size(px(14.0))
-                        .text_color(ThemeColors::ERROR),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(ThemeColors::ERROR)
-                        .child(err.clone()),
-                )
-        });
+        let err_banner = self
+            .error_message
+            .as_ref()
+            .or(self.validation_error.as_ref())
+            .map(|err| {
+                h_flex()
+                    .w_full()
+                    .items_center()
+                    .gap_2()
+                    .p_2p5()
+                    .rounded_md()
+                    .bg(rgba(0xEF444415))
+                    .border_1()
+                    .border_color(rgba(0xEF444440))
+                    .child(
+                        Icon::new(IconName::TriangleAlert)
+                            .size(px(14.0))
+                            .text_color(ThemeColors::ERROR),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(ThemeColors::ERROR)
+                            .child(err.clone()),
+                    )
+            });
 
         // Modal card
         let modal = v_flex()

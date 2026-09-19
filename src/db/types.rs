@@ -345,7 +345,6 @@ impl DatabaseType {
         &[
             // Embedded
             Self::Sqlite,
-
             // MySQL Ecosystem
             Self::Mysql,
             Self::MariaDB,
@@ -361,7 +360,6 @@ impl DatabaseType {
             Self::SingleStore,
             Self::ManticoreSearch,
             Self::CloudSQLMySQL,
-
             // PostgreSQL Ecosystem
             Self::Postgres,
             Self::CockroachDB,
@@ -674,7 +672,10 @@ impl QueryValue {
             Self::Null => "NULL".to_string(),
             Self::Bool(b) => if *b { "true" } else { "false" }.to_string(),
             Self::Int(i) => i.to_string(),
-            Self::Float(f) => format!("{:.4}", f).trim_end_matches('0').trim_end_matches('.').to_string(),
+            Self::Float(f) => format!("{:.4}", f)
+                .trim_end_matches('0')
+                .trim_end_matches('.')
+                .to_string(),
             Self::String(s) => s.clone(),
             Self::Bytes(b) => format!("<blob: {} bytes>", b.len()),
             Self::DateTime(d) => d.clone(),
@@ -709,7 +710,11 @@ pub struct QueryResult {
 
 impl QueryResult {
     /// Constructs a result for row queries (SELECT, PRAGMA, EXPLAIN, etc.).
-    pub fn rows(columns: Vec<String>, column_types: Vec<String>, rows: Vec<Vec<QueryValue>>) -> Self {
+    pub fn rows(
+        columns: Vec<String>,
+        column_types: Vec<String>,
+        rows: Vec<Vec<QueryValue>>,
+    ) -> Self {
         Self {
             columns,
             column_types,
@@ -898,7 +903,14 @@ mod tests {
 
     #[test]
     fn test_connection_config_serialization_and_defaults() {
-        let mut cfg = ConnectionConfig::mysql("Prod Cluster", "10.0.0.1", 3306, "billing", "app", Some("secret".to_string()));
+        let mut cfg = ConnectionConfig::mysql(
+            "Prod Cluster",
+            "10.0.0.1",
+            3306,
+            "billing",
+            "app",
+            Some("secret".to_string()),
+        );
         cfg.environment = EnvironmentTag::Production;
         cfg.is_read_only = true;
         cfg.ssl_mode = SslMode::Require;
@@ -908,7 +920,8 @@ mod tests {
         assert!(json.contains("\"require\""));
         assert!(json.contains("\"is_read_only\":true"));
 
-        let deserialized: ConnectionConfig = serde_json::from_str(&json).expect("deserialization should succeed");
+        let deserialized: ConnectionConfig =
+            serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(deserialized.name, "Prod Cluster");
         assert_eq!(deserialized.environment, EnvironmentTag::Production);
         assert!(deserialized.environment.is_production());

@@ -11,7 +11,7 @@ use gpui_kit::component::{
     Disableable as _, Icon, Sizable as _,
     button::{Button, ButtonVariants as _},
     input::{Textarea, TextareaState},
-    resizable::{resizable_panel, v_resizable, ResizableState},
+    resizable::{ResizableState, resizable_panel, v_resizable},
     tab::{Tab, TabBar},
 };
 use gpui_kit::gpui::{
@@ -316,24 +316,15 @@ impl RenderOnce for QueryConsole {
                         .size(px(14.0))
                         .text_color(ThemeColors::ERROR),
                 )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(ThemeColors::ERROR)
-                        .child(err),
-                )
+                .child(div().text_xs().text_color(ThemeColors::ERROR).child(err))
         });
 
-        let editor_pane = div()
-            .size_full()
-            .min_h_0()
-            .bg(ThemeColors::BG_APP)
-            .child(
-                Textarea::new(&self.editor_state)
-                    .h_full()
-                    .bg(ThemeColors::BG_APP)
-                    .text_color(ThemeColors::TEXT_PRIMARY),
-            );
+        let editor_pane = div().size_full().min_h_0().bg(ThemeColors::BG_APP).child(
+            Textarea::new(&self.editor_state)
+                .h_full()
+                .bg(ThemeColors::BG_APP)
+                .text_color(ThemeColors::TEXT_PRIMARY),
+        );
 
         let bottom_selected = match self.bottom_tab {
             ConsoleBottomTab::Results => 0,

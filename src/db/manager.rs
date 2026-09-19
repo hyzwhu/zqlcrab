@@ -60,7 +60,10 @@ impl ConnectionManager {
         }
 
         // Add SQLite memory DB preset if not present
-        if !configs.iter().any(|c| c.db_type == crate::db::types::DatabaseType::Sqlite) {
+        if !configs
+            .iter()
+            .any(|c| c.db_type == crate::db::types::DatabaseType::Sqlite)
+        {
             let sqlite_cfg = ConnectionConfig::sqlite("Sample SQLite (In-Memory)", ":memory:");
             configs.push(sqlite_cfg);
             updated = true;
@@ -78,8 +81,7 @@ impl ConnectionManager {
         }
         let json = serde_json::to_string_pretty(configs)
             .map_err(|e| DbError::Configuration(e.to_string()))?;
-        fs::write(&self.config_file_path, json)
-            .map_err(|e| DbError::Io(e.to_string()))?;
+        fs::write(&self.config_file_path, json).map_err(|e| DbError::Io(e.to_string()))?;
         Ok(())
     }
 
@@ -90,7 +92,9 @@ impl ConnectionManager {
         }
 
         match fs::read_to_string(&self.config_file_path) {
-            Ok(content) => serde_json::from_str::<Vec<ConnectionConfig>>(&content).unwrap_or_default(),
+            Ok(content) => {
+                serde_json::from_str::<Vec<ConnectionConfig>>(&content).unwrap_or_default()
+            }
             Err(_) => Vec::new(),
         }
     }
@@ -116,8 +120,7 @@ impl ConnectionManager {
 
         let json = serde_json::to_string_pretty(&configs)
             .map_err(|e| DbError::Configuration(e.to_string()))?;
-        fs::write(&self.config_file_path, json)
-            .map_err(|e| DbError::Io(e.to_string()))?;
+        fs::write(&self.config_file_path, json).map_err(|e| DbError::Io(e.to_string()))?;
         Ok(())
     }
 
@@ -128,8 +131,7 @@ impl ConnectionManager {
 
         let json = serde_json::to_string_pretty(&configs)
             .map_err(|e| DbError::Configuration(e.to_string()))?;
-        fs::write(&self.config_file_path, json)
-            .map_err(|e| DbError::Io(e.to_string()))?;
+        fs::write(&self.config_file_path, json).map_err(|e| DbError::Io(e.to_string()))?;
         Ok(())
     }
 
@@ -192,7 +194,10 @@ mod tests {
         let id = config.id.clone();
 
         // Connect
-        let active_conn = manager.connect(config).await.expect("connect should succeed");
+        let active_conn = manager
+            .connect(config)
+            .await
+            .expect("connect should succeed");
         assert!(manager.is_active(&id).await);
 
         // Run query through active connection
@@ -203,7 +208,10 @@ mod tests {
         assert_eq!(res.columns, vec!["num"]);
 
         // Disconnect
-        manager.disconnect(&id).await.expect("disconnect should succeed");
+        manager
+            .disconnect(&id)
+            .await
+            .expect("disconnect should succeed");
         assert!(!manager.is_active(&id).await);
     }
 }

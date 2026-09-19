@@ -9,7 +9,7 @@ use crate::db::{
     },
 };
 use async_trait::async_trait;
-use rusqlite::{types::ValueRef, Connection, OpenFlags};
+use rusqlite::{Connection, OpenFlags, types::ValueRef};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -119,11 +119,16 @@ impl DatabaseAdapter for SqliteAdapter {
                     | OpenFlags::SQLITE_OPEN_URI
                     | OpenFlags::SQLITE_OPEN_NO_MUTEX
             };
-            Connection::open_with_flags(db_path, flags)
-                .map_err(|e| DbError::connection(format!("Failed to open SQLite database at '{db_path}': {e}")))?
+            Connection::open_with_flags(db_path, flags).map_err(|e| {
+                DbError::connection(format!(
+                    "Failed to open SQLite database at '{db_path}': {e}"
+                ))
+            })?
         };
 
-        let _ = conn.busy_timeout(std::time::Duration::from_secs(self.config.connect_timeout_secs.max(1)));
+        let _ = conn.busy_timeout(std::time::Duration::from_secs(
+            self.config.connect_timeout_secs.max(1),
+        ));
 
         // Enable foreign keys and WAL journal mode (if writable)
         if !self.config.is_read_only {
@@ -152,8 +157,13 @@ impl DatabaseAdapter for SqliteAdapter {
 
     async fn test_connection(&self) -> DbResult<ConnectionStatus> {
         let start = Instant::now();
-        let conn_arc = self.conn.as_ref().ok_or_else(|| DbError::connection("Not connected"))?;
-        let conn = conn_arc.lock().map_err(|e| DbError::PoolError(e.to_string()))?;
+        let conn_arc = self
+            .conn
+            .as_ref()
+            .ok_or_else(|| DbError::connection("Not connected"))?;
+        let conn = conn_arc
+            .lock()
+            .map_err(|e| DbError::PoolError(e.to_string()))?;
 
         let version: String = conn
             .query_row("SELECT sqlite_version()", [], |row| row.get(0))
@@ -171,8 +181,13 @@ impl DatabaseAdapter for SqliteAdapter {
 
     async fn execute_query(&self, sql: &str) -> DbResult<QueryResult> {
         let start = Instant::now();
-        let conn_arc = self.conn.as_ref().ok_or_else(|| DbError::connection("Not connected"))?;
-        let conn = conn_arc.lock().map_err(|e| DbError::PoolError(e.to_string()))?;
+        let conn_arc = self
+            .conn
+            .as_ref()
+            .ok_or_else(|| DbError::connection("Not connected"))?;
+        let conn = conn_arc
+            .lock()
+            .map_err(|e| DbError::PoolError(e.to_string()))?;
 
         let is_select = crate::db::safety::QuerySafetyValidator::is_result_set_query(sql);
 
@@ -194,7 +209,10 @@ impl DatabaseAdapter for SqliteAdapter {
                 .map_err(|e| DbError::query(format!("Failed to execute query: {e}")))?;
 
             let mut rows = Vec::new();
-            while let Some(row) = rows_iter.next().map_err(|e| DbError::query(e.to_string()))? {
+            while let Some(row) = rows_iter
+                .next()
+                .map_err(|e| DbError::query(e.to_string()))?
+            {
                 let mut row_vals = Vec::with_capacity(col_count);
                 for i in 0..col_count {
                     let val = row.get_ref(i).map_err(|e| DbError::query(e.to_string()))?;
@@ -214,7 +232,8 @@ impl DatabaseAdapter for SqliteAdapter {
         } else {
             let affected = conn
                 .execute(sql, [])
-                .map_err(|e| DbError::query(format!("Statement execution error: {e}")))? as u64;
+                .map_err(|e| DbError::query(format!("Statement execution error: {e}")))?
+                as u64;
             let execution_time_ms = start.elapsed().as_millis() as u64;
 
             Ok(QueryResult {
@@ -228,8 +247,13 @@ impl DatabaseAdapter for SqliteAdapter {
     }
 
     async fn execute_batch(&self, sql: &str) -> DbResult<()> {
-        let conn_arc = self.conn.as_ref().ok_or_else(|| DbError::connection("Not connected"))?;
-        let conn = conn_arc.lock().map_err(|e| DbError::PoolError(e.to_string()))?;
+        let conn_arc = self
+            .conn
+            .as_ref()
+            .ok_or_else(|| DbError::connection("Not connected"))?;
+        let conn = conn_arc
+            .lock()
+            .map_err(|e| DbError::PoolError(e.to_string()))?;
         conn.execute_batch(sql)
             .map_err(|e| DbError::query(format!("Batch execution failed: {e}")))?;
         Ok(())
@@ -251,11 +275,18 @@ impl DatabaseAdapter for SqliteAdapter {
         _database: Option<&str>,
         _schema: Option<&str>,
     ) -> DbResult<Vec<TableInfo>> {
-        let conn_arc = self.conn.as_ref().ok_or_else(|| DbError::connection("Not connected"))?;
-        let conn = conn_arc.lock().map_err(|e| DbError::PoolError(e.to_string()))?;
+        let conn_arc = self
+            .conn
+            .as_ref()
+            .ok_or_else(|| DbError::connection("Not connected"))?;
+        let conn = conn_arc
+            .lock()
+            .map_err(|e| DbError::PoolError(e.to_string()))?;
 
         let sql = "SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY name;";
-        let mut stmt = conn.prepare(sql).map_err(|e| DbError::query(e.to_string()))?;
+        let mut stmt = conn
+            .prepare(sql)
+            .map_err(|e| DbError::query(e.to_string()))?;
 
         let mut tables = Vec::new();
         let mut rows = stmt.query([]).map_err(|e| DbError::query(e.to_string()))?;
@@ -279,12 +310,19 @@ impl DatabaseAdapter for SqliteAdapter {
         _schema: Option<&str>,
         table: &str,
     ) -> DbResult<Vec<ColumnInfo>> {
-        let conn_arc = self.conn.as_ref().ok_or_else(|| DbError::connection("Not connected"))?;
-        let conn = conn_arc.lock().map_err(|e| DbError::PoolError(e.to_string()))?;
+        let conn_arc = self
+            .conn
+            .as_ref()
+            .ok_or_else(|| DbError::connection("Not connected"))?;
+        let conn = conn_arc
+            .lock()
+            .map_err(|e| DbError::PoolError(e.to_string()))?;
 
         let clean_table = table.replace('"', "\"\"");
         let sql = format!("PRAGMA table_info(\"{clean_table}\");");
-        let mut stmt = conn.prepare(&sql).map_err(|e| DbError::query(e.to_string()))?;
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| DbError::query(e.to_string()))?;
 
         let mut columns = Vec::new();
         let mut rows = stmt.query([]).map_err(|e| DbError::query(e.to_string()))?;
@@ -318,12 +356,19 @@ impl DatabaseAdapter for SqliteAdapter {
         _schema: Option<&str>,
         table: &str,
     ) -> DbResult<Vec<IndexInfo>> {
-        let conn_arc = self.conn.as_ref().ok_or_else(|| DbError::connection("Not connected"))?;
-        let conn = conn_arc.lock().map_err(|e| DbError::PoolError(e.to_string()))?;
+        let conn_arc = self
+            .conn
+            .as_ref()
+            .ok_or_else(|| DbError::connection("Not connected"))?;
+        let conn = conn_arc
+            .lock()
+            .map_err(|e| DbError::PoolError(e.to_string()))?;
 
         let clean_table = table.replace('"', "\"\"");
         let sql = format!("PRAGMA index_list(\"{clean_table}\");");
-        let mut stmt = conn.prepare(&sql).map_err(|e| DbError::query(e.to_string()))?;
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| DbError::query(e.to_string()))?;
 
         let mut indexes = Vec::new();
         let mut rows = stmt.query([]).map_err(|e| DbError::query(e.to_string()))?;
@@ -349,11 +394,18 @@ impl DatabaseAdapter for SqliteAdapter {
         _schema: Option<&str>,
         table: &str,
     ) -> DbResult<Option<String>> {
-        let conn_arc = self.conn.as_ref().ok_or_else(|| DbError::connection("Not connected"))?;
-        let conn = conn_arc.lock().map_err(|e| DbError::PoolError(e.to_string()))?;
+        let conn_arc = self
+            .conn
+            .as_ref()
+            .ok_or_else(|| DbError::connection("Not connected"))?;
+        let conn = conn_arc
+            .lock()
+            .map_err(|e| DbError::PoolError(e.to_string()))?;
 
         let sql = "SELECT sql FROM sqlite_master WHERE name = ?1;";
-        let ddl: Option<String> = conn.query_row(sql, [table], |row| row.get(0)).unwrap_or(None);
+        let ddl: Option<String> = conn
+            .query_row(sql, [table], |row| row.get(0))
+            .unwrap_or(None);
         Ok(ddl)
     }
 }
@@ -372,36 +424,58 @@ mod tests {
         assert!(adapter.is_connected());
 
         // Test connection
-        let status = adapter.test_connection().await.expect("test_connection should succeed");
+        let status = adapter
+            .test_connection()
+            .await
+            .expect("test_connection should succeed");
         assert!(status.connected);
         assert!(status.server_version.unwrap().starts_with("SQLite"));
 
         // Create table
         let ddl = "CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, age INTEGER, active BOOLEAN);";
-        let create_res = adapter.execute_query(ddl).await.expect("create table should succeed");
+        let create_res = adapter
+            .execute_query(ddl)
+            .await
+            .expect("create table should succeed");
         assert_eq!(create_res.rows_affected, Some(0));
 
         // Insert rows
-        let insert_sql = "INSERT INTO users (name, age, active) VALUES ('Alice', 30, 1), ('Bob', 25, 0);";
-        let insert_res = adapter.execute_query(insert_sql).await.expect("insert should succeed");
+        let insert_sql =
+            "INSERT INTO users (name, age, active) VALUES ('Alice', 30, 1), ('Bob', 25, 0);";
+        let insert_res = adapter
+            .execute_query(insert_sql)
+            .await
+            .expect("insert should succeed");
         assert_eq!(insert_res.rows_affected, Some(2));
 
         // Query rows
         let select_sql = "SELECT id, name, age, active FROM users ORDER BY id ASC;";
-        let select_res = adapter.execute_query(select_sql).await.expect("select should succeed");
+        let select_res = adapter
+            .execute_query(select_sql)
+            .await
+            .expect("select should succeed");
         assert_eq!(select_res.columns, vec!["id", "name", "age", "active"]);
         assert_eq!(select_res.rows.len(), 2);
-        assert_eq!(select_res.rows[0][1], QueryValue::String("Alice".to_string()));
+        assert_eq!(
+            select_res.rows[0][1],
+            QueryValue::String("Alice".to_string())
+        );
         assert_eq!(select_res.rows[0][2], QueryValue::Int(30));
         assert_eq!(select_res.rows[1][1], QueryValue::String("Bob".to_string()));
 
         // List tables
-        let tables = adapter.list_tables(None, None).await.expect("list_tables should succeed");
+        let tables = adapter
+            .list_tables(None, None)
+            .await
+            .expect("list_tables should succeed");
         assert_eq!(tables.len(), 1);
         assert_eq!(tables[0].name, "users");
 
         // List columns
-        let cols = adapter.list_columns(None, None, "users").await.expect("list_columns should succeed");
+        let cols = adapter
+            .list_columns(None, None, "users")
+            .await
+            .expect("list_columns should succeed");
         assert_eq!(cols.len(), 4);
         assert_eq!(cols[0].name, "id");
         assert!(cols[0].is_primary_key);
@@ -409,7 +483,10 @@ mod tests {
         assert!(!cols[1].is_nullable);
 
         // Disconnect
-        adapter.disconnect().await.expect("disconnect should succeed");
+        adapter
+            .disconnect()
+            .await
+            .expect("disconnect should succeed");
         assert!(!adapter.is_connected());
     }
 
@@ -421,8 +498,14 @@ mod tests {
 
         let tables = adapter.list_tables(None, None).await.expect("list_tables");
         let names: Vec<_> = tables.iter().map(|t| t.name.as_str()).collect();
-        assert!(names.contains(&"users"), "expected users table, got {names:?}");
-        assert!(names.contains(&"products"), "expected products table, got {names:?}");
+        assert!(
+            names.contains(&"users"),
+            "expected users table, got {names:?}"
+        );
+        assert!(
+            names.contains(&"products"),
+            "expected products table, got {names:?}"
+        );
 
         let users = adapter
             .execute_query("SELECT COUNT(*) AS n FROM users")
@@ -438,7 +521,10 @@ mod tests {
         adapter.connect().await.expect("connect should succeed");
 
         let sql = "-- CrabStudio SQL Workspace\n-- Type your SQL queries here and press ⌘↵ or Run\nSELECT 1 AS id, 'Welcome to CrabStudio' AS message;";
-        let result = adapter.execute_query(sql).await.expect("comment-prefixed SELECT should run");
+        let result = adapter
+            .execute_query(sql)
+            .await
+            .expect("comment-prefixed SELECT should run");
         assert_eq!(result.columns, vec!["id", "message"]);
         assert_eq!(result.rows.len(), 1);
         assert_eq!(result.rows[0][0], QueryValue::Int(1));
@@ -462,7 +548,10 @@ mod tests {
             "SELECT * FROM users LIMIT 100",
             crate::db::types::DatabaseFamily::Sqlite,
         );
-        let result = adapter.execute_query(&sql).await.expect("explain should run");
+        let result = adapter
+            .execute_query(&sql)
+            .await
+            .expect("explain should run");
         let plan = crate::db::explain::parse_explain_result(
             crate::db::types::DatabaseFamily::Sqlite,
             &result,
@@ -475,7 +564,8 @@ mod tests {
         assert!(
             plan.flatten()
                 .iter()
-                .any(|(_, n)| n.node_type.contains("Scan") || n.details.to_uppercase().contains("SCAN")),
+                .any(|(_, n)| n.node_type.contains("Scan")
+                    || n.details.to_uppercase().contains("SCAN")),
             "expected a scan node, got {:?}",
             plan.roots
         );
@@ -493,16 +583,30 @@ mod tests {
             .expect("create table");
 
         adapter
-            .execute_query("INSERT INTO items (id, title, price) VALUES (1, 'Book', 19.99), (2, 'Pen', 2.50);")
+            .execute_query(
+                "INSERT INTO items (id, title, price) VALUES (1, 'Book', 19.99), (2, 'Pen', 2.50);",
+            )
             .await
             .expect("insert items");
 
-        let initial = adapter.execute_query("SELECT id, title, price FROM items ORDER BY id;").await.expect("query items");
-        let cols = adapter.list_columns(None, None, "items").await.expect("list_columns");
+        let initial = adapter
+            .execute_query("SELECT id, title, price FROM items ORDER BY id;")
+            .await
+            .expect("query items");
+        let cols = adapter
+            .list_columns(None, None, "items")
+            .await
+            .expect("list_columns");
 
         let mut cs = crate::db::changeset::GridChangeset::new();
         // Update row 0 title to 'Hardcover Book'
-        cs.stage_cell_update(0, 1, "title", initial.rows[0][1].clone(), QueryValue::String("Hardcover Book".into()));
+        cs.stage_cell_update(
+            0,
+            1,
+            "title",
+            initial.rows[0][1].clone(),
+            QueryValue::String("Hardcover Book".into()),
+        );
         // Delete row 1 (Pen)
         cs.toggle_delete_row(1, &initial.rows[1]);
 
@@ -521,13 +625,22 @@ mod tests {
         assert!(plan.has_primary_key);
 
         // Execute batch transaction
-        adapter.execute_batch(&plan.full_script).await.expect("execute_batch should succeed");
+        adapter
+            .execute_batch(&plan.full_script)
+            .await
+            .expect("execute_batch should succeed");
 
         // Verify changes applied
-        let updated = adapter.execute_query("SELECT id, title, price FROM items ORDER BY id;").await.expect("query items after batch");
+        let updated = adapter
+            .execute_query("SELECT id, title, price FROM items ORDER BY id;")
+            .await
+            .expect("query items after batch");
         assert_eq!(updated.rows.len(), 1);
         assert_eq!(updated.rows[0][0], QueryValue::Int(1));
-        assert_eq!(updated.rows[0][1], QueryValue::String("Hardcover Book".into()));
+        assert_eq!(
+            updated.rows[0][1],
+            QueryValue::String("Hardcover Book".into())
+        );
     }
 
     #[tokio::test]
@@ -550,7 +663,10 @@ mod tests {
             .execute_query("SELECT id, name, email FROM contacts ORDER BY id;")
             .await
             .expect("query initial contacts");
-        let cols = adapter.list_columns(None, None, "contacts").await.expect("list columns");
+        let cols = adapter
+            .list_columns(None, None, "contacts")
+            .await
+            .expect("list columns");
 
         let mut cs = crate::db::changeset::GridChangeset::new();
         // 1. Stage an update to Alice's email
@@ -592,13 +708,21 @@ mod tests {
         assert!(plan.has_primary_key);
 
         // Verify that the generated INSERT statement omitted the auto-increment id column
-        assert!(plan.full_script.contains("INSERT INTO \"contacts\" (\"name\", \"email\") VALUES ('Bob', 'bob@example.com');"));
+        assert!(plan.full_script.contains(
+            "INSERT INTO \"contacts\" (\"name\", \"email\") VALUES ('Bob', 'bob@example.com');"
+        ));
         // Verify UPDATE is present
         assert!(plan.full_script.contains("UPDATE \"contacts\""));
-        assert!(plan.full_script.contains("SET \"email\" = 'alice@newcorp.com'"));
+        assert!(
+            plan.full_script
+                .contains("SET \"email\" = 'alice@newcorp.com'")
+        );
 
         // Execute batch transaction atomically
-        adapter.execute_batch(&plan.full_script).await.expect("execute_batch should succeed");
+        adapter
+            .execute_batch(&plan.full_script)
+            .await
+            .expect("execute_batch should succeed");
 
         // Query contacts to verify both rows are present and accurate
         let reloaded = adapter
@@ -610,11 +734,17 @@ mod tests {
         // Alice
         assert_eq!(reloaded.rows[0][0], QueryValue::Int(1));
         assert_eq!(reloaded.rows[0][1], QueryValue::String("Alice".into()));
-        assert_eq!(reloaded.rows[0][2], QueryValue::String("alice@newcorp.com".into()));
+        assert_eq!(
+            reloaded.rows[0][2],
+            QueryValue::String("alice@newcorp.com".into())
+        );
         // Bob
         assert_eq!(reloaded.rows[1][0], QueryValue::Int(2));
         assert_eq!(reloaded.rows[1][1], QueryValue::String("Bob".into()));
-        assert_eq!(reloaded.rows[1][2], QueryValue::String("bob@example.com".into()));
+        assert_eq!(
+            reloaded.rows[1][2],
+            QueryValue::String("bob@example.com".into())
+        );
     }
 
     #[tokio::test]
@@ -637,7 +767,10 @@ mod tests {
             .execute_query("SELECT id, sku, name, price FROM complex_products;")
             .await
             .expect("query initial product");
-        let cols = adapter.list_columns(None, None, "complex_products").await.expect("list columns");
+        let cols = adapter
+            .list_columns(None, None, "complex_products")
+            .await
+            .expect("list columns");
 
         let mut cs = crate::db::changeset::GridChangeset::new();
         // Duplicate row 0: ID reset to <auto>, other NOT NULL columns cloned and SKU tweaked
@@ -665,7 +798,10 @@ mod tests {
         // <auto> ID column was omitted from INSERT
         assert!(plan.full_script.contains("INSERT INTO \"complex_products\" (\"sku\", \"name\", \"price\") VALUES ('SKU-1002', 'Widget Pro', 49.99);"));
 
-        adapter.execute_batch(&plan.full_script).await.expect("execute_batch should succeed");
+        adapter
+            .execute_batch(&plan.full_script)
+            .await
+            .expect("execute_batch should succeed");
 
         let reloaded = adapter
             .execute_query("SELECT id, sku, name, price FROM complex_products ORDER BY id ASC;")
@@ -698,7 +834,10 @@ mod tests {
             .execute_query("SELECT id, item_code, name FROM items;")
             .await
             .expect("query initial item");
-        let cols = adapter.list_columns(None, None, "items").await.expect("list columns");
+        let cols = adapter
+            .list_columns(None, None, "items")
+            .await
+            .expect("list columns");
 
         let mut cs = crate::db::changeset::GridChangeset::new();
         // A new row is initiated as blank / <auto> (empty waiting to be filled, NOT a copy of ITEM-001)
@@ -707,7 +846,10 @@ mod tests {
             QueryValue::Null,
             QueryValue::Null,
         ];
-        let _temp_id = cs.add_inserted_row(new_row_values, crate::db::changeset::InsertAnchor::AfterRow(0));
+        let _temp_id = cs.add_inserted_row(
+            new_row_values,
+            crate::db::changeset::InsertAnchor::AfterRow(0),
+        );
 
         // User fills in the cells manually
         cs.set_inserted_cell_value(0, 1, QueryValue::String("ITEM-002".into()));
@@ -724,9 +866,14 @@ mod tests {
         );
 
         assert_eq!(plan.inserts_count, 1);
-        assert!(plan.full_script.contains("INSERT INTO \"items\" (\"item_code\", \"name\") VALUES ('ITEM-002', 'Second Item');"));
+        assert!(plan.full_script.contains(
+            "INSERT INTO \"items\" (\"item_code\", \"name\") VALUES ('ITEM-002', 'Second Item');"
+        ));
 
-        adapter.execute_batch(&plan.full_script).await.expect("execute_batch should succeed");
+        adapter
+            .execute_batch(&plan.full_script)
+            .await
+            .expect("execute_batch should succeed");
 
         let reloaded = adapter
             .execute_query("SELECT id, item_code, name FROM items ORDER BY id ASC;")
@@ -735,7 +882,9 @@ mod tests {
         assert_eq!(reloaded.rows.len(), 2);
         assert_eq!(reloaded.rows[0][1], QueryValue::String("ITEM-001".into()));
         assert_eq!(reloaded.rows[1][1], QueryValue::String("ITEM-002".into()));
-        assert_eq!(reloaded.rows[1][2], QueryValue::String("Second Item".into()));
+        assert_eq!(
+            reloaded.rows[1][2],
+            QueryValue::String("Second Item".into())
+        );
     }
 }
-

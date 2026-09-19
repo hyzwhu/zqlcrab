@@ -121,8 +121,10 @@ impl QueryHistoryManager {
             return Ok(());
         }
 
-        let content = fs::read_to_string(&self.storage_path).map_err(|e| DbError::Io(e.to_string()))?;
-        let items: Vec<QueryHistoryItem> = serde_json::from_str(&content).map_err(|e| DbError::Configuration(e.to_string()))?;
+        let content =
+            fs::read_to_string(&self.storage_path).map_err(|e| DbError::Io(e.to_string()))?;
+        let items: Vec<QueryHistoryItem> =
+            serde_json::from_str(&content).map_err(|e| DbError::Configuration(e.to_string()))?;
         self.items = items;
         if self.items.len() > self.max_entries {
             self.items.truncate(self.max_entries);
@@ -200,7 +202,8 @@ mod tests {
 
     #[test]
     fn test_history_manager_fifo_and_search() {
-        let temp_dir = std::env::temp_dir().join(format!("zqlcrab_hist_test_{}", uuid::Uuid::new_v4()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("zqlcrab_hist_test_{}", uuid::Uuid::new_v4()));
         let storage_file = temp_dir.join("history.json");
 
         let mut mgr = QueryHistoryManager::with_storage_path(storage_file.clone(), 3);

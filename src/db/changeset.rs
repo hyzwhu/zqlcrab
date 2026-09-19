@@ -66,7 +66,9 @@ impl GridChangeset {
 
     /// Returns true if there are any pending edits, deletions, or insertions.
     pub fn is_dirty(&self) -> bool {
-        !self.cell_updates.is_empty() || !self.deleted_rows.is_empty() || !self.inserted_rows.is_empty()
+        !self.cell_updates.is_empty()
+            || !self.deleted_rows.is_empty()
+            || !self.inserted_rows.is_empty()
     }
 
     /// Checks whether a specific cell has a pending edit.
@@ -80,7 +82,11 @@ impl GridChangeset {
     }
 
     /// Adds a new inserted row with default values and placement anchor, returning its unique temp_id.
-    pub fn add_inserted_row(&mut self, default_values: Vec<QueryValue>, anchor: InsertAnchor) -> usize {
+    pub fn add_inserted_row(
+        &mut self,
+        default_values: Vec<QueryValue>,
+        anchor: InsertAnchor,
+    ) -> usize {
         let id = self.next_insert_id;
         self.next_insert_id += 1;
         self.inserted_rows.push(RowInsertion {
@@ -116,7 +122,12 @@ impl GridChangeset {
     }
 
     /// Updates a cell value in an uncommitted inserted row.
-    pub fn set_inserted_cell_value(&mut self, insert_idx: usize, col_idx: usize, value: QueryValue) {
+    pub fn set_inserted_cell_value(
+        &mut self,
+        insert_idx: usize,
+        col_idx: usize,
+        value: QueryValue,
+    ) {
         if let Some(row) = self.inserted_rows.get_mut(insert_idx) {
             if col_idx < row.values.len() {
                 row.values[col_idx] = value;
@@ -128,8 +139,14 @@ impl GridChangeset {
     }
 
     /// Gets a cell value from an uncommitted inserted row.
-    pub fn get_inserted_cell_value(&self, insert_idx: usize, col_idx: usize) -> Option<&QueryValue> {
-        self.inserted_rows.get(insert_idx).and_then(|r| r.values.get(col_idx))
+    pub fn get_inserted_cell_value(
+        &self,
+        insert_idx: usize,
+        col_idx: usize,
+    ) -> Option<&QueryValue> {
+        self.inserted_rows
+            .get(insert_idx)
+            .and_then(|r| r.values.get(col_idx))
     }
 
     /// Sets or updates a cell value. If the new value equals the original value,
@@ -372,18 +389,33 @@ mod tests {
         // Insert row A anchored after original row 2
         let id_a = cs.add_inserted_row(vec![QueryValue::Int(101)], InsertAnchor::AfterRow(2));
         // Insert row B anchored after inserted row A
-        let id_b = cs.add_inserted_row(vec![QueryValue::Int(102)], InsertAnchor::AfterInserted(id_a));
+        let id_b = cs.add_inserted_row(
+            vec![QueryValue::Int(102)],
+            InsertAnchor::AfterInserted(id_a),
+        );
         // Insert row C anchored after inserted row B
-        let _id_c = cs.add_inserted_row(vec![QueryValue::Int(103)], InsertAnchor::AfterInserted(id_b));
+        let _id_c = cs.add_inserted_row(
+            vec![QueryValue::Int(103)],
+            InsertAnchor::AfterInserted(id_b),
+        );
 
         assert_eq!(cs.inserted_rows[0].anchor, InsertAnchor::AfterRow(2));
-        assert_eq!(cs.inserted_rows[1].anchor, InsertAnchor::AfterInserted(id_a));
-        assert_eq!(cs.inserted_rows[2].anchor, InsertAnchor::AfterInserted(id_b));
+        assert_eq!(
+            cs.inserted_rows[1].anchor,
+            InsertAnchor::AfterInserted(id_a)
+        );
+        assert_eq!(
+            cs.inserted_rows[2].anchor,
+            InsertAnchor::AfterInserted(id_b)
+        );
 
         // When row A is removed, row B should be reparented to row A's anchor (AfterRow(2))
         cs.remove_inserted_row(id_a);
         assert_eq!(cs.inserted_rows.len(), 2);
         assert_eq!(cs.inserted_rows[0].anchor, InsertAnchor::AfterRow(2));
-        assert_eq!(cs.inserted_rows[1].anchor, InsertAnchor::AfterInserted(id_b));
+        assert_eq!(
+            cs.inserted_rows[1].anchor,
+            InsertAnchor::AfterInserted(id_b)
+        );
     }
 }

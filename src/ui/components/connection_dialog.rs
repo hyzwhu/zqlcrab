@@ -11,8 +11,8 @@ use gpui_kit::component::{
     menu::{DropdownMenu as _, PopupMenuItem},
 };
 use gpui_kit::gpui::{
-    Anchor, App, Entity, FontWeight, IntoElement, ParentElement,
-    RenderOnce, Styled, Window, div, px, rgba,
+    Anchor, App, Entity, FontWeight, IntoElement, ParentElement, RenderOnce, Styled, Window, div,
+    px, rgba,
 };
 use std::rc::Rc;
 
@@ -187,10 +187,7 @@ impl RenderOnce for ConnectionDialog {
             });
         }
 
-        let mut cancel_btn = Button::new("cancel_btn")
-            .ghost()
-            .small()
-            .label("Cancel");
+        let mut cancel_btn = Button::new("cancel_btn").ghost().small().label("Cancel");
         if let Some(ref on_cancel) = cancel_handler {
             let on_cancel = on_cancel.clone();
             cancel_btn = cancel_btn.on_click(move |_, window, cx| {
@@ -202,7 +199,11 @@ impl RenderOnce for ConnectionDialog {
             .outline()
             .small()
             .icon(IconName::Activity)
-            .label(if self.is_testing { "Testing..." } else { "Test Connection" });
+            .label(if self.is_testing {
+                "Testing..."
+            } else {
+                "Test Connection"
+            });
         if let Some(on_test) = self.on_test {
             test_btn = test_btn.on_click(move |_, window, cx| {
                 on_test(window, cx);
@@ -213,7 +214,11 @@ impl RenderOnce for ConnectionDialog {
             .primary()
             .small()
             .icon(IconName::Check)
-            .label(if self.is_editing { "Save Changes" } else { "Save & Connect" });
+            .label(if self.is_editing {
+                "Save Changes"
+            } else {
+                "Save & Connect"
+            });
         if let Some(on_save) = self.on_save {
             save_btn = save_btn.on_click(move |_, window, cx| {
                 on_save(window, cx);
@@ -274,9 +279,15 @@ impl RenderOnce for ConnectionDialog {
         };
 
         let protocol_desc = match current_db_type.family() {
-            DatabaseFamily::Sqlite => "Embedded local database · Fast file or in-memory SQLite engine",
-            DatabaseFamily::MySql => "Native MySQL wire protocol · Compatible with MariaDB, TiDB, Doris, StarRocks & more",
-            DatabaseFamily::Postgres => "Native PostgreSQL wire protocol · Compatible with CockroachDB, Timescale, openGauss & more",
+            DatabaseFamily::Sqlite => {
+                "Embedded local database · Fast file or in-memory SQLite engine"
+            }
+            DatabaseFamily::MySql => {
+                "Native MySQL wire protocol · Compatible with MariaDB, TiDB, Doris, StarRocks & more"
+            }
+            DatabaseFamily::Postgres => {
+                "Native PostgreSQL wire protocol · Compatible with CockroachDB, Timescale, openGauss & more"
+            }
         };
 
         let on_sel_for_menu = on_select_type.clone();
@@ -285,7 +296,11 @@ impl RenderOnce for ConnectionDialog {
             .w_full()
             .dropdown_caret(true)
             .icon(database_icon(current_db_type))
-            .label(format!("{}  ·  {}", current_db_type.display_name(), current_db_type.category().display_name()))
+            .label(format!(
+                "{}  ·  {}",
+                current_db_type.display_name(),
+                current_db_type.category().display_name()
+            ))
             .dropdown_menu_with_anchor(Anchor::BottomLeft, move |mut menu, _window, _cx| {
                 menu = menu
                     .check_side(Side::Right)
@@ -421,7 +436,14 @@ impl RenderOnce for ConnectionDialog {
                         div()
                             .text_xs()
                             .text_color(ThemeColors::TEXT_FAINT)
-                            .child(format!("Default Port: {}", if current_db_type.is_file_based() { "N/A".to_string() } else { current_db_type.default_port().to_string() })),
+                            .child(format!(
+                                "Default Port: {}",
+                                if current_db_type.is_file_based() {
+                                    "N/A".to_string()
+                                } else {
+                                    current_db_type.default_port().to_string()
+                                }
+                            )),
                     ),
             );
 
@@ -557,47 +579,40 @@ impl RenderOnce for ConnectionDialog {
         };
 
         // Test status notification
-        let test_banner = self.test_result.map(|res| {
-            match res {
-                Ok(msg) => h_flex()
-                    .p_2()
-                    .rounded_md()
-                    .items_center()
-                    .gap_2()
-                    .bg(ThemeColors::BG_SURFACE_ACTIVE)
-                    .border_1()
-                    .border_color(ThemeColors::SUCCESS)
-                    .child(
-                        Icon::new(IconName::CircleCheck)
-                            .size(px(14.0))
-                            .text_color(ThemeColors::SUCCESS),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(ThemeColors::TEXT_PRIMARY)
-                            .child(msg),
-                    ),
-                Err(err) => h_flex()
-                    .p_2()
-                    .rounded_md()
-                    .items_center()
-                    .gap_2()
-                    .bg(ThemeColors::BG_SURFACE_ACTIVE)
-                    .border_1()
-                    .border_color(ThemeColors::ERROR)
-                    .child(
-                        Icon::new(IconName::TriangleAlert)
-                            .size(px(14.0))
-                            .text_color(ThemeColors::ERROR),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(ThemeColors::ERROR)
-                            .child(err),
-                    ),
-            }
+        let test_banner = self.test_result.map(|res| match res {
+            Ok(msg) => h_flex()
+                .p_2()
+                .rounded_md()
+                .items_center()
+                .gap_2()
+                .bg(ThemeColors::BG_SURFACE_ACTIVE)
+                .border_1()
+                .border_color(ThemeColors::SUCCESS)
+                .child(
+                    Icon::new(IconName::CircleCheck)
+                        .size(px(14.0))
+                        .text_color(ThemeColors::SUCCESS),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(ThemeColors::TEXT_PRIMARY)
+                        .child(msg),
+                ),
+            Err(err) => h_flex()
+                .p_2()
+                .rounded_md()
+                .items_center()
+                .gap_2()
+                .bg(ThemeColors::BG_SURFACE_ACTIVE)
+                .border_1()
+                .border_color(ThemeColors::ERROR)
+                .child(
+                    Icon::new(IconName::TriangleAlert)
+                        .size(px(14.0))
+                        .text_color(ThemeColors::ERROR),
+                )
+                .child(div().text_xs().text_color(ThemeColors::ERROR).child(err)),
         });
 
         let on_toggle_ro = self.on_toggle_read_only.clone();
@@ -642,12 +657,9 @@ impl RenderOnce for ConnectionDialog {
                                     })
                                     .child("Read-Only Protection"),
                             )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(ThemeColors::TEXT_FAINT)
-                                    .child("Block destructive queries (DROP, DELETE, UPDATE, TRUNCATE)"),
-                            ),
+                            .child(div().text_xs().text_color(ThemeColors::TEXT_FAINT).child(
+                                "Block destructive queries (DROP, DELETE, UPDATE, TRUNCATE)",
+                            )),
                     ),
             )
             .child({
@@ -706,14 +718,13 @@ impl RenderOnce for ConnectionDialog {
                                             }),
                                     )
                                     .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(ThemeColors::TEXT_MUTED)
-                                            .child(if self.is_editing {
+                                        div().text_xs().text_color(ThemeColors::TEXT_MUTED).child(
+                                            if self.is_editing {
                                                 "Modify connection settings and credentials"
                                             } else {
                                                 "Configure a new database profile to connect"
-                                            }),
+                                            },
+                                        ),
                                     ),
                             ),
                     )
@@ -813,7 +824,9 @@ mod tests {
         for db_type in all_types {
             let icon = database_icon(db_type);
             let icon_path = icon.path();
-            let loaded = assets.load(&icon_path).expect("Asset loading should not error");
+            let loaded = assets
+                .load(&icon_path)
+                .expect("Asset loading should not error");
             assert!(
                 loaded.is_some(),
                 "Icon for {db_type:?} at path '{icon_path}' must exist in AllAssets"
@@ -821,4 +834,3 @@ mod tests {
         }
     }
 }
-

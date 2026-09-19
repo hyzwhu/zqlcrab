@@ -9,12 +9,12 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
     input::{Input, InputState},
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem},
-    resizable::{resizable_panel, v_resizable, ResizableState},
+    resizable::{ResizableState, resizable_panel, v_resizable},
 };
 use gpui_kit::gpui::{
-    Anchor, App, Context, ElementId, Entity, FontWeight, InteractiveElement as _, IntoElement, ParentElement,
-    RenderOnce, StatefulInteractiveElement as _, Styled, Window, div, prelude::FluentBuilder as _,
-    px,
+    Anchor, App, Context, ElementId, Entity, FontWeight, InteractiveElement as _, IntoElement,
+    ParentElement, RenderOnce, StatefulInteractiveElement as _, Styled, Window, div,
+    prelude::FluentBuilder as _, px,
 };
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -197,15 +197,13 @@ impl Sidebar {
 
         let edit = on_edit.clone();
         let cid_edit = conn_id.clone();
-        menu = menu.item(
-            PopupMenuItem::new("Edit")
-                .icon(IconName::Pencil)
-                .on_click(move |_, window, cx| {
-                    if let Some(ref handler) = edit {
-                        handler(cid_edit.clone(), window, cx);
-                    }
-                }),
-        );
+        menu = menu.item(PopupMenuItem::new("Edit").icon(IconName::Pencil).on_click(
+            move |_, window, cx| {
+                if let Some(ref handler) = edit {
+                    handler(cid_edit.clone(), window, cx);
+                }
+            },
+        ));
 
         let dup = on_duplicate.clone();
         let cid_dup = conn_id.clone();
@@ -225,15 +223,13 @@ impl Sidebar {
         let cid_del = conn_id.clone();
         let del_icon = Icon::new(IconName::Trash).text_color(ThemeColors::ERROR);
         menu = menu.item(
-            PopupMenuItem::element(|_, _| {
-                div().text_color(ThemeColors::ERROR).child("Delete")
-            })
-            .icon(del_icon)
-            .on_click(move |_, window, cx| {
-                if let Some(ref handler) = del {
-                    handler(cid_del.clone(), window, cx);
-                }
-            }),
+            PopupMenuItem::element(|_, _| div().text_color(ThemeColors::ERROR).child("Delete"))
+                .icon(del_icon)
+                .on_click(move |_, window, cx| {
+                    if let Some(ref handler) = del {
+                        handler(cid_del.clone(), window, cx);
+                    }
+                }),
         );
 
         menu
@@ -422,17 +418,11 @@ impl RenderOnce for Sidebar {
                 .items_center()
                 .gap_2()
                 .cursor_pointer()
-                .child(
-                    div()
-                        .w(px(6.0))
-                        .h(px(6.0))
-                        .rounded_full()
-                        .bg(if is_active {
-                            ThemeColors::SUCCESS
-                        } else {
-                            ThemeColors::TEXT_FAINT
-                        }),
-                )
+                .child(div().w(px(6.0)).h(px(6.0)).rounded_full().bg(if is_active {
+                    ThemeColors::SUCCESS
+                } else {
+                    ThemeColors::TEXT_FAINT
+                }))
                 .child(
                     Icon::new(engine_icon)
                         .size(px(13.0))
@@ -653,20 +643,16 @@ impl RenderOnce for Sidebar {
                     ),
             )
             .child(
-                h_flex()
-                    .items_center()
-                    .gap_1()
-                    .child(create_tbl_btn)
-                    .child(
-                        div()
-                            .px_1()
-                            .py_0p5()
-                            .rounded_sm()
-                            .bg(ThemeColors::BG_SURFACE_HOVER)
-                            .text_size(px(10.0))
-                            .text_color(ThemeColors::TEXT_FAINT)
-                            .child(family_label(active_family)),
-                    ),
+                h_flex().items_center().gap_1().child(create_tbl_btn).child(
+                    div()
+                        .px_1()
+                        .py_0p5()
+                        .rounded_sm()
+                        .bg(ThemeColors::BG_SURFACE_HOVER)
+                        .text_size(px(10.0))
+                        .text_color(ThemeColors::TEXT_FAINT)
+                        .child(family_label(active_family)),
+                ),
             );
 
         let search_row = h_flex()
@@ -713,7 +699,12 @@ impl RenderOnce for Sidebar {
                             ),
                     );
 
-                    tbl_list = tbl_list.child(group_header("TABLES", tables.len(), IconName::Table, self.on_create_table.clone()));
+                    tbl_list = tbl_list.child(group_header(
+                        "TABLES",
+                        tables.len(),
+                        IconName::Table,
+                        self.on_create_table.clone(),
+                    ));
                     for tbl in &tables {
                         tbl_list = tbl_list.child(table_row(
                             tbl,
@@ -724,7 +715,8 @@ impl RenderOnce for Sidebar {
                         ));
                     }
 
-                    tbl_list = tbl_list.child(group_header("VIEWS", views.len(), IconName::Eye, None));
+                    tbl_list =
+                        tbl_list.child(group_header("VIEWS", views.len(), IconName::Eye, None));
                     if views.is_empty() {
                         tbl_list = tbl_list.child(empty_group_hint());
                     }
@@ -742,10 +734,11 @@ impl RenderOnce for Sidebar {
                 tbl_list
             });
 
-        let default_conn_height = px(
-            (36.0 + 34.0 + (self.connections.len().min(6) as f32) * 31.0 + 6.0)
-                .clamp(140.0, 256.0),
-        );
+        let default_conn_height = px((36.0
+            + 34.0
+            + (self.connections.len().min(6) as f32) * 31.0
+            + 6.0)
+            .clamp(140.0, 256.0));
 
         let content = if self.active_connection_id.is_some() {
             div()
@@ -762,10 +755,7 @@ impl RenderOnce for Sidebar {
                                 .flex_none()
                                 .child(conn_pane),
                         )
-                        .child(
-                            resizable_panel()
-                                .child(tables_pane),
-                        ),
+                        .child(resizable_panel().child(tables_pane)),
                 )
                 .into_any_element()
         } else {
@@ -960,7 +950,9 @@ fn table_row(
                         .when_some(on_quick_count, |btn, handler| {
                             btn.on_click(move |_, window, cx| {
                                 handler(
-                                    format!("SELECT COUNT(*) AS total_count FROM {qualified_count};"),
+                                    format!(
+                                        "SELECT COUNT(*) AS total_count FROM {qualified_count};"
+                                    ),
                                     window,
                                     cx,
                                 );

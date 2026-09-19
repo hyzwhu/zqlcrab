@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: zqlcrab
+            asset_name: zqlcrab-aarch64-apple-darwin
+          - os: macos-13
+            target: x86_64-apple-darwin
+            artifact_name: zqlcrab
+            asset_name: zqlcrab-x86_64-apple-darwin
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            artifact_name: zqlcrab
+            asset_name: zqlcrab-x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: zqlcrab.exe
+            asset_name: zqlcrab-x86_64-pc-windows-msvc
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libssl-dev \
+            libx11-dev \
+            libxcb1-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libasound2-dev \
+            libfontconfig1-dev \
+            libfreetype6-dev \
+            libvulkan1
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package release artifact (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p release-pack
+          cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} release-pack/
+          cp README.md LICENSE-MIT LICENSE-APACHE release-pack/
+          tar -czvf ${{ matrix.asset_name }}.tar.gz -C release-pack .
+          shasum -a 256 ${{ matrix.asset_name }}.tar.gz > ${{ matrix.asset_name }}.tar.gz.sha256
+
+      - name: Package release artifact (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p release-pack
+          cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} release-pack/
+          cp README.md LICENSE-MIT LICENSE-APACHE release-pack/
+          7z a ${{ matrix.asset_name }}.zip ./release-pack/*
+          certutil -hashfile ${{ matrix.asset_name }}.zip SHA256 | findstr -v "hash" | findstr -v "CertUtil" > ${{ matrix.asset_name }}.zip.sha256
+
+      - name: Upload binaries to GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            ${{ matrix.asset_name }}.tar.gz
+            ${{ matrix.asset_name }}.tar.gz.sha256
+            ${{ matrix.asset_name }}.zip
+            ${{ matrix.asset_name }}.zip.sha256
+          draft: false
+          prerelease: false
+          generate_release_notes: true

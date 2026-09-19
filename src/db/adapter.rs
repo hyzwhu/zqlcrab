@@ -3,11 +3,11 @@
 //! Standardized interface for database operations including connection lifecycle,
 //! query execution, schema reflection, and metadata inspection.
 
-use async_trait::async_trait;
 use crate::db::{
     error::DbResult,
     types::{ColumnInfo, ConnectionStatus, DatabaseSchema, IndexInfo, QueryResult, TableInfo},
 };
+use async_trait::async_trait;
 
 /// Universal database adapter interface implemented by all supported database engines.
 #[async_trait]

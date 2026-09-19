@@ -1,26 +1,26 @@
 //! Main desktop application workspace coordinating navigation, query console, and data inspection.
 
 use crate::db::changeset::GridChangeset;
-use crate::db::explain::{parse_explain_result, wrap_explain_sql, ExplainPlan};
-use crate::db::export::{export_result, ExportFormat, ExportOptions};
+use crate::db::explain::{ExplainPlan, parse_explain_result, wrap_explain_sql};
+use crate::db::export::{ExportFormat, ExportOptions, export_result};
 use crate::db::handle::ActiveConnection;
 use crate::db::history::{QueryHistoryItem, QueryHistoryManager, QueryHistoryStatus};
 use crate::db::manager::ConnectionManager;
 use crate::db::sql_format::format_sql;
 use crate::db::sql_gen::{
+    ColumnDef, CreateTableDef, SqlReviewPlan, TableIndexDef, TableIndexType,
     column_matches_index_spec, extract_table_from_sql, generate_create_table_sql,
-    generate_review_plan, parse_sql_column_list, ColumnDef, CreateTableDef, SqlReviewPlan,
-    TableIndexDef, TableIndexType,
+    generate_review_plan, parse_sql_column_list,
 };
 use crate::db::types::{
-    ColumnInfo, ConnectionConfig, DatabaseFamily, DatabaseType, IndexInfo, QueryResult,
-    QueryValue, SortDirection, TableInfo,
+    ColumnInfo, ConnectionConfig, DatabaseFamily, DatabaseType, IndexInfo, QueryResult, QueryValue,
+    SortDirection, TableInfo,
 };
 use crate::ui::components::{
-    create_table_modal::{CreateTableColumnState, CreateTableIndexState, CreateTableModal},
-    data_grid::GridCellCoord,
     AppStatusBar, ConnectionDialog, ConsoleBottomTab, DataGrid, ExplainViewMode, QueryConsole,
     QueryHistoryView, SchemaViewer, Sidebar, SqlReviewModal,
+    create_table_modal::{CreateTableColumnState, CreateTableIndexState, CreateTableModal},
+    data_grid::GridCellCoord,
 };
 use crate::ui::theme::ThemeColors;
 use chrono::Utc;
@@ -33,12 +33,25 @@ use gpui_kit::component::{
     resizable::ResizableState,
 };
 use gpui_kit::gpui::{
-    App, AsyncApp, ClipboardItem, Context, ElementId, Entity, FontWeight, IntoElement, ParentElement, Render,
-    ScrollHandle, Styled, Window, div, point, prelude::*, px, transparent_black,
+    App, AsyncApp, ClipboardItem, Context, ElementId, Entity, FontWeight, IntoElement,
+    ParentElement, Render, ScrollHandle, Styled, Window, div, point, prelude::*, px,
+    transparent_black,
 };
 use uuid::Uuid;
 
-gpui_kit::actions!(zqlcrab, [RunQuery, CloseDialog, FormatSql, ExplainQuery, SaveGridChanges, DeleteGridRow, AddNewRow, DuplicateGridRow]);
+gpui_kit::actions!(
+    zqlcrab,
+    [
+        RunQuery,
+        CloseDialog,
+        FormatSql,
+        ExplainQuery,
+        SaveGridChanges,
+        DeleteGridRow,
+        AddNewRow,
+        DuplicateGridRow
+    ]
+);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkspaceTab {
@@ -221,18 +234,16 @@ impl CrabStudioApp {
         });
         let console_split = cx.new(|_cx| ResizableState::default());
         let sidebar_split = cx.new(|_cx| ResizableState::default());
-        let sidebar_conn_filter = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("Search connections…")
-        });
+        let sidebar_conn_filter =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Search connections…"));
         cx.subscribe(&sidebar_conn_filter, |_, _, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Change) {
                 cx.notify();
             }
         })
         .detach();
-        let sidebar_table_filter = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("Search tables, views…")
-        });
+        let sidebar_table_filter =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Search tables, views…"));
         cx.subscribe(&sidebar_table_filter, |_, _, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Change) {
                 cx.notify();
@@ -240,38 +251,21 @@ impl CrabStudioApp {
         })
         .detach();
 
-        let dialog_name_input = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("My Database")
-        });
-        let dialog_host_input = cx.new(|cx| {
-            InputState::new(window, cx).default_value("127.0.0.1")
-        });
-        let dialog_port_input = cx.new(|cx| {
-            InputState::new(window, cx).default_value("5432")
-        });
-        let dialog_database_input = cx.new(|cx| {
-            InputState::new(window, cx).default_value(":memory:")
-        });
-        let dialog_user_input = cx.new(|cx| {
-            InputState::new(window, cx).default_value("postgres")
-        });
-        let dialog_pass_input = cx.new(|cx| {
-            InputState::new(window, cx).masked(true)
-        });
+        let dialog_name_input = cx.new(|cx| InputState::new(window, cx).placeholder("My Database"));
+        let dialog_host_input = cx.new(|cx| InputState::new(window, cx).default_value("127.0.0.1"));
+        let dialog_port_input = cx.new(|cx| InputState::new(window, cx).default_value("5432"));
+        let dialog_database_input =
+            cx.new(|cx| InputState::new(window, cx).default_value(":memory:"));
+        let dialog_user_input = cx.new(|cx| InputState::new(window, cx).default_value("postgres"));
+        let dialog_pass_input = cx.new(|cx| InputState::new(window, cx).masked(true));
 
-        let grid_cell_edit_input = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("Edit cell value...")
-        });
+        let grid_cell_edit_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Edit cell value..."));
 
-        let create_table_name_input = cx.new(|cx| {
-            InputState::new(window, cx).default_value("new_table")
-        });
-        let create_table_schema_input = cx.new(|cx| {
-            InputState::new(window, cx).default_value("")
-        });
-        let create_table_comment_input = cx.new(|cx| {
-            InputState::new(window, cx).default_value("")
-        });
+        let create_table_name_input =
+            cx.new(|cx| InputState::new(window, cx).default_value("new_table"));
+        let create_table_schema_input = cx.new(|cx| InputState::new(window, cx).default_value(""));
+        let create_table_comment_input = cx.new(|cx| InputState::new(window, cx).default_value(""));
 
         let col1_name = cx.new(|cx| InputState::new(window, cx).default_value("id"));
         let col1_type = cx.new(|cx| InputState::new(window, cx).default_value("INTEGER"));
@@ -406,16 +400,19 @@ impl CrabStudioApp {
                             app.select_table(target, cx);
                         }
                         cx.notify();
-                    }).ok();
+                    })
+                    .ok();
                 }
                 Err(err) => {
                     this.update(cx, |app, cx| {
                         app.status_message = Some(format!("Connection error: {err}"));
                         cx.notify();
-                    }).ok();
+                    })
+                    .ok();
                 }
             }
-        }).detach();
+        })
+        .detach();
     }
 
     /// Select a table from the sidebar
@@ -441,10 +438,22 @@ impl CrabStudioApp {
         let qualified = table.qualified_name(family);
 
         cx.spawn(async move |this, cx: &mut AsyncApp| {
-            let data_res = conn.execute_query(&format!("SELECT * FROM {qualified} LIMIT 100")).await;
-            let cols = conn.list_columns(None, schema.as_deref(), &tbl).await.unwrap_or_default();
-            let idxs = conn.list_indexes(None, schema.as_deref(), &tbl).await.unwrap_or_default();
-            let ddl = conn.get_table_ddl(None, schema.as_deref(), &tbl).await.ok().flatten();
+            let data_res = conn
+                .execute_query(&format!("SELECT * FROM {qualified} LIMIT 100"))
+                .await;
+            let cols = conn
+                .list_columns(None, schema.as_deref(), &tbl)
+                .await
+                .unwrap_or_default();
+            let idxs = conn
+                .list_indexes(None, schema.as_deref(), &tbl)
+                .await
+                .unwrap_or_default();
+            let ddl = conn
+                .get_table_ddl(None, schema.as_deref(), &tbl)
+                .await
+                .ok()
+                .flatten();
 
             this.update(cx, |app, cx| {
                 app.table_data = data_res.ok();
@@ -456,8 +465,10 @@ impl CrabStudioApp {
                 }
                 app.status_message = Some(format!("Loaded table {tbl}"));
                 cx.notify();
-            }).ok();
-        }).detach();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// Disconnect from the active database
@@ -466,7 +477,8 @@ impl CrabStudioApp {
             let name = conn.config.name.clone();
             cx.spawn(async move |_, _| {
                 let _ = conn.disconnect().await;
-            }).detach();
+            })
+            .detach();
 
             self.active_tables.clear();
             self.selected_table = None;
@@ -497,8 +509,10 @@ impl CrabStudioApp {
                 app.active_tables = tables;
                 app.status_message = Some("Schema refreshed".to_string());
                 cx.notify();
-            }).ok();
-        }).detach();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// Execute the query written in the query editor
@@ -509,7 +523,10 @@ impl CrabStudioApp {
         }
 
         let Some(conn) = self.active_connection.clone() else {
-            self.console_error = Some("No active database connection. Please select or create a connection first.".to_string());
+            self.console_error = Some(
+                "No active database connection. Please select or create a connection first."
+                    .to_string(),
+            );
             cx.notify();
             return;
         };
@@ -527,9 +544,19 @@ impl CrabStudioApp {
             });
 
             cx.spawn(async move |this, cx: &mut AsyncApp| {
-                let cols = conn_meta.list_columns(None, schema_for_cols.as_deref(), &tbl_for_cols).await.unwrap_or_default();
-                let idxs = conn_meta.list_indexes(None, schema_for_cols.as_deref(), &tbl_for_cols).await.unwrap_or_default();
-                let ddl = conn_meta.get_table_ddl(None, schema_for_cols.as_deref(), &tbl_for_cols).await.ok().flatten();
+                let cols = conn_meta
+                    .list_columns(None, schema_for_cols.as_deref(), &tbl_for_cols)
+                    .await
+                    .unwrap_or_default();
+                let idxs = conn_meta
+                    .list_indexes(None, schema_for_cols.as_deref(), &tbl_for_cols)
+                    .await
+                    .unwrap_or_default();
+                let ddl = conn_meta
+                    .get_table_ddl(None, schema_for_cols.as_deref(), &tbl_for_cols)
+                    .await
+                    .ok()
+                    .flatten();
 
                 this.update(cx, |app, cx| {
                     if app.selected_table.as_deref() == Some(&tbl_for_cols) {
@@ -538,8 +565,10 @@ impl CrabStudioApp {
                         app.schema_ddl = ddl;
                         cx.notify();
                     }
-                }).ok();
-            }).detach();
+                })
+                .ok();
+            })
+            .detach();
         }
 
         let conn_id = Some(conn.config.id.clone());
@@ -590,7 +619,8 @@ impl CrabStudioApp {
                         app.grid_selected_cell = None;
                         app.grid_inspector_open = false;
                         app.console_error = None;
-                        app.status_message = Some(format!("Query completed: {rows} rows returned in {dur}ms"));
+                        app.status_message =
+                            Some(format!("Query completed: {rows} rows returned in {dur}ms"));
                     }
                     Err(err) => {
                         app.console_error = Some(err.to_string());
@@ -598,8 +628,10 @@ impl CrabStudioApp {
                     }
                 }
                 cx.notify();
-            }).ok();
-        }).detach();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// Format the SQL currently in the editor.
@@ -624,7 +656,10 @@ impl CrabStudioApp {
         }
 
         let Some(conn) = self.active_connection.clone() else {
-            self.explain_error = Some("No active database connection. Please select or create a connection first.".to_string());
+            self.explain_error = Some(
+                "No active database connection. Please select or create a connection first."
+                    .to_string(),
+            );
             self.console_bottom_tab = ConsoleBottomTab::Explain;
             cx.notify();
             return;
@@ -708,17 +743,27 @@ impl CrabStudioApp {
         let output = export_result(data, &opt);
         let len = output.len();
         cx.write_to_clipboard(ClipboardItem::new_string(output));
-        self.status_message = Some(format!("Exported {format:?} copied to clipboard ({len} bytes)"));
+        self.status_message = Some(format!(
+            "Exported {format:?} copied to clipboard ({len} bytes)"
+        ));
         cx.notify();
     }
 
     /// Select a grid cell and sync inspector live editor input
-    pub fn select_grid_cell(&mut self, coord: GridCellCoord, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn select_grid_cell(
+        &mut self,
+        coord: GridCellCoord,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.grid_selected_cell = Some(coord);
         self.grid_inspector_open = true;
 
         if coord.is_inserted {
-            if let Some(val) = self.grid_changeset.get_inserted_cell_value(coord.row_idx, coord.col_idx) {
+            if let Some(val) = self
+                .grid_changeset
+                .get_inserted_cell_value(coord.row_idx, coord.col_idx)
+            {
                 let display_str = if val.is_null() {
                     String::new()
                 } else {
@@ -733,7 +778,11 @@ impl CrabStudioApp {
             if let Some(res) = res {
                 if let Some(row) = res.rows.get(coord.row_idx) {
                     if let Some(orig_val) = row.get(coord.col_idx) {
-                        let eff_val = self.grid_changeset.get_effective_cell_value(coord.row_idx, coord.col_idx, orig_val);
+                        let eff_val = self.grid_changeset.get_effective_cell_value(
+                            coord.row_idx,
+                            coord.col_idx,
+                            orig_val,
+                        );
                         let display_str = if eff_val.is_null() {
                             String::new()
                         } else {
@@ -751,8 +800,13 @@ impl CrabStudioApp {
 
     /// Add a new uncommitted row staged for insertion
     pub fn add_new_grid_row(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.active_connection.as_ref().is_some_and(|c| c.config.is_read_only) {
-            self.status_message = Some("Cannot add row: Connection is in read-only mode".to_string());
+        if self
+            .active_connection
+            .as_ref()
+            .is_some_and(|c| c.config.is_read_only)
+        {
+            self.status_message =
+                Some("Cannot add row: Connection is in read-only mode".to_string());
             cx.notify();
             return;
         }
@@ -782,11 +836,19 @@ impl CrabStudioApp {
                 .iter()
                 .find(|c| c.name.eq_ignore_ascii_case(&col_name));
 
-            let is_auto = col_meta.map(|c| {
-                c.is_auto_increment
-                    || c.data_type.to_lowercase().contains("serial")
-                    || (c.is_primary_key && (c.data_type.to_lowercase().contains("int") || self.active_connection.as_ref().map(|conn| conn.config.db_type == DatabaseType::Sqlite).unwrap_or(false)))
-            }).unwrap_or(false);
+            let is_auto = col_meta
+                .map(|c| {
+                    c.is_auto_increment
+                        || c.data_type.to_lowercase().contains("serial")
+                        || (c.is_primary_key
+                            && (c.data_type.to_lowercase().contains("int")
+                                || self
+                                    .active_connection
+                                    .as_ref()
+                                    .map(|conn| conn.config.db_type == DatabaseType::Sqlite)
+                                    .unwrap_or(false)))
+                })
+                .unwrap_or(false);
 
             if is_auto {
                 default_values.push(QueryValue::String("<auto>".to_string()));
@@ -835,11 +897,22 @@ impl CrabStudioApp {
 
         if is_appended_at_end {
             let curr = self.grid_scroll_handle.offset();
-            self.grid_scroll_handle.set_offset(point(curr.x, -px(999999.0)));
+            self.grid_scroll_handle
+                .set_offset(point(curr.x, -px(999999.0)));
         }
 
-        let cur_val = self.grid_changeset.get_inserted_cell_value(insert_idx, first_editable_col);
-        let display_str = cur_val.map(|v| if v.is_null() { String::new() } else { v.to_display_string() }).unwrap_or_default();
+        let cur_val = self
+            .grid_changeset
+            .get_inserted_cell_value(insert_idx, first_editable_col);
+        let display_str = cur_val
+            .map(|v| {
+                if v.is_null() {
+                    String::new()
+                } else {
+                    v.to_display_string()
+                }
+            })
+            .unwrap_or_default();
         self.grid_cell_edit_input.update(cx, |inp, cx| {
             inp.set_value(&display_str, window, cx);
         });
@@ -853,15 +926,27 @@ impl CrabStudioApp {
     }
 
     /// Duplicate a selected grid row as an uncommitted inserted row template
-    pub fn duplicate_grid_row(&mut self, coord: GridCellCoord, window: &mut Window, cx: &mut Context<Self>) {
-        if self.active_connection.as_ref().is_some_and(|c| c.config.is_read_only) {
-            self.status_message = Some("Cannot duplicate row: Connection is in read-only mode".to_string());
+    pub fn duplicate_grid_row(
+        &mut self,
+        coord: GridCellCoord,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .active_connection
+            .as_ref()
+            .is_some_and(|c| c.config.is_read_only)
+        {
+            self.status_message =
+                Some("Cannot duplicate row: Connection is in read-only mode".to_string());
             cx.notify();
             return;
         }
 
         let res = self.table_data.as_ref().or(self.console_result.as_ref());
-        let Some(res) = res else { return; };
+        let Some(res) = res else {
+            return;
+        };
 
         let orig_values: Vec<QueryValue> = if coord.is_inserted {
             if let Some(ins) = self.grid_changeset.inserted_rows.get(coord.row_idx) {
@@ -870,10 +955,14 @@ impl CrabStudioApp {
                 return;
             }
         } else {
-            let Some(row) = res.rows.get(coord.row_idx) else { return; };
+            let Some(row) = res.rows.get(coord.row_idx) else {
+                return;
+            };
             let mut vals = Vec::with_capacity(row.len());
             for (col_idx, orig_val) in row.iter().enumerate() {
-                let eff = self.grid_changeset.get_effective_cell_value(coord.row_idx, col_idx, orig_val);
+                let eff =
+                    self.grid_changeset
+                        .get_effective_cell_value(coord.row_idx, col_idx, orig_val);
                 vals.push(eff.clone());
             }
             vals
@@ -897,11 +986,19 @@ impl CrabStudioApp {
                 .iter()
                 .find(|c| c.name.eq_ignore_ascii_case(&col_name));
 
-            let is_auto = col_meta.map(|c| {
-                c.is_auto_increment
-                    || c.data_type.to_lowercase().contains("serial")
-                    || (c.is_primary_key && (c.data_type.to_lowercase().contains("int") || self.active_connection.as_ref().map(|conn| conn.config.db_type == DatabaseType::Sqlite).unwrap_or(false)))
-            }).unwrap_or(false);
+            let is_auto = col_meta
+                .map(|c| {
+                    c.is_auto_increment
+                        || c.data_type.to_lowercase().contains("serial")
+                        || (c.is_primary_key
+                            && (c.data_type.to_lowercase().contains("int")
+                                || self
+                                    .active_connection
+                                    .as_ref()
+                                    .map(|conn| conn.config.db_type == DatabaseType::Sqlite)
+                                    .unwrap_or(false)))
+                })
+                .unwrap_or(false);
 
             if is_auto {
                 *val = QueryValue::String("<auto>".to_string());
@@ -932,8 +1029,18 @@ impl CrabStudioApp {
         self.grid_selected_cell = Some(new_coord);
         self.grid_inspector_open = true;
 
-        let cur_val = self.grid_changeset.get_inserted_cell_value(insert_idx, first_editable_col);
-        let display_str = cur_val.map(|v| if v.is_null() { String::new() } else { v.to_display_string() }).unwrap_or_default();
+        let cur_val = self
+            .grid_changeset
+            .get_inserted_cell_value(insert_idx, first_editable_col);
+        let display_str = cur_val
+            .map(|v| {
+                if v.is_null() {
+                    String::new()
+                } else {
+                    v.to_display_string()
+                }
+            })
+            .unwrap_or_default();
         self.grid_cell_edit_input.update(cx, |inp, cx| {
             inp.set_value(&display_str, window, cx);
         });
@@ -953,7 +1060,8 @@ impl CrabStudioApp {
             if coord.is_inserted && coord.row_idx == insert_idx {
                 self.grid_selected_cell = None;
             } else if coord.is_inserted && coord.row_idx > insert_idx {
-                self.grid_selected_cell = Some(GridCellCoord::inserted(coord.row_idx - 1, coord.col_idx));
+                self.grid_selected_cell =
+                    Some(GridCellCoord::inserted(coord.row_idx - 1, coord.col_idx));
             }
         }
         let (updates, deletes, inserts) = self.grid_changeset.change_summary();
@@ -965,8 +1073,13 @@ impl CrabStudioApp {
 
     /// Apply edited value from live editor input to the grid changeset
     pub fn apply_grid_cell_edit(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        if self.active_connection.as_ref().is_some_and(|c| c.config.is_read_only) {
-            self.status_message = Some("Cannot modify data: Connection is in read-only mode".to_string());
+        if self
+            .active_connection
+            .as_ref()
+            .is_some_and(|c| c.config.is_read_only)
+        {
+            self.status_message =
+                Some("Cannot modify data: Connection is in read-only mode".to_string());
             cx.notify();
             return;
         }
@@ -980,7 +1093,11 @@ impl CrabStudioApp {
         let col_type = res
             .and_then(|r| r.column_types.get(coord.col_idx))
             .map(|s| s.as_str())
-            .or_else(|| self.schema_columns.get(coord.col_idx).map(|c| c.data_type.as_str()))
+            .or_else(|| {
+                self.schema_columns
+                    .get(coord.col_idx)
+                    .map(|c| c.data_type.as_str())
+            })
             .unwrap_or("");
 
         if coord.is_inserted {
@@ -1003,23 +1120,46 @@ impl CrabStudioApp {
             return;
         }
 
-        let Some(res) = res else { return; };
-        let Some(row) = res.rows.get(coord.row_idx) else { return; };
-        let Some(orig_val) = row.get(coord.col_idx) else { return; };
-        let col_name = res.columns.get(coord.col_idx).cloned().unwrap_or_else(|| format!("col_{}", coord.col_idx));
+        let Some(res) = res else {
+            return;
+        };
+        let Some(row) = res.rows.get(coord.row_idx) else {
+            return;
+        };
+        let Some(orig_val) = row.get(coord.col_idx) else {
+            return;
+        };
+        let col_name = res
+            .columns
+            .get(coord.col_idx)
+            .cloned()
+            .unwrap_or_else(|| format!("col_{}", coord.col_idx));
 
         let new_val = parse_edited_query_value(&new_text, orig_val, col_type);
 
-        self.grid_changeset.stage_cell_update(coord.row_idx, coord.col_idx, col_name, orig_val.clone(), new_val);
+        self.grid_changeset.stage_cell_update(
+            coord.row_idx,
+            coord.col_idx,
+            col_name,
+            orig_val.clone(),
+            new_val,
+        );
         let (updates, deletes, inserts) = self.grid_changeset.change_summary();
-        self.status_message = Some(format!("Staged change: {updates} update(s), {deletes} deletion(s), {inserts} new row(s) pending"));
+        self.status_message = Some(format!(
+            "Staged change: {updates} update(s), {deletes} deletion(s), {inserts} new row(s) pending"
+        ));
         cx.notify();
     }
 
     /// Set selected cell to NULL
     pub fn set_grid_cell_null(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.active_connection.as_ref().is_some_and(|c| c.config.is_read_only) {
-            self.status_message = Some("Cannot modify data: Connection is in read-only mode".to_string());
+        if self
+            .active_connection
+            .as_ref()
+            .is_some_and(|c| c.config.is_read_only)
+        {
+            self.status_message =
+                Some("Cannot modify data: Connection is in read-only mode".to_string());
             cx.notify();
             return;
         }
@@ -1028,7 +1168,11 @@ impl CrabStudioApp {
         };
 
         if coord.is_inserted {
-            self.grid_changeset.set_inserted_cell_value(coord.row_idx, coord.col_idx, QueryValue::Null);
+            self.grid_changeset.set_inserted_cell_value(
+                coord.row_idx,
+                coord.col_idx,
+                QueryValue::Null,
+            );
             self.grid_cell_edit_input.update(cx, |inp, cx| {
                 inp.set_value("", window, cx);
             });
@@ -1042,22 +1186,46 @@ impl CrabStudioApp {
         }
 
         let res = self.table_data.as_ref().or(self.console_result.as_ref());
-        let Some(res) = res else { return; };
-        let Some(row) = res.rows.get(coord.row_idx) else { return; };
-        let Some(orig_val) = row.get(coord.col_idx) else { return; };
-        let col_name = res.columns.get(coord.col_idx).cloned().unwrap_or_else(|| format!("col_{}", coord.col_idx));
+        let Some(res) = res else {
+            return;
+        };
+        let Some(row) = res.rows.get(coord.row_idx) else {
+            return;
+        };
+        let Some(orig_val) = row.get(coord.col_idx) else {
+            return;
+        };
+        let col_name = res
+            .columns
+            .get(coord.col_idx)
+            .cloned()
+            .unwrap_or_else(|| format!("col_{}", coord.col_idx));
 
-        self.grid_changeset.stage_cell_update(coord.row_idx, coord.col_idx, col_name, orig_val.clone(), QueryValue::Null);
+        self.grid_changeset.stage_cell_update(
+            coord.row_idx,
+            coord.col_idx,
+            col_name,
+            orig_val.clone(),
+            QueryValue::Null,
+        );
         self.grid_cell_edit_input.update(cx, |inp, cx| {
             inp.set_value("", window, cx);
         });
         let (updates, deletes, inserts) = self.grid_changeset.change_summary();
-        self.status_message = Some(format!("Staged NULL: {updates} update(s), {deletes} deletion(s), {inserts} new row(s) pending"));
+        self.status_message = Some(format!(
+            "Staged NULL: {updates} update(s), {deletes} deletion(s), {inserts} new row(s) pending"
+        ));
         cx.notify();
     }
 
     /// Revert a dirty cell to its original value
-    pub fn revert_grid_cell(&mut self, row_idx: usize, col_idx: usize, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn revert_grid_cell(
+        &mut self,
+        row_idx: usize,
+        col_idx: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.grid_changeset.revert_cell(row_idx, col_idx);
         let res = self.table_data.as_ref().or(self.console_result.as_ref());
         if let Some(res) = res {
@@ -1075,20 +1243,31 @@ impl CrabStudioApp {
             }
         }
         let (updates, deletes, inserts) = self.grid_changeset.change_summary();
-        self.status_message = Some(format!("Reverted cell. {updates} update(s), {deletes} deletion(s), {inserts} new row(s) pending"));
+        self.status_message = Some(format!(
+            "Reverted cell. {updates} update(s), {deletes} deletion(s), {inserts} new row(s) pending"
+        ));
         cx.notify();
     }
 
     /// Toggle a row's staged deletion status
     pub fn toggle_delete_grid_row(&mut self, row_idx: usize, cx: &mut Context<Self>) {
-        if self.active_connection.as_ref().is_some_and(|c| c.config.is_read_only) {
-            self.status_message = Some("Cannot modify data: Connection is in read-only mode".to_string());
+        if self
+            .active_connection
+            .as_ref()
+            .is_some_and(|c| c.config.is_read_only)
+        {
+            self.status_message =
+                Some("Cannot modify data: Connection is in read-only mode".to_string());
             cx.notify();
             return;
         }
         let res = self.table_data.as_ref().or(self.console_result.as_ref());
-        let Some(res) = res else { return; };
-        let Some(row) = res.rows.get(row_idx) else { return; };
+        let Some(res) = res else {
+            return;
+        };
+        let Some(row) = res.rows.get(row_idx) else {
+            return;
+        };
 
         let now_deleted = self.grid_changeset.toggle_delete_row(row_idx, row);
         let (updates, deletes, inserts) = self.grid_changeset.change_summary();
@@ -1154,7 +1333,8 @@ impl CrabStudioApp {
         };
 
         if conn.config.is_read_only {
-            self.status_message = Some("Cannot save changes: Connection is in read-only mode".to_string());
+            self.status_message =
+                Some("Cannot save changes: Connection is in read-only mode".to_string());
             cx.notify();
             return;
         }
@@ -1177,18 +1357,23 @@ impl CrabStudioApp {
         };
 
         if schema_name.is_none() {
-            schema_name = self.active_tables.iter().find(|t| t.name.eq_ignore_ascii_case(&table_name)).and_then(|t| t.schema.clone());
+            schema_name = self
+                .active_tables
+                .iter()
+                .find(|t| t.name.eq_ignore_ascii_case(&table_name))
+                .and_then(|t| t.schema.clone());
         }
 
         let family = conn.config.db_type.family();
 
         let empty_cols = Vec::new();
         let empty_rows = Vec::new();
-        let (grid_cols, orig_rows) = if let Some(ref res) = self.table_data.as_ref().or(self.console_result.as_ref()) {
-            (&res.columns, &res.rows)
-        } else {
-            (&empty_cols, &empty_rows)
-        };
+        let (grid_cols, orig_rows) =
+            if let Some(ref res) = self.table_data.as_ref().or(self.console_result.as_ref()) {
+                (&res.columns, &res.rows)
+            } else {
+                (&empty_cols, &empty_rows)
+            };
 
         let plan = generate_review_plan(
             &table_name,
@@ -1237,11 +1422,7 @@ impl CrabStudioApp {
         let deletes_count = plan.deletes_count;
         let reload_sql = if self.active_tab == WorkspaceTab::QueryConsole {
             let s = self.query_editor.read(cx).value().trim().to_string();
-            if !s.is_empty() {
-                Some(s)
-            } else {
-                None
-            }
+            if !s.is_empty() { Some(s) } else { None }
         } else {
             None
         };
@@ -1297,13 +1478,15 @@ impl CrabStudioApp {
     /// Open the create table modal and configure default inputs according to database family
     pub fn open_create_table_modal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(conn) = self.active_connection.as_ref() else {
-            self.status_message = Some("Please connect to a database first before creating a table".to_string());
+            self.status_message =
+                Some("Please connect to a database first before creating a table".to_string());
             cx.notify();
             return;
         };
 
         if conn.config.is_read_only {
-            self.status_message = Some("Cannot create table: connection is in Read-Only mode".to_string());
+            self.status_message =
+                Some("Cannot create table: connection is in Read-Only mode".to_string());
             cx.notify();
             return;
         }
@@ -1475,9 +1658,17 @@ impl CrabStudioApp {
         let default_name = format!("idx_tbl_col_{count}");
         // Default target column to second column if available, else first
         let default_target = if self.create_table_columns.len() > 1 {
-            self.create_table_columns[1].name.read(cx).value().to_string()
+            self.create_table_columns[1]
+                .name
+                .read(cx)
+                .value()
+                .to_string()
         } else if !self.create_table_columns.is_empty() {
-            self.create_table_columns[0].name.read(cx).value().to_string()
+            self.create_table_columns[0]
+                .name
+                .read(cx)
+                .value()
+                .to_string()
         } else {
             String::new()
         };
@@ -1541,7 +1732,10 @@ impl CrabStudioApp {
             let current_raw = index_item.columns.read(cx).value().to_string();
             let mut cols = parse_sql_column_list(&current_raw);
 
-            if let Some(pos) = cols.iter().position(|c| column_matches_index_spec(c, &column_name)) {
+            if let Some(pos) = cols
+                .iter()
+                .position(|c| column_matches_index_spec(c, &column_name))
+            {
                 cols.remove(pos);
             } else {
                 cols.push(column_name);
@@ -1655,7 +1849,12 @@ impl CrabStudioApp {
         self.create_table_error = None;
         cx.notify();
 
-        let new_table_name = self.create_table_name_input.read(cx).value().trim().to_string();
+        let new_table_name = self
+            .create_table_name_input
+            .read(cx)
+            .value()
+            .trim()
+            .to_string();
 
         cx.spawn(async move |this, cx: &mut AsyncApp| {
             let res = conn.execute_batch(&sql).await;
@@ -1665,7 +1864,8 @@ impl CrabStudioApp {
                 match res {
                     Ok(_) => {
                         app.create_table_modal_open = false;
-                        app.status_message = Some(format!("Table '{new_table_name}' created successfully"));
+                        app.status_message =
+                            Some(format!("Table '{new_table_name}' created successfully"));
                         app.refresh_schema(cx);
                         app.active_tab = WorkspaceTab::Schema;
                         cx.notify();
@@ -1729,7 +1929,12 @@ impl CrabStudioApp {
     }
 
     /// Open dialog to edit an existing connection profile
-    pub fn open_edit_connection_dialog(&mut self, conn_id: &str, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn open_edit_connection_dialog(
+        &mut self,
+        conn_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(config) = self.manager.get_config(conn_id) else {
             return;
         };
@@ -1797,10 +2002,18 @@ impl CrabStudioApp {
 
     /// Delete an existing connection profile
     pub fn delete_connection(&mut self, conn_id: &str, cx: &mut Context<Self>) {
-        if self.active_connection.as_ref().is_some_and(|c| c.config.id == conn_id) {
+        if self
+            .active_connection
+            .as_ref()
+            .is_some_and(|c| c.config.id == conn_id)
+        {
             self.disconnect(cx);
         }
-        let config_name = self.manager.get_config(conn_id).map(|c| c.name).unwrap_or_else(|| conn_id.to_string());
+        let config_name = self
+            .manager
+            .get_config(conn_id)
+            .map(|c| c.name)
+            .unwrap_or_else(|| conn_id.to_string());
         if let Err(err) = self.manager.delete_config(conn_id) {
             self.status_message = Some(format!("Failed to delete profile: {err}"));
             cx.notify();
@@ -1820,7 +2033,12 @@ impl CrabStudioApp {
     }
 
     /// Set dialog database type
-    pub fn set_dialog_db_type(&mut self, db_type: DatabaseType, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn set_dialog_db_type(
+        &mut self,
+        db_type: DatabaseType,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.dialog_db_type = db_type;
         self.dialog_test_result = None;
 
@@ -1858,7 +2076,11 @@ impl CrabStudioApp {
         let mut cfg = match self.dialog_db_type.family() {
             DatabaseFamily::Sqlite => {
                 let db_path = self.dialog_database_input.read(cx).value().to_string();
-                let path = if db_path.trim().is_empty() { ":memory:".to_string() } else { db_path };
+                let path = if db_path.trim().is_empty() {
+                    ":memory:".to_string()
+                } else {
+                    db_path
+                };
                 let mut c = ConnectionConfig::sqlite(name, path);
                 c.db_type = self.dialog_db_type;
                 c
@@ -1866,11 +2088,18 @@ impl CrabStudioApp {
             DatabaseFamily::Postgres => {
                 let host = self.dialog_host_input.read(cx).value().to_string();
                 let port_str = self.dialog_port_input.read(cx).value().to_string();
-                let port = port_str.trim().parse::<u16>().unwrap_or_else(|_| self.dialog_db_type.default_port());
+                let port = port_str
+                    .trim()
+                    .parse::<u16>()
+                    .unwrap_or_else(|_| self.dialog_db_type.default_port());
                 let db = self.dialog_database_input.read(cx).value().to_string();
                 let user = self.dialog_user_input.read(cx).value().to_string();
                 let pass_str = self.dialog_pass_input.read(cx).value().to_string();
-                let pass = if pass_str.is_empty() { None } else { Some(pass_str) };
+                let pass = if pass_str.is_empty() {
+                    None
+                } else {
+                    Some(pass_str)
+                };
                 let mut c = ConnectionConfig::postgres(name, host, port, db, user, pass);
                 c.db_type = self.dialog_db_type;
                 c
@@ -1878,11 +2107,18 @@ impl CrabStudioApp {
             DatabaseFamily::MySql => {
                 let host = self.dialog_host_input.read(cx).value().to_string();
                 let port_str = self.dialog_port_input.read(cx).value().to_string();
-                let port = port_str.trim().parse::<u16>().unwrap_or_else(|_| self.dialog_db_type.default_port());
+                let port = port_str
+                    .trim()
+                    .parse::<u16>()
+                    .unwrap_or_else(|_| self.dialog_db_type.default_port());
                 let db = self.dialog_database_input.read(cx).value().to_string();
                 let user = self.dialog_user_input.read(cx).value().to_string();
                 let pass_str = self.dialog_pass_input.read(cx).value().to_string();
-                let pass = if pass_str.is_empty() { None } else { Some(pass_str) };
+                let pass = if pass_str.is_empty() {
+                    None
+                } else {
+                    Some(pass_str)
+                };
                 let mut c = ConnectionConfig::mysql(name, host, port, db, user, pass);
                 c.db_type = self.dialog_db_type;
                 c
@@ -1906,17 +2142,22 @@ impl CrabStudioApp {
                 app.dialog_is_testing = false;
                 match res {
                     Ok(status) => {
-                        let version = status.server_version.unwrap_or_else(|| "Unknown".to_string());
+                        let version = status
+                            .server_version
+                            .unwrap_or_else(|| "Unknown".to_string());
                         let ping = status.ping_ms.unwrap_or(0);
-                        app.dialog_test_result = Some(Ok(format!("Connected! {version} ({ping} ms)")));
+                        app.dialog_test_result =
+                            Some(Ok(format!("Connected! {version} ({ping} ms)")));
                     }
                     Err(err) => {
                         app.dialog_test_result = Some(Err(format!("Connection failed: {err}")));
                     }
                 }
                 cx.notify();
-            }).ok();
-        }).detach();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// Save connection configured in dialog and connect
@@ -2066,7 +2307,8 @@ impl CrabStudioApp {
                 handle.update(cx, |this, cx| {
                     let len = val.len();
                     cx.write_to_clipboard(ClipboardItem::new_string(val));
-                    this.status_message = Some(format!("Copied value of column '{col_name}' ({len} chars)"));
+                    this.status_message =
+                        Some(format!("Copied value of column '{col_name}' ({len} chars)"));
                     cx.notify();
                 });
             }
@@ -2078,7 +2320,8 @@ impl CrabStudioApp {
                 handle.update(cx, |this, cx| {
                     let len = json_str.len();
                     cx.write_to_clipboard(ClipboardItem::new_string(json_str));
-                    this.status_message = Some(format!("Copied row #{} as JSON ({len} bytes)", row_idx + 1));
+                    this.status_message =
+                        Some(format!("Copied row #{} as JSON ({len} bytes)", row_idx + 1));
                     cx.notify();
                 });
             }
@@ -2090,7 +2333,8 @@ impl CrabStudioApp {
                 handle.update(cx, |this, cx| {
                     let len = tsv_str.len();
                     cx.write_to_clipboard(ClipboardItem::new_string(tsv_str));
-                    this.status_message = Some(format!("Copied row #{} as TSV ({len} bytes)", row_idx + 1));
+                    this.status_message =
+                        Some(format!("Copied row #{} as TSV ({len} bytes)", row_idx + 1));
                     cx.notify();
                 });
             }
@@ -2190,10 +2434,23 @@ impl Render for CrabStudioApp {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let active_conn_id = self.active_connection.as_ref().map(|c| c.config.id.clone());
         let is_connected = self.active_connection.is_some();
-        let is_read_only = self.active_connection.as_ref().map(|c| c.config.is_read_only).unwrap_or(false);
-        let conn_name = self.active_connection.as_ref().map(|c| c.config.name.clone());
-        let db_type_str = self.active_connection.as_ref().map(|c| c.config.db_type.to_string());
-        let active_status = self.active_connection.as_ref().and_then(|c| c.status.clone());
+        let is_read_only = self
+            .active_connection
+            .as_ref()
+            .map(|c| c.config.is_read_only)
+            .unwrap_or(false);
+        let conn_name = self
+            .active_connection
+            .as_ref()
+            .map(|c| c.config.name.clone());
+        let db_type_str = self
+            .active_connection
+            .as_ref()
+            .map(|c| c.config.db_type.to_string());
+        let active_status = self
+            .active_connection
+            .as_ref()
+            .and_then(|c| c.status.clone());
 
         let app_handle = cx.entity().clone();
 
@@ -2540,8 +2797,12 @@ impl Render for CrabStudioApp {
                 };
 
                 let connection_label = match (
-                    self.active_connection.as_ref().map(|c| c.config.name.clone()),
-                    self.active_connection.as_ref().map(|c| c.config.database.clone()),
+                    self.active_connection
+                        .as_ref()
+                        .map(|c| c.config.name.clone()),
+                    self.active_connection
+                        .as_ref()
+                        .map(|c| c.config.database.clone()),
                 ) {
                     (Some(name), Some(db)) if !db.is_empty() => Some(format!("{name} / {db}")),
                     (Some(name), _) => Some(name),
@@ -2578,21 +2839,23 @@ impl Render for CrabStudioApp {
                     for conn in self.saved_connections.iter().take(4) {
                         let conn_id = conn.id.clone();
                         let handle = app_handle.clone();
-                        let icon = crate::ui::components::connection_dialog::database_icon(conn.db_type);
-                        let chip = Button::new(ElementId::Name(format!("quick_conn_{}", conn.id).into()))
-                            .outline()
-                            .small()
-                            .flex_shrink(1.0)
-                            .min_w(px(32.0))
-                            .overflow_hidden()
-                            .icon(icon)
-                            .label(format!("Connect: {}", conn.name))
-                            .tooltip(format!("Connect to {}", conn.name))
-                            .on_click(move |_, _, cx| {
-                                handle.update(cx, |this, cx| {
-                                    this.select_connection(&conn_id, cx);
+                        let icon =
+                            crate::ui::components::connection_dialog::database_icon(conn.db_type);
+                        let chip =
+                            Button::new(ElementId::Name(format!("quick_conn_{}", conn.id).into()))
+                                .outline()
+                                .small()
+                                .flex_shrink(1.0)
+                                .min_w(px(32.0))
+                                .overflow_hidden()
+                                .icon(icon)
+                                .label(format!("Connect: {}", conn.name))
+                                .tooltip(format!("Connect to {}", conn.name))
+                                .on_click(move |_, _, cx| {
+                                    handle.update(cx, |this, cx| {
+                                        this.select_connection(&conn_id, cx);
+                                    });
                                 });
-                            });
                         conn_chips = conn_chips.child(chip);
                     }
 
@@ -2652,7 +2915,10 @@ impl Render for CrabStudioApp {
                     .into_any_element()
             }
             WorkspaceTab::DataGrid => {
-                let grid_data = self.table_data.clone().or_else(|| self.console_result.clone());
+                let grid_data = self
+                    .table_data
+                    .clone()
+                    .or_else(|| self.console_result.clone());
                 self.build_data_grid(
                     &app_handle,
                     grid_data,
@@ -2714,7 +2980,8 @@ impl Render for CrabStudioApp {
                         handle.update(cx, |this, cx| {
                             let len = sql.len();
                             cx.write_to_clipboard(ClipboardItem::new_string(sql));
-                            this.status_message = Some(format!("Copied SQL to clipboard ({len} bytes)"));
+                            this.status_message =
+                                Some(format!("Copied SQL to clipboard ({len} bytes)"));
                             cx.notify();
                         });
                     }
@@ -2744,11 +3011,18 @@ impl Render for CrabStudioApp {
         // Footer status bar
         let query_row_count = match self.active_tab {
             WorkspaceTab::QueryConsole => self.console_result.as_ref().map(|r| r.rows.len()),
-            WorkspaceTab::DataGrid => self.table_data.as_ref().or(self.console_result.as_ref()).map(|r| r.rows.len()),
+            WorkspaceTab::DataGrid => self
+                .table_data
+                .as_ref()
+                .or(self.console_result.as_ref())
+                .map(|r| r.rows.len()),
             WorkspaceTab::Schema => Some(self.schema_columns.len()),
             WorkspaceTab::History => Some(self.history_manager.items().len()),
         };
-        let query_duration = self.console_result.as_ref().and_then(|r| r.execution_time_ms);
+        let query_duration = self
+            .console_result
+            .as_ref()
+            .and_then(|r| r.execution_time_ms);
 
         let mut status_bar = AppStatusBar::new()
             .connected(is_connected)
@@ -2857,7 +3131,8 @@ impl Render for CrabStudioApp {
                         handle.update(cx, |this, cx| {
                             cx.write_to_clipboard(ClipboardItem::new_string(sql));
                             this.sql_review_copied = true;
-                            this.status_message = Some("Copied SQL script to clipboard".to_string());
+                            this.status_message =
+                                Some("Copied SQL script to clipboard".to_string());
                             cx.notify();
                         });
                     }
@@ -2956,7 +3231,8 @@ impl Render for CrabStudioApp {
                         handle.update(cx, |this, cx| {
                             cx.write_to_clipboard(ClipboardItem::new_string(sql));
                             this.create_table_copied = true;
-                            this.status_message = Some("Copied Create Table DDL to clipboard".to_string());
+                            this.status_message =
+                                Some("Copied Create Table DDL to clipboard".to_string());
                             cx.notify();
                         });
                     }
@@ -3053,24 +3329,33 @@ impl Render for CrabStudioApp {
                 this.run_explain(cx);
             }))
             .on_action(cx.listener(|this, _: &SaveGridChanges, _, cx| {
-                if (this.active_tab == WorkspaceTab::DataGrid || this.active_tab == WorkspaceTab::QueryConsole) && this.grid_changeset.is_dirty() {
+                if (this.active_tab == WorkspaceTab::DataGrid
+                    || this.active_tab == WorkspaceTab::QueryConsole)
+                    && this.grid_changeset.is_dirty()
+                {
                     this.open_sql_review_modal(cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &AddNewRow, window, cx| {
-                if this.active_tab == WorkspaceTab::DataGrid || this.active_tab == WorkspaceTab::QueryConsole {
+                if this.active_tab == WorkspaceTab::DataGrid
+                    || this.active_tab == WorkspaceTab::QueryConsole
+                {
                     this.add_new_grid_row(window, cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &DuplicateGridRow, window, cx| {
-                if this.active_tab == WorkspaceTab::DataGrid || this.active_tab == WorkspaceTab::QueryConsole {
+                if this.active_tab == WorkspaceTab::DataGrid
+                    || this.active_tab == WorkspaceTab::QueryConsole
+                {
                     if let Some(coord) = this.grid_selected_cell {
                         this.duplicate_grid_row(coord, window, cx);
                     }
                 }
             }))
             .on_action(cx.listener(|this, _: &DeleteGridRow, _, cx| {
-                if this.active_tab == WorkspaceTab::DataGrid || this.active_tab == WorkspaceTab::QueryConsole {
+                if this.active_tab == WorkspaceTab::DataGrid
+                    || this.active_tab == WorkspaceTab::QueryConsole
+                {
                     if let Some(coord) = this.grid_selected_cell {
                         if coord.is_inserted {
                             this.discard_inserted_row(coord.row_idx, cx);
@@ -3113,7 +3398,14 @@ impl Render for CrabStudioApp {
                             .min_w_0()
                             .min_h_0()
                             .child(tabs_bar)
-                            .child(v_flex().size_full().flex_1().min_h_0().w_full().child(main_content)),
+                            .child(
+                                v_flex()
+                                    .size_full()
+                                    .flex_1()
+                                    .min_h_0()
+                                    .w_full()
+                                    .child(main_content),
+                            ),
                     ),
             )
             .child(status_bar)

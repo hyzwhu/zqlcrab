@@ -109,7 +109,8 @@ pub fn export_csv(result: &QueryResult, include_headers: bool) -> String {
 }
 
 fn write_csv_cell(out: &mut String, text: &str) {
-    let needs_quotes = text.contains(',') || text.contains('"') || text.contains('\n') || text.contains('\r');
+    let needs_quotes =
+        text.contains(',') || text.contains('"') || text.contains('\n') || text.contains('\r');
     if needs_quotes {
         out.push('"');
         for ch in text.chars() {
@@ -215,7 +216,9 @@ pub fn export_markdown(result: &QueryResult) -> String {
 }
 
 fn escape_markdown_cell(text: &str) -> String {
-    text.replace('|', "\\|").replace('\n', " ").replace('\r', "")
+    text.replace('|', "\\|")
+        .replace('\n', " ")
+        .replace('\r', "")
 }
 
 /// Serializes query results into batched SQL INSERT statements.
@@ -235,7 +238,10 @@ pub fn export_sql_inserts(result: &QueryResult, table_name: &str, batch_size: us
         .join(", ");
 
     for chunk in result.rows.chunks(batch) {
-        out.push_str(&format!("INSERT INTO \"{}\" ({}) VALUES\n", table_name, columns_part));
+        out.push_str(&format!(
+            "INSERT INTO \"{}\" ({}) VALUES\n",
+            table_name, columns_part
+        ));
         for (row_idx, row) in chunk.iter().enumerate() {
             out.push_str("  (");
             for (col_idx, val) in row.iter().enumerate() {
@@ -285,7 +291,11 @@ mod tests {
     fn sample_query_result() -> QueryResult {
         QueryResult {
             columns: vec!["id".to_string(), "name".to_string(), "active".to_string()],
-            column_types: vec!["INTEGER".to_string(), "TEXT".to_string(), "BOOLEAN".to_string()],
+            column_types: vec![
+                "INTEGER".to_string(),
+                "TEXT".to_string(),
+                "BOOLEAN".to_string(),
+            ],
             rows: vec![
                 vec![
                     QueryValue::Int(1),

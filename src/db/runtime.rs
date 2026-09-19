@@ -5,10 +5,10 @@
 //! reactor context for socket polling, timers, and background tasks.
 //! This module provides a shared multi-thread Tokio runtime and bridging routines.
 
+use crate::db::error::{DbError, DbResult};
 use std::future::Future;
 use std::sync::LazyLock;
 use tokio::runtime::Runtime;
-use crate::db::error::{DbError, DbResult};
 
 static TOKIO_RT: LazyLock<Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_multi_thread()
@@ -51,9 +51,7 @@ mod tests {
             assert!(tokio::runtime::Handle::try_current().is_err());
 
             // Using futures::executor::block_on or polling run_on_tokio should work cleanly
-            let res = tokio_runtime().block_on(async {
-                run_on_tokio(async { Ok(42) }).await
-            });
+            let res = tokio_runtime().block_on(async { run_on_tokio(async { Ok(42) }).await });
             assert_eq!(res.unwrap(), 42);
         });
 
@@ -71,7 +69,10 @@ mod tests {
             Some("skillup_local_test".to_string()),
         );
         let res = ActiveConnection::connect_config(config).await;
-        println!("test_active_connection_connect_docker_mysql result: {:?}", res.is_ok());
+        println!(
+            "test_active_connection_connect_docker_mysql result: {:?}",
+            res.is_ok()
+        );
         assert!(res.is_ok());
     }
 
@@ -84,10 +85,16 @@ mod tests {
             // Connect to an offline port.
             // Before this fix, Pool::new inside connect_config panicked with:
             // "there is no reactor running, must be called from the context of a Tokio 1.x runtime"
-            let cfg = ConnectionConfig::mysql("Test Offline MySQL", "127.0.0.1", 59999, "none", "root", None);
-            let res = tokio_runtime().block_on(async {
-                ActiveConnection::connect_config(cfg).await
-            });
+            let cfg = ConnectionConfig::mysql(
+                "Test Offline MySQL",
+                "127.0.0.1",
+                59999,
+                "none",
+                "root",
+                None,
+            );
+            let res =
+                tokio_runtime().block_on(async { ActiveConnection::connect_config(cfg).await });
 
             // Must return an Err cleanly instead of panicking/aborting
             assert!(res.is_err());
@@ -96,4 +103,3 @@ mod tests {
         handle.join().expect("thread must not panic or abort");
     }
 }
-

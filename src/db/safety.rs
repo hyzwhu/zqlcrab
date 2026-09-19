@@ -73,9 +73,9 @@ impl QuerySafetyValidator {
 
         // Check prominent mutating or DDL keywords
         const MUTATING_KEYWORDS: &[&str] = &[
-            "DROP", "TRUNCATE", "ALTER", "CREATE", "DELETE", "UPDATE", "INSERT",
-            "REPLACE", "MERGE", "UPSERT", "GRANT", "REVOKE", "RENAME", "EXEC",
-            "EXECUTE", "CALL", "VACUUM", "ATTACH", "DETACH",
+            "DROP", "TRUNCATE", "ALTER", "CREATE", "DELETE", "UPDATE", "INSERT", "REPLACE",
+            "MERGE", "UPSERT", "GRANT", "REVOKE", "RENAME", "EXEC", "EXECUTE", "CALL", "VACUUM",
+            "ATTACH", "DETACH",
         ];
 
         for word in &words {
@@ -141,10 +141,18 @@ mod tests {
     fn test_comment_prefixed_select_is_result_set() {
         let sql = "-- CrabStudio SQL Workspace\n-- Type your SQL queries here\nSELECT 1 AS id, 'Welcome' AS message;";
         assert!(QuerySafetyValidator::is_result_set_query(sql));
-        assert!(QuerySafetyValidator::is_result_set_query("WITH t AS (SELECT 1) SELECT * FROM t"));
-        assert!(QuerySafetyValidator::is_result_set_query("PRAGMA table_info(users)"));
-        assert!(!QuerySafetyValidator::is_result_set_query("INSERT INTO users(name) VALUES ('a')"));
-        assert!(!QuerySafetyValidator::is_result_set_query("-- only a comment"));
+        assert!(QuerySafetyValidator::is_result_set_query(
+            "WITH t AS (SELECT 1) SELECT * FROM t"
+        ));
+        assert!(QuerySafetyValidator::is_result_set_query(
+            "PRAGMA table_info(users)"
+        ));
+        assert!(!QuerySafetyValidator::is_result_set_query(
+            "INSERT INTO users(name) VALUES ('a')"
+        ));
+        assert!(!QuerySafetyValidator::is_result_set_query(
+            "-- only a comment"
+        ));
     }
 
     #[test]
@@ -154,8 +162,12 @@ mod tests {
         assert!(QuerySafetyValidator::validate_query("SHOW TABLES", true).is_ok());
 
         assert!(QuerySafetyValidator::validate_query("DROP TABLE users", true).is_err());
-        assert!(QuerySafetyValidator::validate_query("DELETE FROM users WHERE id = 1", true).is_err());
-        assert!(QuerySafetyValidator::validate_query("UPDATE users SET name = 'Bob'", true).is_err());
+        assert!(
+            QuerySafetyValidator::validate_query("DELETE FROM users WHERE id = 1", true).is_err()
+        );
+        assert!(
+            QuerySafetyValidator::validate_query("UPDATE users SET name = 'Bob'", true).is_err()
+        );
         assert!(QuerySafetyValidator::validate_query("CREATE TABLE t(x int)", true).is_err());
         assert!(QuerySafetyValidator::validate_query("TRUNCATE TABLE logs", true).is_err());
 
@@ -170,7 +182,9 @@ mod tests {
             Some("Unbounded DELETE statement without a WHERE clause")
         );
         assert_eq!(
-            QuerySafetyValidator::is_dangerous_unbounded_mutation("DELETE FROM orders WHERE id = 1"),
+            QuerySafetyValidator::is_dangerous_unbounded_mutation(
+                "DELETE FROM orders WHERE id = 1"
+            ),
             None
         );
         assert_eq!(
@@ -178,7 +192,9 @@ mod tests {
             Some("Unbounded UPDATE statement without a WHERE clause")
         );
         assert_eq!(
-            QuerySafetyValidator::is_dangerous_unbounded_mutation("UPDATE orders SET status = 1 WHERE id = 2"),
+            QuerySafetyValidator::is_dangerous_unbounded_mutation(
+                "UPDATE orders SET status = 1 WHERE id = 2"
+            ),
             None
         );
     }

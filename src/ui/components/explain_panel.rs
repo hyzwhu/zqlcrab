@@ -6,8 +6,8 @@ use gpui_kit::assets::IconName;
 use gpui_kit::base::{h_flex, v_flex};
 use gpui_kit::component::{
     Icon, Sizable as _,
-    table::{Table, TableBody, TableCell, TableHead, TableHeader, TableRow},
     tab::{Tab, TabBar},
+    table::{Table, TableBody, TableCell, TableHead, TableHeader, TableRow},
 };
 use gpui_kit::gpui::{
     App, FontWeight, InteractiveElement as _, IntoElement, ParentElement, RenderOnce,
@@ -98,12 +98,7 @@ impl RenderOnce for ExplainPanel {
                                 .size(px(14.0))
                                 .text_color(ThemeColors::ERROR),
                         )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(ThemeColors::ERROR)
-                                .child(err),
-                        ),
+                        .child(div().text_xs().text_color(ThemeColors::ERROR).child(err)),
                 )
                 .into_any_element();
         }
@@ -252,8 +247,8 @@ fn render_tree(plan: &ExplainPlan) -> impl IntoElement {
         .gap_1();
 
     for (depth, node) in plan.flatten() {
-        let is_hot = expensive_type.as_deref() == Some(node.node_type.as_str())
-            && node.total_cost.is_some();
+        let is_hot =
+            expensive_type.as_deref() == Some(node.node_type.as_str()) && node.total_cost.is_some();
         let marker = if is_hot {
             ThemeColors::ERROR
         } else if node.total_cost.is_some() {
@@ -273,13 +268,7 @@ fn render_tree(plan: &ExplainPlan) -> impl IntoElement {
             .bg(ThemeColors::BG_SURFACE)
             .items_center()
             .gap_2()
-            .child(
-                div()
-                    .w(px(8.0))
-                    .h(px(8.0))
-                    .rounded_full()
-                    .bg(marker),
-            )
+            .child(div().w(px(8.0)).h(px(8.0)).rounded_full().bg(marker))
             .child(
                 div()
                     .px_1p5()
@@ -311,12 +300,7 @@ fn render_tree(plan: &ExplainPlan) -> impl IntoElement {
         }
 
         if let Some(rows) = node.rows_label() {
-            row = row.child(
-                div()
-                    .text_xs()
-                    .text_color(ThemeColors::WARNING)
-                    .child(rows),
-            );
+            row = row.child(div().text_xs().text_color(ThemeColors::WARNING).child(rows));
         }
 
         if !node.details.is_empty() && node.relation.is_none() {
@@ -340,9 +324,7 @@ fn render_summary(plan: &ExplainPlan) -> impl IntoElement {
         body = body.child(
             TableRow::new()
                 .child(TableCell::new().child(node.display_name()))
-                .child(
-                    TableCell::new().child(node.relation.clone().unwrap_or_else(|| "-".into())),
-                )
+                .child(TableCell::new().child(node.relation.clone().unwrap_or_else(|| "-".into())))
                 .child(TableCell::new().child(node.index.clone().unwrap_or_else(|| "-".into())))
                 .child(
                     TableCell::new().child(
@@ -364,13 +346,11 @@ fn render_summary(plan: &ExplainPlan) -> impl IntoElement {
                             .unwrap_or_else(|| "-".into()),
                     ),
                 )
-                .child(
-                    TableCell::new().child(if node.details.is_empty() {
-                        "-".to_string()
-                    } else {
-                        node.details.clone()
-                    }),
-                ),
+                .child(TableCell::new().child(if node.details.is_empty() {
+                    "-".to_string()
+                } else {
+                    node.details.clone()
+                })),
         );
     }
 

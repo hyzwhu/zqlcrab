@@ -76,13 +76,7 @@ impl RenderOnce for AppStatusBar {
         let left_part = h_flex()
             .items_center()
             .gap_2()
-            .child(
-                div()
-                    .w(px(8.0))
-                    .h(px(8.0))
-                    .rounded_full()
-                    .bg(status_color),
-            )
+            .child(div().w(px(8.0)).h(px(8.0)).rounded_full().bg(status_color))
             .child(
                 div()
                     .text_xs()
@@ -172,8 +166,6 @@ impl RenderOnce for AppStatusBar {
                     .child("zqlcrab v0.1.0"),
             );
 
-        StatusBar::new()
-            .left(left_part)
-            .right(right_part)
+        StatusBar::new().left(left_part).right(right_part)
     }
 }

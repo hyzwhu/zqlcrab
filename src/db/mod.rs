@@ -12,15 +12,15 @@ pub mod mysql;
 pub mod postgres;
 pub mod runtime;
 pub mod safety;
-pub mod sqlite;
 pub mod sql_format;
 pub mod sql_gen;
+pub mod sqlite;
 pub mod types;
 
 pub use adapter::DatabaseAdapter;
 pub use changeset::{CellEdit, GridChangeset, RowDeletion};
 pub use error::{DbError, DbResult};
-pub use export::{export_result, ExportFormat, ExportOptions};
+pub use export::{ExportFormat, ExportOptions, export_result};
 pub use handle::ActiveConnection;
 pub use history::{QueryHistoryItem, QueryHistoryManager, QueryHistoryStatus};
 pub use manager::ConnectionManager;
@@ -28,8 +28,8 @@ pub use mysql::MysqlAdapter;
 pub use postgres::PostgresAdapter;
 pub use runtime::{run_on_tokio, tokio_runtime};
 pub use safety::QuerySafetyValidator;
-pub use sqlite::SqliteAdapter;
 pub use sql_gen::{
-    generate_create_table_sql, generate_review_plan, ColumnDef, CreateTableDef, SqlReviewPlan,
+    ColumnDef, CreateTableDef, SqlReviewPlan, generate_create_table_sql, generate_review_plan,
 };
+pub use sqlite::SqliteAdapter;
 pub use types::*;
