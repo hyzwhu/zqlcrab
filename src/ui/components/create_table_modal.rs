@@ -1,5 +1,6 @@
 //! Create Table modal dialog for visual schema design and DDL execution.
 
+use crate::db::sql_gen::TableIndexType;
 use crate::db::types::DatabaseFamily;
 use crate::ui::theme::ThemeColors;
 use gpui_kit::assets::IconName;
@@ -29,6 +30,15 @@ pub struct CreateTableColumnState {
     pub is_nullable: bool,
     pub is_auto_increment: bool,
     pub default_val: Entity<InputState>,
+    pub comment: Entity<InputState>,
+}
+
+/// State representation of an individual index row in the Create Table designer.
+#[derive(Clone)]
+pub struct CreateTableIndexState {
+    pub name: Entity<InputState>,
+    pub index_type: TableIndexType,
+    pub columns: Entity<InputState>,
 }
 
 #[derive(IntoElement)]
@@ -39,6 +49,7 @@ pub struct CreateTableModal {
     schema_input: Entity<InputState>,
     comment_input: Entity<InputState>,
     columns: Vec<CreateTableColumnState>,
+    indexes: Vec<CreateTableIndexState>,
     preview_sql: String,
     validation_error: Option<String>,
     error_message: Option<String>,
@@ -55,6 +66,9 @@ pub struct CreateTableModal {
     on_open_in_console: Option<StringCallback>,
     on_execute: Option<ActionCallback>,
     on_cancel: Option<ActionCallback>,
+    on_add_index: Option<ActionCallback>,
+    on_remove_index: Option<IndexActionCallback>,
+    on_toggle_index_type: Option<IndexActionCallback>,
 }
 
 impl CreateTableModal {
@@ -74,6 +88,7 @@ impl CreateTableModal {
             schema_input: schema_input.clone(),
             comment_input: comment_input.clone(),
             columns,
+            indexes: Vec::new(),
             preview_sql,
             validation_error: None,
             error_message: None,
@@ -89,7 +104,39 @@ impl CreateTableModal {
             on_open_in_console: None,
             on_execute: None,
             on_cancel: None,
+            on_add_index: None,
+            on_remove_index: None,
+            on_toggle_index_type: None,
         }
+    }
+
+    pub fn indexes(mut self, indexes: Vec<CreateTableIndexState>) -> Self {
+        self.indexes = indexes;
+        self
+    }
+
+    pub fn on_add_index<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&mut Window, &mut App) + 'static,
+    {
+        self.on_add_index = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_remove_index<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(usize, &mut Window, &mut App) + 'static,
+    {
+        self.on_remove_index = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_toggle_index_type<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(usize, &mut Window, &mut App) + 'static,
+    {
+        self.on_toggle_index_type = Some(Rc::new(handler));
+        self
     }
 
     pub fn validation_error(mut self, err: Option<String>) -> Self {
@@ -430,7 +477,7 @@ impl RenderOnce for CreateTableModal {
                 // Column Name
                 .child(
                     div()
-                        .w(px(160.0))
+                        .w(px(150.0))
                         .child(Input::new(&col.name).small().w_full()),
                 )
                 // Data Type
@@ -448,14 +495,137 @@ impl RenderOnce for CreateTableModal {
                 // Default Value Input
                 .child(
                     div()
-                        .flex_1()
-                        .min_w(px(120.0))
+                        .w(px(130.0))
                         .child(Input::new(&col.default_val).small().w_full()),
+                )
+                // Column Comment Input
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(130.0))
+                        .child(Input::new(&col.comment).small().w_full()),
                 )
                 // Actions
                 .child(div().w(px(32.0)).items_center().justify_center().child(del_btn));
 
             columns_list = columns_list.child(row);
+        }
+
+        // Render index rows
+        let index_count = self.indexes.len();
+        let mut add_idx_btn = Button::new("add_idx_btn")
+            .ghost()
+            .xsmall()
+            .icon(IconName::Plus)
+            .label("Add Index");
+        if let Some(ref on_add_idx) = self.on_add_index {
+            let on_add_idx = on_add_idx.clone();
+            add_idx_btn = add_idx_btn.on_click(move |_, window, cx| {
+                on_add_idx(window, cx);
+            });
+        }
+
+        let remove_idx_handler = self.on_remove_index.clone();
+        let toggle_type_handler = self.on_toggle_index_type.clone();
+
+        let mut indexes_list = v_flex().w_full().gap_1p5();
+        if self.indexes.is_empty() {
+            indexes_list = indexes_list.child(
+                div()
+                    .w_full()
+                    .py_2()
+                    .px_3()
+                    .rounded_md()
+                    .bg(ThemeColors::BG_APP)
+                    .border_1()
+                    .border_color(ThemeColors::BORDER.opacity(0.5))
+                    .text_xs()
+                    .text_color(ThemeColors::TEXT_FAINT)
+                    .child("No indexes defined. Click '+ Add Index' to define indexes on columns."),
+            );
+        } else {
+            for (idx, index_item) in self.indexes.iter().enumerate() {
+                let idx_row = idx;
+                let mut type_btn = Button::new(("idx_type_btn", idx)).xsmall();
+                match index_item.index_type {
+                    TableIndexType::Unique => {
+                        type_btn = type_btn
+                            .primary()
+                            .label("UNIQUE")
+                            .tooltip("Index Type: UNIQUE (Click to toggle Normal)");
+                    }
+                    TableIndexType::Normal => {
+                        type_btn = type_btn
+                            .ghost()
+                            .label("INDEX")
+                            .tooltip("Index Type: INDEX (Click to toggle Unique)");
+                    }
+                }
+                if let Some(ref on_tog) = toggle_type_handler {
+                    let on_tog = on_tog.clone();
+                    type_btn = type_btn.on_click(move |_, window, cx| {
+                        on_tog(idx_row, window, cx);
+                    });
+                }
+
+                let mut del_btn = Button::new(("del_idx_btn", idx))
+                    .ghost()
+                    .xsmall()
+                    .icon(IconName::Trash)
+                    .tooltip("Remove Index");
+                if let Some(ref on_rem) = remove_idx_handler {
+                    let on_rem = on_rem.clone();
+                    del_btn = del_btn.on_click(move |_, window, cx| {
+                        on_rem(idx_row, window, cx);
+                    });
+                }
+
+                let row = h_flex()
+                    .w_full()
+                    .items_center()
+                    .gap_2()
+                    .px_2()
+                    .py_1()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(ThemeColors::BORDER)
+                    .bg(ThemeColors::BG_APP)
+                    .child(
+                        div()
+                            .w(px(20.0))
+                            .text_xs()
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(ThemeColors::TEXT_FAINT)
+                            .child(format!("{}", idx + 1)),
+                    )
+                    .child(
+                        div()
+                            .w(px(180.0))
+                            .child(Input::new(&index_item.name).small().w_full()),
+                    )
+                    .child(
+                        div()
+                            .w(px(80.0))
+                            .items_center()
+                            .justify_center()
+                            .child(type_btn),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(180.0))
+                            .child(Input::new(&index_item.columns).small().w_full()),
+                    )
+                    .child(
+                        div()
+                            .w(px(32.0))
+                            .items_center()
+                            .justify_center()
+                            .child(del_btn),
+                    );
+
+                indexes_list = indexes_list.child(row);
+            }
         }
 
         // Live SQL Preview lines
@@ -527,9 +697,9 @@ impl RenderOnce for CreateTableModal {
 
         // Modal card
         let modal = v_flex()
-            .w(px(840.0))
-            .max_w(px(980.0))
-            .max_h(px(720.0))
+            .w(px(940.0))
+            .max_w(px(1080.0))
+            .max_h(px(760.0))
             .bg(ThemeColors::BG_SURFACE)
             .border_1()
             .border_color(ThemeColors::BORDER)
@@ -768,17 +938,75 @@ impl RenderOnce for CreateTableModal {
                                     .border_color(ThemeColors::BORDER)
                                     .rounded_t_md()
                                     .child(div().w(px(20.0)).text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("#"))
-                                    .child(div().w(px(160.0)).text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("NAME"))
+                                    .child(div().w(px(150.0)).text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("NAME"))
                                     .child(div().w(px(130.0)).text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("TYPE"))
                                     .child(div().w(px(42.0)).items_center().justify_center().child(div().text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("PK")))
                                     .child(div().w(px(48.0)).items_center().justify_center().child(div().text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("NULL")))
                                     .child(div().w(px(42.0)).items_center().justify_center().child(div().text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("AUTO")))
-                                    .child(div().flex_1().min_w(px(120.0)).text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("DEFAULT VALUE"))
+                                    .child(div().w(px(130.0)).text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("DEFAULT VALUE"))
+                                    .child(div().flex_1().min_w(px(130.0)).text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("COMMENT"))
                                     .child(div().w(px(32.0)).items_center().justify_center().child(div().text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("DEL"))),
                             )
                             .child(columns_list),
                     )
-                    // Section 3: Live SQL Preview
+                    // Section 3: Indexes builder
+                    .child(
+                        v_flex()
+                            .w_full()
+                            .gap_1p5()
+                            .child(
+                                h_flex()
+                                    .w_full()
+                                    .justify_between()
+                                    .items_center()
+                                    .child(
+                                        h_flex()
+                                            .items_center()
+                                            .gap_2()
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .font_weight(FontWeight::BOLD)
+                                                    .text_color(ThemeColors::TEXT_PRIMARY)
+                                                    .child("Indexes"),
+                                            )
+                                            .child(
+                                                div()
+                                                    .px_1p5()
+                                                    .py_0p5()
+                                                    .rounded_full()
+                                                    .bg(ThemeColors::BG_SURFACE_ACTIVE)
+                                                    .border_1()
+                                                    .border_color(ThemeColors::BORDER)
+                                                    .text_xs()
+                                                    .font_weight(FontWeight::SEMIBOLD)
+                                                    .text_color(ThemeColors::TEXT_MUTED)
+                                                    .child(format!("{index_count}")),
+                                            ),
+                                    )
+                                    .child(add_idx_btn),
+                            )
+                            // Indexes list headers
+                            .child(
+                                h_flex()
+                                    .w_full()
+                                    .items_center()
+                                    .gap_2()
+                                    .px_2()
+                                    .py_1()
+                                    .bg(ThemeColors::BG_SURFACE_ACTIVE)
+                                    .border_1()
+                                    .border_color(ThemeColors::BORDER)
+                                    .rounded_t_md()
+                                    .child(div().w(px(20.0)).text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("#"))
+                                    .child(div().w(px(180.0)).text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("INDEX NAME"))
+                                    .child(div().w(px(80.0)).items_center().justify_center().child(div().text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("TYPE")))
+                                    .child(div().flex_1().min_w(px(180.0)).text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("COLUMNS (comma-separated)"))
+                                    .child(div().w(px(32.0)).items_center().justify_center().child(div().text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("DEL"))),
+                            )
+                            .child(indexes_list),
+                    )
+                    // Section 4: Live SQL Preview
                     .child(
                         v_flex()
                             .w_full()

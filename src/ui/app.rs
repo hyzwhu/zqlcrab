@@ -9,14 +9,14 @@ use crate::db::manager::ConnectionManager;
 use crate::db::sql_format::format_sql;
 use crate::db::sql_gen::{
     extract_table_from_sql, generate_create_table_sql, generate_review_plan, ColumnDef,
-    CreateTableDef, SqlReviewPlan,
+    CreateTableDef, SqlReviewPlan, TableIndexDef, TableIndexType,
 };
 use crate::db::types::{
     ColumnInfo, ConnectionConfig, DatabaseFamily, DatabaseType, IndexInfo, QueryResult,
     QueryValue, SortDirection, TableInfo,
 };
 use crate::ui::components::{
-    create_table_modal::{CreateTableColumnState, CreateTableModal},
+    create_table_modal::{CreateTableColumnState, CreateTableIndexState, CreateTableModal},
     data_grid::GridCellCoord,
     AppStatusBar, ConnectionDialog, ConsoleBottomTab, DataGrid, ExplainViewMode, QueryConsole,
     QueryHistoryView, SchemaViewer, Sidebar, SqlReviewModal,
@@ -186,6 +186,7 @@ pub struct CrabStudioApp {
     create_table_schema_input: Entity<InputState>,
     create_table_comment_input: Entity<InputState>,
     create_table_columns: Vec<CreateTableColumnState>,
+    create_table_indexes: Vec<CreateTableIndexState>,
     create_table_is_executing: bool,
     create_table_error: Option<String>,
     create_table_copied: bool,
@@ -274,10 +275,12 @@ impl CrabStudioApp {
         let col1_name = cx.new(|cx| InputState::new(window, cx).default_value("id"));
         let col1_type = cx.new(|cx| InputState::new(window, cx).default_value("INTEGER"));
         let col1_def = cx.new(|cx| InputState::new(window, cx).default_value(""));
+        let col1_comment = cx.new(|cx| InputState::new(window, cx).default_value(""));
 
         let col2_name = cx.new(|cx| InputState::new(window, cx).default_value("name"));
         let col2_type = cx.new(|cx| InputState::new(window, cx).default_value("TEXT"));
         let col2_def = cx.new(|cx| InputState::new(window, cx).default_value(""));
+        let col2_comment = cx.new(|cx| InputState::new(window, cx).default_value(""));
 
         let create_table_columns = vec![
             CreateTableColumnState {
@@ -287,6 +290,7 @@ impl CrabStudioApp {
                 is_nullable: false,
                 is_auto_increment: true,
                 default_val: col1_def,
+                comment: col1_comment,
             },
             CreateTableColumnState {
                 name: col2_name,
@@ -295,6 +299,7 @@ impl CrabStudioApp {
                 is_nullable: false,
                 is_auto_increment: false,
                 default_val: col2_def,
+                comment: col2_comment,
             },
         ];
 
@@ -361,6 +366,7 @@ impl CrabStudioApp {
             create_table_schema_input,
             create_table_comment_input,
             create_table_columns,
+            create_table_indexes: Vec::new(),
             create_table_is_executing: false,
             create_table_error: None,
             create_table_copied: false,
@@ -1327,10 +1333,12 @@ impl CrabStudioApp {
         let col1_name = cx.new(|cx| InputState::new(window, cx).default_value("id"));
         let col1_type = cx.new(|cx| InputState::new(window, cx).default_value(id_type));
         let col1_def = cx.new(|cx| InputState::new(window, cx).default_value(""));
+        let col1_comment = cx.new(|cx| InputState::new(window, cx).default_value(""));
 
         let col2_name = cx.new(|cx| InputState::new(window, cx).default_value("name"));
         let col2_type = cx.new(|cx| InputState::new(window, cx).default_value(name_type));
         let col2_def = cx.new(|cx| InputState::new(window, cx).default_value(""));
+        let col2_comment = cx.new(|cx| InputState::new(window, cx).default_value(""));
 
         self.create_table_columns = vec![
             CreateTableColumnState {
@@ -1340,6 +1348,7 @@ impl CrabStudioApp {
                 is_nullable: false,
                 is_auto_increment: true,
                 default_val: col1_def,
+                comment: col1_comment,
             },
             CreateTableColumnState {
                 name: col2_name,
@@ -1348,8 +1357,10 @@ impl CrabStudioApp {
                 is_nullable: false,
                 is_auto_increment: false,
                 default_val: col2_def,
+                comment: col2_comment,
             },
         ];
+        self.create_table_indexes.clear();
 
         self.create_table_modal_open = true;
         self.create_table_is_executing = false;
@@ -1382,6 +1393,7 @@ impl CrabStudioApp {
         let name_inp = cx.new(|cx| InputState::new(window, cx).default_value(&col_name_str));
         let type_inp = cx.new(|cx| InputState::new(window, cx).default_value(default_type));
         let def_inp = cx.new(|cx| InputState::new(window, cx).default_value(""));
+        let comm_inp = cx.new(|cx| InputState::new(window, cx).default_value(""));
 
         self.create_table_columns.push(CreateTableColumnState {
             name: name_inp,
@@ -1390,6 +1402,7 @@ impl CrabStudioApp {
             is_nullable: true,
             is_auto_increment: false,
             default_val: def_inp,
+            comment: comm_inp,
         });
         cx.notify();
     }
@@ -1455,6 +1468,49 @@ impl CrabStudioApp {
         }
     }
 
+    /// Add a new index to the create table designer
+    pub fn add_create_table_index(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let count = self.create_table_indexes.len() + 1;
+        let default_name = format!("idx_tbl_col_{count}");
+        // Default target column to second column if available, else first
+        let default_target = if self.create_table_columns.len() > 1 {
+            self.create_table_columns[1].name.read(cx).value().to_string()
+        } else if !self.create_table_columns.is_empty() {
+            self.create_table_columns[0].name.read(cx).value().to_string()
+        } else {
+            String::new()
+        };
+
+        let name_inp = cx.new(|cx| InputState::new(window, cx).default_value(&default_name));
+        let cols_inp = cx.new(|cx| InputState::new(window, cx).default_value(&default_target));
+
+        self.create_table_indexes.push(CreateTableIndexState {
+            name: name_inp,
+            index_type: TableIndexType::Normal,
+            columns: cols_inp,
+        });
+        cx.notify();
+    }
+
+    /// Remove an index from the create table designer
+    pub fn remove_create_table_index(&mut self, idx: usize, cx: &mut Context<Self>) {
+        if idx < self.create_table_indexes.len() {
+            self.create_table_indexes.remove(idx);
+            cx.notify();
+        }
+    }
+
+    /// Toggle an index between Normal (INDEX) and Unique (UNIQUE)
+    pub fn toggle_create_table_index_type(&mut self, idx: usize, cx: &mut Context<Self>) {
+        if let Some(index_item) = self.create_table_indexes.get_mut(idx) {
+            index_item.index_type = match index_item.index_type {
+                TableIndexType::Normal => TableIndexType::Unique,
+                TableIndexType::Unique => TableIndexType::Normal,
+            };
+            cx.notify();
+        }
+    }
+
     /// Build CreateTableDef from input states
     pub fn build_create_table_def(&self, cx: &App) -> CreateTableDef {
         let table_name = self.create_table_name_input.read(cx).value().to_string();
@@ -1484,14 +1540,36 @@ impl CrabStudioApp {
             } else {
                 Some(def_raw.trim().to_string())
             };
+            let comment_raw = col.comment.read(cx).value().to_string();
+            let col_comment = if comment_raw.trim().is_empty() {
+                None
+            } else {
+                Some(comment_raw.trim().to_string())
+            };
 
             let col_def = ColumnDef::new(col_name, col_type)
                 .primary_key(col.is_primary_key)
                 .nullable(col.is_nullable)
                 .auto_increment(col.is_auto_increment)
-                .default_value(default_val);
+                .default_value(default_val)
+                .comment(col_comment);
 
             def = def.column(col_def);
+        }
+
+        for idx_state in &self.create_table_indexes {
+            let idx_name = idx_state.name.read(cx).value().to_string();
+            let cols_raw = idx_state.columns.read(cx).value().to_string();
+            let cols: Vec<String> = cols_raw
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if !cols.is_empty() {
+                let idx_def = TableIndexDef::new(idx_name, cols)
+                    .unique(idx_state.index_type == TableIndexType::Unique);
+                def = def.index(idx_def);
+            }
         }
 
         def
@@ -2851,6 +2929,30 @@ impl Render for CrabStudioApp {
                         });
                     }
                 };
+                let on_add_idx = {
+                    let handle = app_handle.clone();
+                    move |window: &mut Window, cx: &mut App| {
+                        handle.update(cx, |this, cx| {
+                            this.add_create_table_index(window, cx);
+                        });
+                    }
+                };
+                let on_remove_idx = {
+                    let handle = app_handle.clone();
+                    move |idx: usize, _: &mut Window, cx: &mut App| {
+                        handle.update(cx, |this, cx| {
+                            this.remove_create_table_index(idx, cx);
+                        });
+                    }
+                };
+                let on_toggle_idx_type = {
+                    let handle = app_handle.clone();
+                    move |idx: usize, _: &mut Window, cx: &mut App| {
+                        handle.update(cx, |this, cx| {
+                            this.toggle_create_table_index_type(idx, cx);
+                        });
+                    }
+                };
 
                 Some(
                     CreateTableModal::new(
@@ -2862,6 +2964,10 @@ impl Render for CrabStudioApp {
                         self.create_table_columns.clone(),
                         preview_sql,
                     )
+                    .indexes(self.create_table_indexes.clone())
+                    .on_add_index(on_add_idx)
+                    .on_remove_index(on_remove_idx)
+                    .on_toggle_index_type(on_toggle_idx_type)
                     .validation_error(validation_err)
                     .error(self.create_table_error.clone())
                     .executing(self.create_table_is_executing)

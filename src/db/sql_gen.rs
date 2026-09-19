@@ -478,12 +478,57 @@ impl ColumnDef {
     }
 }
 
+/// Type of index (normal or unique).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TableIndexType {
+    #[default]
+    Normal,
+    Unique,
+}
+
+impl TableIndexType {
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            TableIndexType::Normal => "INDEX",
+            TableIndexType::Unique => "UNIQUE",
+        }
+    }
+}
+
+/// Index definition for table creation DDL generation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TableIndexDef {
+    pub name: String,
+    pub index_type: TableIndexType,
+    pub columns: Vec<String>,
+}
+
+impl TableIndexDef {
+    pub fn new(name: impl Into<String>, columns: Vec<String>) -> Self {
+        Self {
+            name: name.into(),
+            index_type: TableIndexType::Normal,
+            columns,
+        }
+    }
+
+    pub fn unique(mut self, is_unique: bool) -> Self {
+        self.index_type = if is_unique {
+            TableIndexType::Unique
+        } else {
+            TableIndexType::Normal
+        };
+        self
+    }
+}
+
 /// Specifications for creating a new database table.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateTableDef {
     pub table_name: String,
     pub schema: Option<String>,
     pub columns: Vec<ColumnDef>,
+    pub indexes: Vec<TableIndexDef>,
     pub comment: Option<String>,
 }
 
@@ -493,6 +538,7 @@ impl CreateTableDef {
             table_name: table_name.into(),
             schema: None,
             columns: Vec::new(),
+            indexes: Vec::new(),
             comment: None,
         }
     }
@@ -504,6 +550,11 @@ impl CreateTableDef {
 
     pub fn column(mut self, column: ColumnDef) -> Self {
         self.columns.push(column);
+        self
+    }
+
+    pub fn index(mut self, index: TableIndexDef) -> Self {
+        self.indexes.push(index);
         self
     }
 
@@ -607,11 +658,43 @@ pub fn generate_create_table_sql(
                 col_clauses.push(format!("    PRIMARY KEY ({pk_cols})"));
             }
 
-            let ddl = format!(
+            let mut stmts = vec![format!(
                 "CREATE TABLE {quoted_table} (\n{}\n);",
                 col_clauses.join(",\n")
-            );
-            Ok(ddl)
+            )];
+
+            for idx in &def.indexes {
+                let valid_idx_cols: Vec<&str> = idx
+                    .columns
+                    .iter()
+                    .map(|c| c.trim())
+                    .filter(|c| !c.is_empty())
+                    .collect();
+                if valid_idx_cols.is_empty() {
+                    continue;
+                }
+                let idx_name = idx.name.trim();
+                let actual_name = if idx_name.is_empty() {
+                    format!("idx_{}_{}", table_name, valid_idx_cols.join("_"))
+                } else {
+                    idx_name.to_string()
+                };
+                let quoted_idx = quote_ident(&actual_name, family);
+                let cols_str = valid_idx_cols
+                    .iter()
+                    .map(|c| quote_ident(c, family))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let unique_str = match idx.index_type {
+                    TableIndexType::Unique => "UNIQUE ",
+                    TableIndexType::Normal => "",
+                };
+                stmts.push(format!(
+                    "CREATE {unique_str}INDEX {quoted_idx} ON {quoted_table} ({cols_str});"
+                ));
+            }
+
+            Ok(stmts.join("\n\n"))
         }
 
         DatabaseFamily::Postgres => {
@@ -679,15 +762,45 @@ pub fn generate_create_table_sql(
                 }
             }
 
-            let mut ddl = format!(
+            for idx in &def.indexes {
+                let valid_idx_cols: Vec<&str> = idx
+                    .columns
+                    .iter()
+                    .map(|c| c.trim())
+                    .filter(|c| !c.is_empty())
+                    .collect();
+                if valid_idx_cols.is_empty() {
+                    continue;
+                }
+                let idx_name = idx.name.trim();
+                let actual_name = if idx_name.is_empty() {
+                    format!("idx_{}_{}", table_name, valid_idx_cols.join("_"))
+                } else {
+                    idx_name.to_string()
+                };
+                let quoted_idx = quote_ident(&actual_name, family);
+                let cols_str = valid_idx_cols
+                    .iter()
+                    .map(|c| quote_ident(c, family))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let unique_str = match idx.index_type {
+                    TableIndexType::Unique => "UNIQUE ",
+                    TableIndexType::Normal => "",
+                };
+                post_statements.push(format!(
+                    "CREATE {unique_str}INDEX {quoted_idx} ON {quoted_table} ({cols_str});"
+                ));
+            }
+
+            let mut stmts = vec![format!(
                 "CREATE TABLE {quoted_table} (\n{}\n);",
                 col_clauses.join(",\n")
-            );
+            )];
             if !post_statements.is_empty() {
-                ddl.push_str("\n\n");
-                ddl.push_str(&post_statements.join("\n"));
+                stmts.extend(post_statements);
             }
-            Ok(ddl)
+            Ok(stmts.join("\n\n"))
         }
 
         DatabaseFamily::MySql => {
@@ -732,6 +845,35 @@ pub fn generate_create_table_sql(
                     .collect::<Vec<_>>()
                     .join(", ");
                 col_clauses.push(format!("    PRIMARY KEY ({pk_cols})"));
+            }
+
+            for idx in &def.indexes {
+                let valid_idx_cols: Vec<&str> = idx
+                    .columns
+                    .iter()
+                    .map(|c| c.trim())
+                    .filter(|c| !c.is_empty())
+                    .collect();
+                if valid_idx_cols.is_empty() {
+                    continue;
+                }
+                let idx_name = idx.name.trim();
+                let actual_name = if idx_name.is_empty() {
+                    format!("idx_{}_{}", table_name, valid_idx_cols.join("_"))
+                } else {
+                    idx_name.to_string()
+                };
+                let quoted_idx = quote_ident(&actual_name, family);
+                let cols_str = valid_idx_cols
+                    .iter()
+                    .map(|c| quote_ident(c, family))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let key_type = match idx.index_type {
+                    TableIndexType::Unique => "UNIQUE KEY",
+                    TableIndexType::Normal => "KEY",
+                };
+                col_clauses.push(format!("    {key_type} {quoted_idx} ({cols_str})"));
             }
 
             let mut table_suffix = " ENGINE=InnoDB DEFAULT CHARSET=utf8mb4".to_string();
@@ -1160,6 +1302,36 @@ mod tests {
     }
 
     #[test]
+    fn test_generate_create_table_sql_with_indexes() {
+        let def = CreateTableDef::new("accounts")
+            .schema(Some("core".into()))
+            .column(ColumnDef::new("id", "BIGINT").auto_increment(true))
+            .column(ColumnDef::new("email", "VARCHAR(255)").nullable(false))
+            .column(ColumnDef::new("tenant_id", "INT").nullable(false))
+            .column(ColumnDef::new("status", "VARCHAR(50)").default_value(Some("'active'".into())))
+            .index(TableIndexDef::new("uk_accounts_email", vec!["email".into()]).unique(true))
+            .index(TableIndexDef::new("", vec!["tenant_id".into(), "status".into()])); // Auto name idx_accounts_tenant_id_status
+
+        // SQLite
+        let sqlite_ddl = generate_create_table_sql(&def, DatabaseFamily::Sqlite).unwrap();
+        assert!(sqlite_ddl.contains("CREATE TABLE \"core\".\"accounts\" ("));
+        assert!(sqlite_ddl.contains("CREATE UNIQUE INDEX \"uk_accounts_email\" ON \"core\".\"accounts\" (\"email\");"));
+        assert!(sqlite_ddl.contains("CREATE INDEX \"idx_accounts_tenant_id_status\" ON \"core\".\"accounts\" (\"tenant_id\", \"status\");"));
+
+        // PostgreSQL
+        let pg_ddl = generate_create_table_sql(&def, DatabaseFamily::Postgres).unwrap();
+        assert!(pg_ddl.contains("CREATE TABLE \"core\".\"accounts\" ("));
+        assert!(pg_ddl.contains("CREATE UNIQUE INDEX \"uk_accounts_email\" ON \"core\".\"accounts\" (\"email\");"));
+        assert!(pg_ddl.contains("CREATE INDEX \"idx_accounts_tenant_id_status\" ON \"core\".\"accounts\" (\"tenant_id\", \"status\");"));
+
+        // MySQL
+        let mysql_ddl = generate_create_table_sql(&def, DatabaseFamily::MySql).unwrap();
+        assert!(mysql_ddl.contains("CREATE TABLE `core`.`accounts` ("));
+        assert!(mysql_ddl.contains("    UNIQUE KEY `uk_accounts_email` (`email`),"));
+        assert!(mysql_ddl.contains("    KEY `idx_accounts_tenant_id_status` (`tenant_id`, `status`)"));
+    }
+
+    #[test]
     fn test_generate_create_table_validation() {
         // Empty table name
         let def = CreateTableDef::new("").column(ColumnDef::new("id", "INT"));
@@ -1174,5 +1346,32 @@ mod tests {
             .column(ColumnDef::new("name", "TEXT"))
             .column(ColumnDef::new("Name", "VARCHAR(50)"));
         assert!(generate_create_table_sql(&def, DatabaseFamily::Sqlite).is_err());
+    }
+
+    #[test]
+    fn test_generate_create_table_sql_with_column_comments() {
+        let def = CreateTableDef::new("users")
+            .comment(Some("Table description".into()))
+            .column(ColumnDef::new("id", "BIGINT").auto_increment(true).comment(Some("User primary key".into())))
+            .column(ColumnDef::new("email", "VARCHAR(255)").nullable(false).comment(Some("Login email".into())))
+            .column(ColumnDef::new("bio", "TEXT").comment(Some("User's profile bio".into())));
+
+        // PostgreSQL: comments generated as COMMENT ON statements
+        let pg_ddl = generate_create_table_sql(&def, DatabaseFamily::Postgres).unwrap();
+        assert!(pg_ddl.contains("COMMENT ON TABLE \"users\" IS 'Table description';"));
+        assert!(pg_ddl.contains("COMMENT ON COLUMN \"users\".\"id\" IS 'User primary key';"));
+        assert!(pg_ddl.contains("COMMENT ON COLUMN \"users\".\"email\" IS 'Login email';"));
+        assert!(pg_ddl.contains("COMMENT ON COLUMN \"users\".\"bio\" IS 'User''s profile bio';"));
+
+        // MySQL: comments generated inline
+        let mysql_ddl = generate_create_table_sql(&def, DatabaseFamily::MySql).unwrap();
+        assert!(mysql_ddl.contains("COMMENT='Table description';"));
+        assert!(mysql_ddl.contains("`id` BIGINT NOT NULL AUTO_INCREMENT COMMENT 'User primary key',"));
+        assert!(mysql_ddl.contains("`email` VARCHAR(255) NOT NULL COMMENT 'Login email',"));
+        assert!(mysql_ddl.contains("`bio` TEXT COMMENT 'User''s profile bio'"));
+
+        // SQLite: standard columns without error
+        let sqlite_ddl = generate_create_table_sql(&def, DatabaseFamily::Sqlite).unwrap();
+        assert!(sqlite_ddl.contains("CREATE TABLE \"users\" ("));
     }
 }
