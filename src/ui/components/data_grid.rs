@@ -1221,13 +1221,8 @@ impl RenderOnce for DataGrid {
             let col_type = result.column_types.get(i).map(|s| s.as_str()).unwrap_or("");
             let col_type_lower = col_type.to_lowercase();
 
-            let header_chars = col_name.chars().count()
-                + if col_type.is_empty() {
-                    0
-                } else {
-                    col_type.chars().count() + 3
-                };
-            let mut est_w = (header_chars as f32 * 8.5 + 44.0).max(80.0);
+            let header_chars = col_name.chars().count();
+            let mut est_w = (header_chars as f32 * 8.5 + 28.0).max(60.0);
 
             for &orig_idx in page_slice_indices.iter().take(50) {
                 if let Some(row) = result.rows.get(orig_idx) {
@@ -1246,28 +1241,28 @@ impl RenderOnce for DataGrid {
             }
 
             let (min_w, max_w) = if col_type_lower.contains("bool") {
-                (80.0, 120.0)
-            } else if col_type_lower.contains("int") || col_type_lower.contains("serial") {
-                (90.0, 160.0)
+                (60.0, 100.0)
+            } else if col_type_lower.contains("int") || col_type_lower.contains("serial") || col_type_lower.contains("long") {
+                (60.0, 140.0)
             } else if col_type_lower.contains("float")
                 || col_type_lower.contains("double")
                 || col_type_lower.contains("numeric")
                 || col_type_lower.contains("decimal")
             {
-                (100.0, 180.0)
+                (80.0, 160.0)
             } else if col_type_lower.contains("date") || col_type_lower.contains("time") {
-                (160.0, 240.0)
+                (120.0, 220.0)
             } else if col_type_lower.contains("uuid") {
-                (240.0, 320.0)
+                (180.0, 300.0)
             } else {
-                (140.0, 420.0)
+                (80.0, 360.0)
             };
 
             col_widths.push(est_w.clamp(min_w, max_w));
         }
 
         let index_col_width: f32 = 48.0;
-        let min_total_viewport: f32 = 960.0;
+        let min_total_viewport: f32 = 720.0;
         let data_cols_sum: f32 = col_widths.iter().sum();
         if data_cols_sum > 0.0 && data_cols_sum + index_col_width < min_total_viewport {
             let extra = (min_total_viewport - index_col_width) - data_cols_sum;
@@ -1368,19 +1363,6 @@ impl RenderOnce for DataGrid {
                         })
                         .child(col_name.clone()),
                 )
-                .when_some(result.column_types.get(i), |this, col_type| {
-                    if col_type.is_empty() {
-                        this
-                    } else {
-                        this.child(
-                            div()
-                                .flex_shrink_0()
-                                .text_xs()
-                                .text_color(ThemeColors::TEXT_FAINT)
-                                .child(format!("({col_type})")),
-                        )
-                    }
-                })
                 .children(sort_icon);
 
             let header_div = h_flex()
