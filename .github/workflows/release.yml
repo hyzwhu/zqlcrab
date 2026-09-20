@@ -21,7 +21,7 @@ jobs:
             target: aarch64-apple-darwin
             artifact_name: zqlcrab
             asset_name: zqlcrab-aarch64-apple-darwin
-          - os: macos-13
+          - os: macos-15-intel
             target: x86_64-apple-darwin
             artifact_name: zqlcrab
             asset_name: zqlcrab-x86_64-apple-darwin
@@ -121,10 +121,8 @@ EOF
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
-            ${{ matrix.asset_name }}.tar.gz
-            ${{ matrix.asset_name }}.tar.gz.sha256
-            ${{ matrix.asset_name }}.zip
-            ${{ matrix.asset_name }}.zip.sha256
+            ${{ matrix.asset_name }}.*
+          fail_on_unmatched_files: false
           draft: false
           prerelease: false
           generate_release_notes: true
