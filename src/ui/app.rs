@@ -973,17 +973,19 @@ impl CrabStudioApp {
                 .iter()
                 .find(|c| c.name.eq_ignore_ascii_case(&col_name));
 
+            let is_sqlite = self
+                .active_connection
+                .as_ref()
+                .map(|conn| conn.config.db_type.family() == DatabaseFamily::Sqlite)
+                .unwrap_or(false);
+
             let is_auto = col_meta
                 .map(|c| {
                     c.is_auto_increment
                         || c.data_type.to_lowercase().contains("serial")
-                        || (c.is_primary_key
-                            && (c.data_type.to_lowercase().contains("int")
-                                || self
-                                    .active_connection
-                                    .as_ref()
-                                    .map(|conn| conn.config.db_type == DatabaseType::Sqlite)
-                                    .unwrap_or(false)))
+                        || (is_sqlite
+                            && c.is_primary_key
+                            && c.data_type.to_lowercase().contains("int"))
                 })
                 .unwrap_or(false);
 
@@ -1123,17 +1125,19 @@ impl CrabStudioApp {
                 .iter()
                 .find(|c| c.name.eq_ignore_ascii_case(&col_name));
 
+            let is_sqlite = self
+                .active_connection
+                .as_ref()
+                .map(|conn| conn.config.db_type.family() == DatabaseFamily::Sqlite)
+                .unwrap_or(false);
+
             let is_auto = col_meta
                 .map(|c| {
                     c.is_auto_increment
                         || c.data_type.to_lowercase().contains("serial")
-                        || (c.is_primary_key
-                            && (c.data_type.to_lowercase().contains("int")
-                                || self
-                                    .active_connection
-                                    .as_ref()
-                                    .map(|conn| conn.config.db_type == DatabaseType::Sqlite)
-                                    .unwrap_or(false)))
+                        || (is_sqlite
+                            && c.is_primary_key
+                            && c.data_type.to_lowercase().contains("int"))
                 })
                 .unwrap_or(false);
 

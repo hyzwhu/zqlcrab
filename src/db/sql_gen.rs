@@ -73,13 +73,14 @@ pub fn generate_review_plan(
                 .find(|c| c.name.eq_ignore_ascii_case(col_name));
 
             // Determine whether to omit an auto-increment or serial column when value is Null or <auto>
+            let is_sqlite = family == DatabaseFamily::Sqlite;
             let is_auto = col_meta
                 .map(|c| {
                     c.is_auto_increment
                         || c.data_type.to_lowercase().contains("serial")
-                        || (c.is_primary_key
-                            && (c.data_type.to_lowercase().contains("int")
-                                || family == DatabaseFamily::Sqlite))
+                        || (is_sqlite
+                            && c.is_primary_key
+                            && c.data_type.to_lowercase().contains("int"))
                 })
                 .unwrap_or(false);
 
@@ -101,6 +102,15 @@ pub fn generate_review_plan(
 
             if is_auto_placeholder || is_default_placeholder {
                 continue;
+            }
+
+            if let Some(c) = col_meta {
+                if !c.is_nullable && !is_auto && c.default_value.is_none() && matches!(val, QueryValue::Null) {
+                    warnings.push(format!(
+                        "Column '{}' in new row #{} is NOT NULL and has no default value, but is currently NULL.",
+                        col_name, inserts_count + 1
+                    ));
+                }
             }
 
             insert_cols.push(quote_ident(col_name, family));
@@ -1624,5 +1634,122 @@ mod tests {
             format_index_column_expr("\"col\" ASC", DatabaseFamily::Postgres),
             "\"col\" ASC"
         );
+    }
+
+    #[test]
+    fn test_insert_into_auto_increment_vs_non_auto_increment_pk() {
+        // Table like mysql.help_topic where help_topic_id is a non-auto-increment integer PK
+        let cols = vec![
+            ColumnInfo {
+                name: "help_topic_id".into(),
+                data_type: "int unsigned".into(),
+                is_nullable: false,
+                is_primary_key: true,
+                is_auto_increment: false,
+                default_value: None,
+                description: None,
+            },
+            ColumnInfo {
+                name: "name".into(),
+                data_type: "char(64)".into(),
+                is_nullable: false,
+                is_primary_key: false,
+                is_auto_increment: false,
+                default_value: None,
+                description: None,
+            },
+        ];
+        let grid_cols = vec!["help_topic_id".to_string(), "name".to_string()];
+
+        // Case A: User provides explicit ID value for non-auto PK in MySQL
+        let mut cs_explicit = GridChangeset::new();
+        cs_explicit.add_inserted_row(
+            vec![
+                QueryValue::Int(101),
+                QueryValue::String("JOIN Syntax".into()),
+            ],
+            crate::db::changeset::InsertAnchor::default(),
+        );
+
+        let plan_explicit = generate_review_plan(
+            "help_topic",
+            Some("mysql"),
+            DatabaseFamily::MySql,
+            &cols,
+            &grid_cols,
+            &[],
+            &cs_explicit,
+        );
+
+        assert!(plan_explicit.warnings.is_empty());
+        assert!(plan_explicit.full_script.contains("INSERT INTO `mysql`.`help_topic` (`help_topic_id`, `name`) VALUES (101, 'JOIN Syntax');"));
+
+        // Case B: User left non-auto-increment NOT NULL PK as NULL - must NOT be omitted as auto, and triggers warning
+        let mut cs_null = GridChangeset::new();
+        cs_null.add_inserted_row(
+            vec![
+                QueryValue::Null,
+                QueryValue::String("JOIN Syntax".into()),
+            ],
+            crate::db::changeset::InsertAnchor::default(),
+        );
+
+        let plan_null = generate_review_plan(
+            "help_topic",
+            Some("mysql"),
+            DatabaseFamily::MySql,
+            &cols,
+            &grid_cols,
+            &[],
+            &cs_null,
+        );
+
+        assert!(!plan_null.warnings.is_empty());
+        assert!(plan_null.warnings[0].contains("help_topic_id"));
+        assert!(plan_null.warnings[0].contains("is NOT NULL and has no default value"));
+
+        // Case C: True auto-increment in MySQL with <auto> or Null - correctly omitted from INSERT columns
+        let auto_cols = vec![
+            ColumnInfo {
+                name: "id".into(),
+                data_type: "int".into(),
+                is_nullable: false,
+                is_primary_key: true,
+                is_auto_increment: true,
+                default_value: None,
+                description: None,
+            },
+            ColumnInfo {
+                name: "title".into(),
+                data_type: "varchar(100)".into(),
+                is_nullable: false,
+                is_primary_key: false,
+                is_auto_increment: false,
+                default_value: None,
+                description: None,
+            },
+        ];
+        let auto_grid_cols = vec!["id".to_string(), "title".to_string()];
+        let mut cs_auto = GridChangeset::new();
+        cs_auto.add_inserted_row(
+            vec![
+                QueryValue::String("<auto>".into()),
+                QueryValue::String("New Post".into()),
+            ],
+            crate::db::changeset::InsertAnchor::default(),
+        );
+
+        let plan_auto = generate_review_plan(
+            "posts",
+            None,
+            DatabaseFamily::MySql,
+            &auto_cols,
+            &auto_grid_cols,
+            &[],
+            &cs_auto,
+        );
+
+        assert!(plan_auto.warnings.is_empty());
+        assert!(plan_auto.full_script.contains("INSERT INTO `posts` (`title`) VALUES ('New Post');"));
     }
 }

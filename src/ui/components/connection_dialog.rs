@@ -425,15 +425,19 @@ impl RenderOnce for ConnectionDialog {
                     .w_full()
                     .justify_between()
                     .items_center()
+                    .gap_2()
                     .px_1()
                     .child(
                         div()
+                            .flex_1()
+                            .min_w_0()
                             .text_xs()
                             .text_color(ThemeColors::TEXT_FAINT)
                             .child(protocol_desc),
                     )
                     .child(
                         div()
+                            .flex_shrink_0()
                             .text_xs()
                             .text_color(ThemeColors::TEXT_FAINT)
                             .child(format!(
@@ -581,38 +585,55 @@ impl RenderOnce for ConnectionDialog {
         // Test status notification
         let test_banner = self.test_result.map(|res| match res {
             Ok(msg) => h_flex()
-                .p_2()
+                .w_full()
+                .min_w_0()
+                .p_2p5()
                 .rounded_md()
-                .items_center()
+                .items_start()
                 .gap_2()
                 .bg(ThemeColors::BG_SURFACE_ACTIVE)
                 .border_1()
                 .border_color(ThemeColors::SUCCESS)
                 .child(
-                    Icon::new(IconName::CircleCheck)
-                        .size(px(14.0))
-                        .text_color(ThemeColors::SUCCESS),
+                    div().pt(px(1.0)).child(
+                        Icon::new(IconName::CircleCheck)
+                            .size(px(14.0))
+                            .text_color(ThemeColors::SUCCESS),
+                    ),
                 )
                 .child(
                     div()
+                        .flex_1()
+                        .min_w_0()
                         .text_xs()
                         .text_color(ThemeColors::TEXT_PRIMARY)
                         .child(msg),
                 ),
             Err(err) => h_flex()
-                .p_2()
+                .w_full()
+                .min_w_0()
+                .p_2p5()
                 .rounded_md()
-                .items_center()
+                .items_start()
                 .gap_2()
-                .bg(ThemeColors::BG_SURFACE_ACTIVE)
+                .bg(rgba(0xEF444415))
                 .border_1()
                 .border_color(ThemeColors::ERROR)
                 .child(
-                    Icon::new(IconName::TriangleAlert)
-                        .size(px(14.0))
-                        .text_color(ThemeColors::ERROR),
+                    div().pt(px(1.0)).child(
+                        Icon::new(IconName::TriangleAlert)
+                            .size(px(14.0))
+                            .text_color(ThemeColors::ERROR),
+                    ),
                 )
-                .child(div().text_xs().text_color(ThemeColors::ERROR).child(err)),
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_xs()
+                        .text_color(ThemeColors::ERROR)
+                        .child(err),
+                ),
         });
 
         let on_toggle_ro = self.on_toggle_read_only.clone();
@@ -685,6 +706,7 @@ impl RenderOnce for ConnectionDialog {
             .border_1()
             .border_color(ThemeColors::BORDER)
             .shadow_lg()
+            .overflow_hidden()
             .child(
                 // Modal header
                 h_flex()

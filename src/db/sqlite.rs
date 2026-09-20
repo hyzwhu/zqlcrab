@@ -324,7 +324,8 @@ impl DatabaseAdapter for SqliteAdapter {
             .prepare(&sql)
             .map_err(|e| DbError::query(e.to_string()))?;
 
-        let mut columns = Vec::new();
+        let mut raw_cols = Vec::new();
+        let mut pk_count = 0;
         let mut rows = stmt.query([]).map_err(|e| DbError::query(e.to_string()))?;
         while let Some(row) = rows.next().map_err(|e| DbError::query(e.to_string()))? {
             let name: String = row.get(1).map_err(|e| DbError::query(e.to_string()))?;
@@ -332,21 +333,31 @@ impl DatabaseAdapter for SqliteAdapter {
             let not_null: i32 = row.get(3).map_err(|e| DbError::query(e.to_string()))?;
             let default_val: Option<String> = row.get(4).unwrap_or(None);
             let pk: i32 = row.get(5).map_err(|e| DbError::query(e.to_string()))?;
-
-            columns.push(ColumnInfo {
-                name,
-                data_type: if data_type.is_empty() {
-                    "ANY".to_string()
-                } else {
-                    data_type
-                },
-                is_nullable: not_null == 0,
-                is_primary_key: pk > 0,
-                is_auto_increment: false,
-                default_value: default_val,
-                description: None,
-            });
+            if pk > 0 {
+                pk_count += 1;
+            }
+            raw_cols.push((name, data_type, not_null, default_val, pk));
         }
+
+        let columns = raw_cols
+            .into_iter()
+            .map(|(name, data_type, not_null, default_val, pk)| {
+                let is_auto = pk_count == 1 && pk > 0 && data_type.to_lowercase().contains("int");
+                ColumnInfo {
+                    name,
+                    data_type: if data_type.is_empty() {
+                        "ANY".to_string()
+                    } else {
+                        data_type
+                    },
+                    is_nullable: not_null == 0,
+                    is_primary_key: pk > 0,
+                    is_auto_increment: is_auto,
+                    default_value: default_val,
+                    description: None,
+                }
+            })
+            .collect();
         Ok(columns)
     }
 
