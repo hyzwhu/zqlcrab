@@ -2,3 +2,8 @@
 assets/download.png
 .DS_Store
 *.DS_Store
+release-pack/
+*.tar.gz
+*.tar.gz.sha256
+*.zip
+*.zip.sha256
