@@ -45,6 +45,149 @@ fn setup_macos_app_icon() {
     }
 }
 
+#[cfg(target_os = "macos")]
+#[allow(unexpected_cfgs, deprecated)]
+fn setup_macos_status_bar() {
+    use cocoa::base::{id, nil};
+    use cocoa::foundation::{NSData, NSSize, NSString};
+    use objc::declare::ClassDecl;
+    use objc::runtime::{BOOL, Class, Object, Sel, YES};
+    use objc::{class, msg_send, sel, sel_impl};
+
+    extern "C" fn show_window(_this: &Object, _cmd: Sel, _sender: id) {
+        unsafe {
+            let app = cocoa::appkit::NSApp();
+            if !app.is_null() {
+                let _: () = msg_send![app, activateIgnoringOtherApps: YES];
+                let windows: id = msg_send![app, windows];
+                let count: usize = msg_send![windows, count];
+                for i in 0..count {
+                    let win: id = msg_send![windows, objectAtIndex: i];
+                    if !win.is_null() {
+                        let is_mini: BOOL = msg_send![win, isMiniaturized];
+                        if is_mini == YES {
+                            let _: () = msg_send![win, deminiaturize: nil];
+                        }
+                        let _: () = msg_send![win, makeKeyAndOrderFront: nil];
+                    }
+                }
+            }
+        }
+    }
+
+    extern "C" fn hide_window(_this: &Object, _cmd: Sel, _sender: id) {
+        unsafe {
+            let app = cocoa::appkit::NSApp();
+            if !app.is_null() {
+                let _: () = msg_send![app, hide: nil];
+            }
+        }
+    }
+
+    extern "C" fn quit_app(_this: &Object, _cmd: Sel, _sender: id) {
+        unsafe {
+            let app = cocoa::appkit::NSApp();
+            if !app.is_null() {
+                let _: () = msg_send![app, terminate: nil];
+            }
+        }
+    }
+
+    unsafe {
+        let status_bar: id = msg_send![class!(NSStatusBar), systemStatusBar];
+        if status_bar.is_null() {
+            return;
+        }
+
+        // NSVariableStatusItemLength = -1.0
+        let status_item: id = msg_send![status_bar, statusItemWithLength: -1.0f64];
+        if status_item.is_null() {
+            return;
+        }
+        let _: id = msg_send![status_item, retain];
+
+        let button: id = msg_send![status_item, button];
+        if !button.is_null() {
+            let bytes = ui::app::LOGO_PNG_BYTES;
+            let data = NSData::dataWithBytes_length_(
+                nil,
+                bytes.as_ptr() as *const std::ffi::c_void,
+                bytes.len() as u64,
+            );
+            if let Some(cls) = Class::get("NSImage") {
+                let alloc_image: id = msg_send![cls, alloc];
+                let image: id = msg_send![alloc_image, initWithData: data];
+                if !image.is_null() {
+                    let size = NSSize::new(18.0, 18.0);
+                    let _: () = msg_send![image, setSize: size];
+                    let _: () = msg_send![button, setImage: image];
+                }
+            }
+        }
+
+        // Setup Target Class for menu item actions
+        let target_cls = match Class::get("ZqlcrabTrayTarget") {
+            Some(cls) => cls,
+            None => {
+                if let Some(super_cls) = Class::get("NSObject") {
+                    if let Some(mut decl) = ClassDecl::new("ZqlcrabTrayTarget", super_cls) {
+                        decl.add_method(
+                            sel!(showWindow:),
+                            show_window as extern "C" fn(&Object, Sel, id),
+                        );
+                        decl.add_method(
+                            sel!(hideWindow:),
+                            hide_window as extern "C" fn(&Object, Sel, id),
+                        );
+                        decl.add_method(
+                            sel!(quitApp:),
+                            quit_app as extern "C" fn(&Object, Sel, id),
+                        );
+                        decl.register()
+                    } else {
+                        return;
+                    }
+                } else {
+                    return;
+                }
+            }
+        };
+
+        let target: id = msg_send![target_cls, alloc];
+        let target: id = msg_send![target, init];
+
+        if let Some(menu_cls) = Class::get("NSMenu") {
+            let alloc_menu: id = msg_send![menu_cls, alloc];
+            let menu_title = NSString::alloc(nil).init_str("zqlcrab");
+            let menu: id = msg_send![alloc_menu, initWithTitle: menu_title];
+
+            let add_item = |title: &str, action: Sel| {
+                if let Some(item_cls) = Class::get("NSMenuItem") {
+                    let alloc_item: id = msg_send![item_cls, alloc];
+                    let t = NSString::alloc(nil).init_str(title);
+                    let k = NSString::alloc(nil).init_str("");
+                    let item: id =
+                        msg_send![alloc_item, initWithTitle: t action: action keyEquivalent: k];
+                    let _: () = msg_send![item, setTarget: target];
+                    let _: () = msg_send![menu, addItem: item];
+                }
+            };
+
+            add_item("Show zqlcrab", sel!(showWindow:));
+            add_item("Hide zqlcrab", sel!(hideWindow:));
+
+            if let Some(item_cls) = Class::get("NSMenuItem") {
+                let sep: id = msg_send![item_cls, separatorItem];
+                let _: () = msg_send![menu, addItem: sep];
+            }
+
+            add_item("Quit zqlcrab", sel!(quitApp:));
+
+            let _: () = msg_send![status_item, setMenu: menu];
+        }
+    }
+}
+
 fn main() {
     // Initialize background Tokio runtime and set ambient context on main thread
     let _tokio_guard = db::tokio_runtime().enter();
@@ -54,7 +197,10 @@ fn main() {
         .run(|cx| {
             gpui_kit::init(cx);
             #[cfg(target_os = "macos")]
-            setup_macos_app_icon();
+            {
+                setup_macos_app_icon();
+                setup_macos_status_bar();
+            }
 
             let settings = settings::SettingsManager::new();
             let initial_theme = match settings.settings().appearance.theme {
@@ -74,7 +220,6 @@ fn main() {
                 // Application Lifecycle (Quit) - cmd-q and ctrl-q
                 KeyBinding::new("cmd-q", Quit, None),
                 KeyBinding::new("ctrl-q", Quit, None),
-
                 // Window & Dialog Controls
                 KeyBinding::new("cmd-w", CloseWindow, None),
                 KeyBinding::new("ctrl-w", CloseWindow, None),
@@ -82,11 +227,9 @@ fn main() {
                 KeyBinding::new("cmd-m", MinimizeWindow, None),
                 KeyBinding::new("ctrl-m", MinimizeWindow, None),
                 KeyBinding::new("ctrl-cmd-f", ToggleFullscreen, None),
-
                 // Preferences / Settings
                 KeyBinding::new("cmd-,", OpenSettings, None),
                 KeyBinding::new("ctrl-,", OpenSettings, None),
-
                 // Navigation & Connection Management
                 KeyBinding::new("cmd-shift-n", NewConnection, None),
                 KeyBinding::new("ctrl-shift-n", NewConnection, None),
@@ -94,7 +237,6 @@ fn main() {
                 KeyBinding::new("ctrl-t", NewQueryTab, None),
                 KeyBinding::new("cmd-r", RefreshTables, None),
                 KeyBinding::new("ctrl-r", RefreshTables, None),
-
                 // Workspace Tab Switching
                 KeyBinding::new("cmd-1", SelectConsoleTab, None),
                 KeyBinding::new("ctrl-1", SelectConsoleTab, None),
@@ -104,14 +246,12 @@ fn main() {
                 KeyBinding::new("ctrl-3", SelectSchemaTab, None),
                 KeyBinding::new("cmd-4", SelectHistoryTab, None),
                 KeyBinding::new("ctrl-4", SelectHistoryTab, None),
-
                 // Query Execution & Formatting
                 KeyBinding::new("cmd-enter", RunQuery, Some("CrabStudio")),
                 KeyBinding::new("ctrl-enter", RunQuery, Some("CrabStudio")),
                 KeyBinding::new("alt-shift-f", FormatSql, Some("CrabStudio")),
                 KeyBinding::new("cmd-shift-e", ExplainQuery, Some("CrabStudio")),
                 KeyBinding::new("ctrl-shift-e", ExplainQuery, Some("CrabStudio")),
-
                 // Grid Data Editing & Mutation
                 KeyBinding::new("cmd-s", SaveGridChanges, Some("CrabStudio")),
                 KeyBinding::new("ctrl-s", SaveGridChanges, Some("CrabStudio")),

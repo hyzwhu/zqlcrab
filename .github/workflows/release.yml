@@ -62,19 +62,48 @@ jobs:
             libfreetype6-dev \
             libvulkan1
 
+      - name: Install macOS packaging tools
+        if: runner.os == 'macOS'
+        run: brew install create-dmg
+
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Package release artifact (Unix)
-        if: runner.os != 'Windows'
+      - name: Package release artifact (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p dmg-pack/zqlcrab.app/Contents/{MacOS,Resources}
+          cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} dmg-pack/zqlcrab.app/Contents/MacOS/
+          cp assets/icon.icns dmg-pack/zqlcrab.app/Contents/Resources/AppIcon.icns
+          cp assets/Info.plist dmg-pack/zqlcrab.app/Contents/Info.plist
+          cp "assets/若打不开请双击修复.command" dmg-pack/
+          chmod +x dmg-pack/zqlcrab.app/Contents/MacOS/${{ matrix.artifact_name }}
+          chmod +x "dmg-pack/若打不开请双击修复.command"
+
+          create-dmg \
+            --volname "zqlcrab Installer" \
+            --window-pos 200 120 \
+            --window-size 800 420 \
+            --icon-size 100 \
+            --icon "zqlcrab.app" 200 190 \
+            --hide-extension "zqlcrab.app" \
+            --app-drop-link 600 185 \
+            --background "assets/dmg-background.png" \
+            "${{ matrix.asset_name }}.dmg" \
+            "dmg-pack/" || test -f "${{ matrix.asset_name }}.dmg"
+          shasum -a 256 ${{ matrix.asset_name }}.dmg > ${{ matrix.asset_name }}.dmg.sha256
+
+          mkdir -p release-pack
+          cp -r dmg-pack/zqlcrab.app release-pack/
+          cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} release-pack/
+          cp README.md LICENSE-MIT LICENSE-APACHE release-pack/
+          tar -czvf ${{ matrix.asset_name }}.tar.gz -C release-pack .
+          shasum -a 256 ${{ matrix.asset_name }}.tar.gz > ${{ matrix.asset_name }}.tar.gz.sha256
+
+      - name: Package release artifact (Linux)
+        if: runner.os == 'Linux'
         run: |
           mkdir -p release-pack
-          if [ "${{ runner.os }}" = "macOS" ]; then
-            mkdir -p release-pack/zqlcrab.app/Contents/{MacOS,Resources}
-            cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} release-pack/zqlcrab.app/Contents/MacOS/
-            cp assets/icon.icns release-pack/zqlcrab.app/Contents/Resources/AppIcon.icns
-            cp assets/Info.plist release-pack/zqlcrab.app/Contents/Info.plist
-          fi
           cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} release-pack/
           cp README.md LICENSE-MIT LICENSE-APACHE release-pack/
           tar -czvf ${{ matrix.asset_name }}.tar.gz -C release-pack .

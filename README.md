@@ -87,10 +87,19 @@ git clone https://github.com/zqlcrab/zqlcrab.git
 cd zqlcrab
 ```
 
-#### 2. Platform Dependencies
+#### 2. Platform Dependencies & Installation
 
 ##### macOS
-No additional system dependencies required.
+下载 Release 中的 `.dmg` 文件打开后，将 `zqlcrab` 拖拽至 `Applications` 文件夹即可完成安装。
+
+> **⚠️ macOS 首次打开提示“应用已损坏，无法打开”解决方式：**  
+> 这是由于开源免签应用触发了 macOS Gatekeeper 隔离保护。可打开「终端」(Terminal) 执行以下命令解除隔离：
+> ```bash
+> sudo xattr -rd com.apple.quarantine /Applications/zqlcrab.app
+> ```
+> 或在打开的 DMG 镜像中直接双击运行 `若打不开请双击修复.command`。
+
+本地编译：
 ```bash
 cargo build --release
 ```

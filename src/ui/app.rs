@@ -596,8 +596,7 @@ impl CrabStudioApp {
                     "You are running the latest version (v{})",
                     env!("CARGO_PKG_VERSION")
                 ));
-                app.status_message =
-                    Some("Check for updates completed: Up to date".to_string());
+                app.status_message = Some("Check for updates completed: Up to date".to_string());
                 cx.notify();
             })
             .ok();
@@ -3169,136 +3168,138 @@ impl Render for CrabStudioApp {
                 .into_any_element()
         } else {
             match self.active_tab {
-            WorkspaceTab::QueryConsole => {
-                let on_run = {
-                    let handle = app_handle.clone();
-                    move |_: &mut Window, cx: &mut App| {
-                        handle.update(cx, |this, cx| {
-                            this.run_query(cx);
-                        });
-                    }
-                };
-                let on_clear = {
-                    let handle = app_handle.clone();
-                    move |window: &mut Window, cx: &mut App| {
-                        handle.update(cx, |this, cx| {
-                            this.clear_console(window, cx);
-                        });
-                    }
-                };
-                let on_format = {
-                    let handle = app_handle.clone();
-                    move |window: &mut Window, cx: &mut App| {
-                        handle.update(cx, |this, cx| {
-                            this.format_editor_sql(window, cx);
-                        });
-                    }
-                };
-                let on_explain = {
-                    let handle = app_handle.clone();
-                    move |_: &mut Window, cx: &mut App| {
-                        handle.update(cx, |this, cx| {
-                            this.run_explain(cx);
-                        });
-                    }
-                };
-                let on_bottom_tab = {
-                    let handle = app_handle.clone();
-                    move |tab: ConsoleBottomTab, _: &mut Window, cx: &mut App| {
-                        handle.update(cx, |this, cx| {
-                            this.console_bottom_tab = tab;
-                            cx.notify();
-                        });
-                    }
-                };
-                let on_explain_view = {
-                    let handle = app_handle.clone();
-                    move |view: ExplainViewMode, _: &mut Window, cx: &mut App| {
-                        handle.update(cx, |this, cx| {
-                            this.explain_view = view;
-                            cx.notify();
-                        });
-                    }
-                };
-
-                let connection_label = match (
-                    self.active_connection
-                        .as_ref()
-                        .map(|c| c.config.name.clone()),
-                    self.active_connection
-                        .as_ref()
-                        .map(|c| c.config.database.clone()),
-                ) {
-                    (Some(name), Some(db)) if !db.is_empty() => Some(format!("{name} / {db}")),
-                    (Some(name), _) => Some(name),
-                    _ => None,
-                };
-
-                let console_grid = self.build_data_grid(
-                    &app_handle,
-                    self.console_result.clone(),
-                    self.selected_table.clone(),
-                    is_read_only,
-                );
-
-                let console = QueryConsole::new(&self.query_editor, &self.console_split)
-                    .result(self.console_result.clone())
-                    .error(self.console_error.clone())
-                    .explain_plan(self.explain_plan.clone())
-                    .explain_error(self.explain_error.clone())
-                    .executing(self.is_executing_query)
-                    .explaining(self.is_explaining)
-                    .bottom_tab(self.console_bottom_tab)
-                    .explain_view(self.explain_view)
-                    .connection_label(connection_label)
-                    .results_view(console_grid)
-                    .editor_settings(self.settings_manager.settings().editor.clone())
-                    .language(self.settings_manager.settings().language)
-                    .on_run(on_run)
-                    .on_clear(on_clear)
-                    .on_format(on_format)
-                    .on_explain(on_explain)
-                    .on_bottom_tab(on_bottom_tab)
-                    .on_explain_view(on_explain_view);
-
-                let quick_connect_banner = if !is_connected {
-                    let mut conn_chips = h_flex().gap_2().items_center().flex_wrap().min_w_0();
-                    for conn in self.saved_connections.iter().take(4) {
-                        let conn_id = conn.id.clone();
+                WorkspaceTab::QueryConsole => {
+                    let on_run = {
                         let handle = app_handle.clone();
-                        let icon =
-                            crate::ui::components::connection_dialog::database_icon(conn.db_type);
-                        let chip =
-                            Button::new(ElementId::Name(format!("quick_conn_{}", conn.id).into()))
-                                .outline()
-                                .small()
-                                .flex_shrink(1.0)
-                                .min_w(px(32.0))
-                                .overflow_hidden()
-                                .icon(icon)
-                                .label(format!("Connect: {}", conn.name))
-                                .tooltip(format!("Connect to {}", conn.name))
-                                .on_click(move |_, _, cx| {
-                                    handle.update(cx, |this, cx| {
-                                        this.select_connection(&conn_id, cx);
-                                    });
-                                });
-                        conn_chips = conn_chips.child(chip);
-                    }
-
-                    let handle = app_handle.clone();
-                    let new_profile_btn = Button::new("quick_new_profile")
-                        .primary()
-                        .small()
-                        .icon(IconName::Plus)
-                        .label("New Database Connection")
-                        .on_click(move |_, window, cx| {
+                        move |_: &mut Window, cx: &mut App| {
                             handle.update(cx, |this, cx| {
-                                this.open_connection_dialog(window, cx);
+                                this.run_query(cx);
                             });
-                        });
+                        }
+                    };
+                    let on_clear = {
+                        let handle = app_handle.clone();
+                        move |window: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                this.clear_console(window, cx);
+                            });
+                        }
+                    };
+                    let on_format = {
+                        let handle = app_handle.clone();
+                        move |window: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                this.format_editor_sql(window, cx);
+                            });
+                        }
+                    };
+                    let on_explain = {
+                        let handle = app_handle.clone();
+                        move |_: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                this.run_explain(cx);
+                            });
+                        }
+                    };
+                    let on_bottom_tab = {
+                        let handle = app_handle.clone();
+                        move |tab: ConsoleBottomTab, _: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                this.console_bottom_tab = tab;
+                                cx.notify();
+                            });
+                        }
+                    };
+                    let on_explain_view = {
+                        let handle = app_handle.clone();
+                        move |view: ExplainViewMode, _: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                this.explain_view = view;
+                                cx.notify();
+                            });
+                        }
+                    };
 
-                    Some(
+                    let connection_label = match (
+                        self.active_connection
+                            .as_ref()
+                            .map(|c| c.config.name.clone()),
+                        self.active_connection
+                            .as_ref()
+                            .map(|c| c.config.database.clone()),
+                    ) {
+                        (Some(name), Some(db)) if !db.is_empty() => Some(format!("{name} / {db}")),
+                        (Some(name), _) => Some(name),
+                        _ => None,
+                    };
+
+                    let console_grid = self.build_data_grid(
+                        &app_handle,
+                        self.console_result.clone(),
+                        self.selected_table.clone(),
+                        is_read_only,
+                    );
+
+                    let console = QueryConsole::new(&self.query_editor, &self.console_split)
+                        .result(self.console_result.clone())
+                        .error(self.console_error.clone())
+                        .explain_plan(self.explain_plan.clone())
+                        .explain_error(self.explain_error.clone())
+                        .executing(self.is_executing_query)
+                        .explaining(self.is_explaining)
+                        .bottom_tab(self.console_bottom_tab)
+                        .explain_view(self.explain_view)
+                        .connection_label(connection_label)
+                        .results_view(console_grid)
+                        .editor_settings(self.settings_manager.settings().editor.clone())
+                        .language(self.settings_manager.settings().language)
+                        .on_run(on_run)
+                        .on_clear(on_clear)
+                        .on_format(on_format)
+                        .on_explain(on_explain)
+                        .on_bottom_tab(on_bottom_tab)
+                        .on_explain_view(on_explain_view);
+
+                    let quick_connect_banner = if !is_connected {
+                        let mut conn_chips = h_flex().gap_2().items_center().flex_wrap().min_w_0();
+                        for conn in self.saved_connections.iter().take(4) {
+                            let conn_id = conn.id.clone();
+                            let handle = app_handle.clone();
+                            let icon = crate::ui::components::connection_dialog::database_icon(
+                                conn.db_type,
+                            );
+                            let chip = Button::new(ElementId::Name(
+                                format!("quick_conn_{}", conn.id).into(),
+                            ))
+                            .outline()
+                            .small()
+                            .flex_shrink(1.0)
+                            .min_w(px(32.0))
+                            .overflow_hidden()
+                            .icon(icon)
+                            .label(format!("Connect: {}", conn.name))
+                            .tooltip(format!("Connect to {}", conn.name))
+                            .on_click(move |_, _, cx| {
+                                handle.update(cx, |this, cx| {
+                                    this.select_connection(&conn_id, cx);
+                                });
+                            });
+                            conn_chips = conn_chips.child(chip);
+                        }
+
+                        let handle = app_handle.clone();
+                        let new_profile_btn = Button::new("quick_new_profile")
+                            .primary()
+                            .small()
+                            .icon(IconName::Plus)
+                            .label("New Database Connection")
+                            .on_click(move |_, window, cx| {
+                                handle.update(cx, |this, cx| {
+                                    this.open_connection_dialog(window, cx);
+                                });
+                            });
+
+                        Some(
                         v_flex()
                             .w_full()
                             .p_3()
@@ -3331,110 +3332,110 @@ impl Render for CrabStudioApp {
                             )
                             .child(conn_chips),
                     )
-                } else {
-                    None
-                };
+                    } else {
+                        None
+                    };
 
-                v_flex()
-                    .size_full()
-                    .children(quick_connect_banner)
-                    .child(div().size_full().flex_1().min_h_0().child(console))
+                    v_flex()
+                        .size_full()
+                        .children(quick_connect_banner)
+                        .child(div().size_full().flex_1().min_h_0().child(console))
+                        .into_any_element()
+                }
+                WorkspaceTab::DataGrid => {
+                    let grid_data = self
+                        .table_data
+                        .clone()
+                        .or_else(|| self.console_result.clone());
+                    self.build_data_grid(
+                        &app_handle,
+                        grid_data,
+                        self.selected_table.clone(),
+                        is_read_only,
+                    )
                     .into_any_element()
-            }
-            WorkspaceTab::DataGrid => {
-                let grid_data = self
-                    .table_data
-                    .clone()
-                    .or_else(|| self.console_result.clone());
-                self.build_data_grid(
-                    &app_handle,
-                    grid_data,
-                    self.selected_table.clone(),
-                    is_read_only,
-                )
-                .into_any_element()
-            }
-            WorkspaceTab::Schema => {
-                let on_quick = {
-                    let handle = app_handle.clone();
-                    move |sql: String, window: &mut Window, cx: &mut App| {
-                        handle.update(cx, |this, cx| {
-                            this.execute_custom_sql(&sql, window, cx);
-                        });
-                    }
-                };
-                let on_create = {
-                    let handle = app_handle.clone();
-                    move |window: &mut Window, cx: &mut App| {
-                        handle.update(cx, |this, cx| {
-                            this.open_create_table_modal(window, cx);
-                        });
-                    }
-                };
+                }
+                WorkspaceTab::Schema => {
+                    let on_quick = {
+                        let handle = app_handle.clone();
+                        move |sql: String, window: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                this.execute_custom_sql(&sql, window, cx);
+                            });
+                        }
+                    };
+                    let on_create = {
+                        let handle = app_handle.clone();
+                        move |window: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                this.open_create_table_modal(window, cx);
+                            });
+                        }
+                    };
 
-                SchemaViewer::new(
-                    self.selected_table.clone(),
-                    self.schema_columns.clone(),
-                    self.schema_indexes.clone(),
-                    self.schema_ddl.clone(),
-                )
-                .on_quick_query(on_quick)
-                .on_create_table(on_create)
-                .into_any_element()
-            }
-            WorkspaceTab::History => {
-                let on_load = {
-                    let handle = app_handle.clone();
-                    move |sql: String, window: &mut Window, cx: &mut App| {
-                        handle.update(cx, |this, cx| {
-                            this.load_sql_into_editor(&sql, window, cx);
-                        });
-                    }
-                };
-
-                let on_run = {
-                    let handle = app_handle.clone();
-                    move |sql: String, window: &mut Window, cx: &mut App| {
-                        handle.update(cx, |this, cx| {
-                            this.execute_custom_sql(&sql, window, cx);
-                        });
-                    }
-                };
-
-                let on_copy = {
-                    let handle = app_handle.clone();
-                    move |sql: String, _: &mut Window, cx: &mut App| {
-                        handle.update(cx, |this, cx| {
-                            let len = sql.len();
-                            cx.write_to_clipboard(ClipboardItem::new_string(sql));
-                            this.status_message =
-                                Some(format!("Copied SQL to clipboard ({len} bytes)"));
-                            cx.notify();
-                        });
-                    }
-                };
-
-                let on_clear = {
-                    let handle = app_handle.clone();
-                    move |_: &mut Window, cx: &mut App| {
-                        handle.update(cx, |this, cx| {
-                            let _ = this.history_manager.clear();
-                            this.status_message = Some("Query history cleared".to_string());
-                            cx.notify();
-                        });
-                    }
-                };
-
-                QueryHistoryView::new(self.history_manager.items().to_vec())
-                    .filter_keyword(self.history_filter.clone())
-                    .on_load_query(on_load)
-                    .on_run_query(on_run)
-                    .on_copy_query(on_copy)
-                    .on_clear_history(on_clear)
+                    SchemaViewer::new(
+                        self.selected_table.clone(),
+                        self.schema_columns.clone(),
+                        self.schema_indexes.clone(),
+                        self.schema_ddl.clone(),
+                    )
+                    .on_quick_query(on_quick)
+                    .on_create_table(on_create)
                     .into_any_element()
+                }
+                WorkspaceTab::History => {
+                    let on_load = {
+                        let handle = app_handle.clone();
+                        move |sql: String, window: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                this.load_sql_into_editor(&sql, window, cx);
+                            });
+                        }
+                    };
+
+                    let on_run = {
+                        let handle = app_handle.clone();
+                        move |sql: String, window: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                this.execute_custom_sql(&sql, window, cx);
+                            });
+                        }
+                    };
+
+                    let on_copy = {
+                        let handle = app_handle.clone();
+                        move |sql: String, _: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                let len = sql.len();
+                                cx.write_to_clipboard(ClipboardItem::new_string(sql));
+                                this.status_message =
+                                    Some(format!("Copied SQL to clipboard ({len} bytes)"));
+                                cx.notify();
+                            });
+                        }
+                    };
+
+                    let on_clear = {
+                        let handle = app_handle.clone();
+                        move |_: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                let _ = this.history_manager.clear();
+                                this.status_message = Some("Query history cleared".to_string());
+                                cx.notify();
+                            });
+                        }
+                    };
+
+                    QueryHistoryView::new(self.history_manager.items().to_vec())
+                        .filter_keyword(self.history_filter.clone())
+                        .on_load_query(on_load)
+                        .on_run_query(on_run)
+                        .on_copy_query(on_copy)
+                        .on_clear_history(on_clear)
+                        .into_any_element()
+                }
             }
-        }
-    };
+        };
 
         // Footer status bar
         let query_row_count = match self.active_tab {
@@ -4019,7 +4020,11 @@ impl Render for CrabStudioApp {
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &ToggleActivityBar, _, cx| {
-                let curr = this.settings_manager.settings().appearance.show_activity_bar;
+                let curr = this
+                    .settings_manager
+                    .settings()
+                    .appearance
+                    .show_activity_bar;
                 let _ = this.settings_manager.update(|s| {
                     s.appearance.show_activity_bar = !curr;
                 });
