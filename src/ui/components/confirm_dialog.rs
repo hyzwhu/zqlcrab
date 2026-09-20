@@ -200,6 +200,7 @@ impl RenderOnce for ConfirmDialog {
         };
 
         let table_target_badge = h_flex()
+            .w_full()
             .items_center()
             .gap_2()
             .px_3()
@@ -209,16 +210,21 @@ impl RenderOnce for ConfirmDialog {
             .border_1()
             .border_color(ThemeColors::BORDER)
             .child(
-                Icon::new(if is_view {
-                    IconName::Eye
-                } else {
-                    IconName::Table
-                })
-                .size(px(16.0))
-                .text_color(ThemeColors::PRIMARY_BORDER),
+                div().flex_shrink_0().child(
+                    Icon::new(if is_view {
+                        IconName::Eye
+                    } else {
+                        IconName::Table
+                    })
+                    .size(px(16.0))
+                    .text_color(ThemeColors::PRIMARY_BORDER),
+                ),
             )
             .child(
                 div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
                     .text_sm()
                     .font_weight(FontWeight::BOLD)
                     .text_color(ThemeColors::TEXT_PRIMARY)
@@ -226,6 +232,7 @@ impl RenderOnce for ConfirmDialog {
             )
             .child(
                 div()
+                    .flex_shrink_0()
                     .px_1p5()
                     .py_0p5()
                     .rounded_sm()
@@ -236,6 +243,7 @@ impl RenderOnce for ConfirmDialog {
             )
             .child(
                 div()
+                    .flex_shrink_0()
                     .px_1p5()
                     .py_0p5()
                     .rounded_sm()
@@ -336,6 +344,7 @@ impl RenderOnce for ConfirmDialog {
                             .gap_2p5()
                             .p_3()
                             .rounded_md()
+                            .overflow_hidden()
                             .bg(if is_drop {
                                 rgba(0xEF444415)
                             } else {
@@ -361,6 +370,7 @@ impl RenderOnce for ConfirmDialog {
                             .child(
                                 div()
                                     .flex_1()
+                                    .min_w_0()
                                     .text_xs()
                                     .line_height(px(18.0))
                                     .text_color(ThemeColors::TEXT_PRIMARY)
@@ -387,6 +397,7 @@ impl RenderOnce for ConfirmDialog {
                                     .bg(ThemeColors::BG_SURFACE)
                                     .border_1()
                                     .border_color(ThemeColors::BORDER)
+                                    .overflow_hidden()
                                     .font_family("JetBrains Mono")
                                     .text_xs()
                                     .text_color(ThemeColors::PRIMARY_BORDER)
