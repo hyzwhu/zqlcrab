@@ -1,4 +1,5 @@
 pub mod activity_bar;
+pub mod confirm_dialog;
 pub mod connection_dialog;
 pub mod create_table_modal;
 pub mod data_grid;
@@ -12,6 +13,7 @@ pub mod sql_review_modal;
 pub mod status_bar;
 
 pub use activity_bar::{ActivityBar, ActivityNav};
+pub use confirm_dialog::{ConfirmActionKind, ConfirmDialog};
 pub use connection_dialog::ConnectionDialog;
 pub use create_table_modal::{CreateTableColumnState, CreateTableModal};
 pub use data_grid::DataGrid;

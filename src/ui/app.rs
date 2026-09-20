@@ -18,9 +18,9 @@ use crate::db::types::{
 };
 use crate::settings::{SettingsManager, ThemePreference};
 use crate::ui::components::{
-    ActivityBar, ActivityNav, AppStatusBar, ConnectionDialog, ConsoleBottomTab, DataGrid,
-    ExplainViewMode, QueryConsole, QueryHistoryView, SchemaViewer, SettingsTab, SettingsView,
-    Sidebar, SqlReviewModal,
+    ActivityBar, ActivityNav, AppStatusBar, ConfirmActionKind, ConfirmDialog, ConnectionDialog,
+    ConsoleBottomTab, DataGrid, ExplainViewMode, QueryConsole, QueryHistoryView, SchemaViewer,
+    SettingsTab, SettingsView, Sidebar, SqlReviewModal,
     create_table_modal::{CreateTableColumnState, CreateTableIndexState, CreateTableModal},
     data_grid::GridCellCoord,
 };
@@ -137,6 +137,16 @@ fn parse_edited_query_value(new_text: &str, orig_val: &QueryValue, col_type: &st
     }
 }
 
+#[derive(Clone)]
+pub struct TableConfirmActionState {
+    pub kind: ConfirmActionKind,
+    pub table: TableInfo,
+    pub database_family: DatabaseFamily,
+    pub sql_preview: String,
+    pub is_executing: bool,
+    pub error: Option<String>,
+}
+
 pub struct CrabStudioApp {
     manager: ConnectionManager,
     saved_connections: Vec<ConnectionConfig>,
@@ -148,6 +158,9 @@ pub struct CrabStudioApp {
     schema_indexes: Vec<IndexInfo>,
     schema_ddl: Option<String>,
     active_tab: WorkspaceTab,
+
+    // Table confirm dialog state (Drop/Truncate)
+    table_confirm_modal: Option<TableConfirmActionState>,
 
     // Query console state
     query_editor: Entity<TextareaState>,
@@ -331,6 +344,7 @@ impl CrabStudioApp {
             schema_indexes: Vec::new(),
             schema_ddl: None,
             active_tab: WorkspaceTab::QueryConsole,
+            table_confirm_modal: None,
             query_editor,
             console_split,
             console_result: None,
@@ -1972,6 +1986,145 @@ impl CrabStudioApp {
         cx.notify();
     }
 
+    /// Open Drop Table / Drop View confirmation dialog
+    pub fn open_drop_table_confirm(&mut self, table: TableInfo, cx: &mut Context<Self>) {
+        let family = self
+            .active_connection
+            .as_ref()
+            .map(|c| c.config.db_type.family())
+            .unwrap_or(DatabaseFamily::Sqlite);
+        let qualified = table.qualified_name(family);
+        let is_view = table.is_view();
+        let kind = if is_view {
+            ConfirmActionKind::DropView
+        } else {
+            ConfirmActionKind::DropTable
+        };
+        let sql_preview = if is_view {
+            format!("DROP VIEW {qualified};")
+        } else {
+            format!("DROP TABLE {qualified};")
+        };
+
+        self.table_confirm_modal = Some(TableConfirmActionState {
+            kind,
+            table,
+            database_family: family,
+            sql_preview,
+            is_executing: false,
+            error: None,
+        });
+        cx.notify();
+    }
+
+    /// Open Truncate Table confirmation dialog
+    pub fn open_truncate_table_confirm(&mut self, table: TableInfo, cx: &mut Context<Self>) {
+        let family = self
+            .active_connection
+            .as_ref()
+            .map(|c| c.config.db_type.family())
+            .unwrap_or(DatabaseFamily::Sqlite);
+        let qualified = table.qualified_name(family);
+        let sql_preview = match family {
+            DatabaseFamily::Sqlite => format!("DELETE FROM {qualified};"),
+            _ => format!("TRUNCATE TABLE {qualified};"),
+        };
+
+        self.table_confirm_modal = Some(TableConfirmActionState {
+            kind: ConfirmActionKind::TruncateTable,
+            table,
+            database_family: family,
+            sql_preview,
+            is_executing: false,
+            error: None,
+        });
+        cx.notify();
+    }
+
+    /// Execute the confirmed table action (Drop/Truncate)
+    pub fn execute_table_confirm_action(&mut self, cx: &mut Context<Self>) {
+        let Some(ref mut modal_state) = self.table_confirm_modal else {
+            return;
+        };
+
+        let Some(conn) = self.active_connection.clone() else {
+            modal_state.error = Some("No active database connection".to_string());
+            cx.notify();
+            return;
+        };
+
+        if conn.config.is_read_only {
+            modal_state.error = Some("Connection is in Read-Only mode".to_string());
+            cx.notify();
+            return;
+        }
+
+        modal_state.is_executing = true;
+        modal_state.error = None;
+        cx.notify();
+
+        let sql = modal_state.sql_preview.clone();
+        let kind = modal_state.kind;
+        let table_name = modal_state.table.name.clone();
+        let is_drop = kind.is_drop();
+
+        cx.spawn(async move |this, cx: &mut AsyncApp| {
+            let res = conn.execute_batch(&sql).await;
+
+            this.update(cx, |app, cx| {
+                match res {
+                    Ok(_) => {
+                        app.table_confirm_modal = None;
+                        let action_desc = match kind {
+                            ConfirmActionKind::DropTable => {
+                                format!("Table '{table_name}' dropped successfully")
+                            }
+                            ConfirmActionKind::DropView => {
+                                format!("View '{table_name}' dropped successfully")
+                            }
+                            ConfirmActionKind::TruncateTable => {
+                                format!("Table '{table_name}' truncated successfully")
+                            }
+                        };
+                        app.status_message = Some(action_desc);
+
+                        if is_drop {
+                            if app.selected_table.as_deref() == Some(&table_name) {
+                                app.selected_table = None;
+                                app.table_data = None;
+                                app.schema_columns.clear();
+                                app.schema_indexes.clear();
+                                app.schema_ddl = None;
+                            }
+                        } else if app.selected_table.as_deref() == Some(&table_name) {
+                            if let Some(tbl) = app
+                                .active_tables
+                                .iter()
+                                .find(|t| t.name == table_name)
+                                .cloned()
+                            {
+                                app.select_table(tbl, cx);
+                            }
+                        }
+
+                        app.refresh_schema(cx);
+                        cx.notify();
+                    }
+                    Err(err) => {
+                        if let Some(ref mut state) = app.table_confirm_modal {
+                            state.is_executing = false;
+                            state.error = Some(err.to_string());
+                        }
+                        app.status_message = Some(format!("Action failed: {err}"));
+                        cx.notify();
+                    }
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     /// Clear console editor & results
     pub fn clear_console(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.query_editor.update(cx, |editor, cx| {
@@ -2608,6 +2761,7 @@ impl Render for CrabStudioApp {
             &self.sidebar_split,
         )
         .selected_table(self.selected_table.clone())
+        .language(self.settings_manager.settings().language)
         .on_create_table({
             let handle = app_handle.clone();
             move |window, cx| {
@@ -2637,6 +2791,62 @@ impl Render for CrabStudioApp {
             move |table, _, cx| {
                 handle.update(cx, |this, cx| {
                     this.select_table(table, cx);
+                });
+            }
+        })
+        .on_view_schema({
+            let handle = app_handle.clone();
+            move |table, _, cx| {
+                handle.update(cx, |this, cx| {
+                    this.select_table(table, cx);
+                    this.active_tab = WorkspaceTab::Schema;
+                    cx.notify();
+                });
+            }
+        })
+        .on_query_table({
+            let handle = app_handle.clone();
+            move |table, window, cx| {
+                handle.update(cx, |this, cx| {
+                    let family = this
+                        .active_connection
+                        .as_ref()
+                        .map(|c| c.config.db_type.family())
+                        .unwrap_or(DatabaseFamily::Sqlite);
+                    let qualified = table.qualified_name(family);
+                    let sql = format!("SELECT * FROM {qualified} LIMIT 100;\n");
+                    this.query_editor.update(cx, |ed, cx| {
+                        ed.set_value(sql, window, cx);
+                    });
+                    this.active_tab = WorkspaceTab::QueryConsole;
+                    this.active_nav = ActivityNav::Console;
+                    cx.notify();
+                });
+            }
+        })
+        .on_copy_table_name({
+            let handle = app_handle.clone();
+            move |text, _, cx| {
+                handle.update(cx, |this, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
+                    this.status_message = Some(format!("Copied to clipboard: {text}"));
+                    cx.notify();
+                });
+            }
+        })
+        .on_truncate_table({
+            let handle = app_handle.clone();
+            move |table, _, cx| {
+                handle.update(cx, |this, cx| {
+                    this.open_truncate_table_confirm(table, cx);
+                });
+            }
+        })
+        .on_drop_table({
+            let handle = app_handle.clone();
+            move |table, _, cx| {
+                handle.update(cx, |this, cx| {
+                    this.open_drop_table_confirm(table, cx);
                 });
             }
         })
@@ -3427,6 +3637,43 @@ impl Render for CrabStudioApp {
             None
         };
 
+        // Table destructive action confirm dialog overlay (Drop/Truncate)
+        let table_confirm_overlay = if let Some(ref action_state) = self.table_confirm_modal {
+            let on_confirm = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.execute_table_confirm_action(cx);
+                    });
+                }
+            };
+            let on_cancel = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.table_confirm_modal = None;
+                        cx.notify();
+                    });
+                }
+            };
+
+            Some(
+                ConfirmDialog::new(
+                    action_state.kind,
+                    action_state.table.clone(),
+                    action_state.database_family,
+                    action_state.sql_preview.clone(),
+                )
+                .language(self.settings_manager.settings().language)
+                .executing(action_state.is_executing)
+                .error(action_state.error.clone())
+                .on_confirm(on_confirm)
+                .on_cancel(on_cancel),
+            )
+        } else {
+            None
+        };
+
         // Left rail Activity Bar
         let activity_bar = ActivityBar::new(self.active_nav, self.settings_manager.settings().language)
             .on_select_nav({
@@ -3594,7 +3841,10 @@ impl Render for CrabStudioApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &CloseDialog, _, cx| {
-                if this.create_table_modal_open {
+                if this.table_confirm_modal.is_some() {
+                    this.table_confirm_modal = None;
+                    cx.notify();
+                } else if this.create_table_modal_open {
                     this.create_table_modal_open = false;
                     this.create_table_error = None;
                     cx.notify();
@@ -3653,5 +3903,6 @@ impl Render for CrabStudioApp {
             .children(dialog_overlay)
             .children(sql_review_overlay)
             .children(create_table_overlay)
+            .children(table_confirm_overlay)
     }
 }

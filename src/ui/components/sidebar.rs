@@ -1,6 +1,8 @@
 //! Sidebar navigation displaying saved connection profiles and database schema tree.
 
 use crate::db::types::{ConnectionConfig, DatabaseFamily, TableInfo};
+use crate::settings::AppLanguage;
+use crate::ui::i18n::t;
 use crate::ui::theme::ThemeColors;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::{h_flex, v_flex};
@@ -19,6 +21,17 @@ use gpui_kit::gpui::{
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
+#[derive(Clone)]
+struct TableActionCallbacks {
+    on_select: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
+    on_view_schema: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
+    on_query_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
+    on_quick_query: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
+    on_copy_name: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
+    on_truncate: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
+    on_drop: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
+}
+
 #[derive(IntoElement)]
 pub struct Sidebar {
     connections: Vec<ConnectionConfig>,
@@ -28,15 +41,21 @@ pub struct Sidebar {
     table_filter: Entity<InputState>,
     split_state: Entity<ResizableState>,
     selected_table: Option<String>,
+    language: AppLanguage,
     on_new_connection: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_select_connection: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
     on_select_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
+    on_view_schema: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
+    on_query_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_disconnect: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_refresh: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_quick_query: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
+    on_copy_table_name: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
     on_edit_connection: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
     on_duplicate_connection: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
     on_delete_connection: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
+    on_truncate_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
+    on_drop_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_create_table: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
 }
 
@@ -57,21 +76,72 @@ impl Sidebar {
             table_filter: table_filter.clone(),
             split_state: split_state.clone(),
             selected_table: None,
+            language: AppLanguage::En,
             on_new_connection: None,
             on_select_connection: None,
             on_select_table: None,
+            on_view_schema: None,
+            on_query_table: None,
             on_disconnect: None,
             on_refresh: None,
             on_quick_query: None,
+            on_copy_table_name: None,
             on_edit_connection: None,
             on_duplicate_connection: None,
             on_delete_connection: None,
+            on_truncate_table: None,
+            on_drop_table: None,
             on_create_table: None,
         }
     }
 
     pub fn selected_table(mut self, table: Option<String>) -> Self {
         self.selected_table = table;
+        self
+    }
+
+    pub fn language(mut self, lang: AppLanguage) -> Self {
+        self.language = lang;
+        self
+    }
+
+    pub fn on_view_schema<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(TableInfo, &mut Window, &mut App) + 'static,
+    {
+        self.on_view_schema = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_query_table<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(TableInfo, &mut Window, &mut App) + 'static,
+    {
+        self.on_query_table = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_copy_table_name<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(String, &mut Window, &mut App) + 'static,
+    {
+        self.on_copy_table_name = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_truncate_table<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(TableInfo, &mut Window, &mut App) + 'static,
+    {
+        self.on_truncate_table = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_drop_table<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(TableInfo, &mut Window, &mut App) + 'static,
+    {
+        self.on_drop_table = Some(Rc::new(handler));
         self
     }
 
@@ -230,6 +300,145 @@ impl Sidebar {
                         handler(cid_del.clone(), window, cx);
                     }
                 }),
+        );
+
+        menu
+    }
+
+    fn render_table_menu(
+        info: &TableInfo,
+        family: DatabaseFamily,
+        lang: AppLanguage,
+        actions: &TableActionCallbacks,
+        mut menu: PopupMenu,
+        _window: &mut Window,
+        _cx: &mut Context<PopupMenu>,
+    ) -> PopupMenu {
+        let is_view = info.is_view();
+        let qualified = info.qualified_name(family);
+        let tbl_name = info.name.clone();
+
+        // 1. Open Data / 浏览数据
+        let select_handler = actions.on_select.clone();
+        let tbl_open = info.clone();
+        menu = menu.item(
+            PopupMenuItem::new(t("table_menu.open_data", lang))
+                .icon(IconName::Table)
+                .on_click(move |_, window, cx| {
+                    if let Some(ref handler) = select_handler {
+                        handler(tbl_open.clone(), window, cx);
+                    }
+                }),
+        );
+
+        // 2. View Structure / 查看表结构
+        let schema_handler = actions.on_view_schema.clone();
+        let tbl_schema = info.clone();
+        menu = menu.item(
+            PopupMenuItem::new(t("table_menu.view_schema", lang))
+                .icon(IconName::TableProperties)
+                .on_click(move |_, window, cx| {
+                    if let Some(ref handler) = schema_handler {
+                        handler(tbl_schema.clone(), window, cx);
+                    }
+                }),
+        );
+
+        // 3. Query in Console / 在控制台查询
+        let query_handler = actions.on_query_table.clone();
+        let tbl_query = info.clone();
+        menu = menu.item(
+            PopupMenuItem::new(t("table_menu.query_console", lang))
+                .icon(IconName::Terminal)
+                .on_click(move |_, window, cx| {
+                    if let Some(ref handler) = query_handler {
+                        handler(tbl_query.clone(), window, cx);
+                    }
+                }),
+        );
+
+        // 4. Count Rows / 统计总行数
+        let quick_handler = actions.on_quick_query.clone();
+        let q_sql = format!("SELECT COUNT(*) AS total_count FROM {qualified};");
+        menu = menu.item(
+            PopupMenuItem::new(t("table_menu.count_rows", lang))
+                .icon(IconName::Hash)
+                .on_click(move |_, window, cx| {
+                    if let Some(ref handler) = quick_handler {
+                        handler(q_sql.clone(), window, cx);
+                    }
+                }),
+        );
+
+        menu = menu.separator();
+
+        // 5. Copy Table Name / 复制表名
+        let copy_handler = actions.on_copy_name.clone();
+        let name_to_copy = tbl_name.clone();
+        menu = menu.item(
+            PopupMenuItem::new(t("table_menu.copy_name", lang))
+                .icon(IconName::Copy)
+                .on_click(move |_, window, cx| {
+                    if let Some(ref handler) = copy_handler {
+                        handler(name_to_copy.clone(), window, cx);
+                    }
+                }),
+        );
+
+        // 6. Copy SELECT Statement / 复制 SELECT 语句
+        let copy_sql_handler = actions.on_copy_name.clone();
+        let select_sql = format!("SELECT * FROM {qualified} LIMIT 100;");
+        menu = menu.item(
+            PopupMenuItem::new(t("table_menu.copy_select", lang))
+                .icon(IconName::FileCode)
+                .on_click(move |_, window, cx| {
+                    if let Some(ref handler) = copy_sql_handler {
+                        handler(select_sql.clone(), window, cx);
+                    }
+                }),
+        );
+
+        menu = menu.separator();
+
+        // 7. Truncate Table... (tables only, not views)
+        if !is_view {
+            let trunc_handler = actions.on_truncate.clone();
+            let tbl_trunc = info.clone();
+            let trunc_icon = Icon::new(IconName::RotateCcw).text_color(ThemeColors::WARNING);
+            menu = menu.item(
+                PopupMenuItem::element(move |_, _| {
+                    div()
+                        .text_color(ThemeColors::WARNING)
+                        .child(t("table_menu.truncate", lang))
+                })
+                .icon(trunc_icon)
+                .on_click(move |_, window, cx| {
+                    if let Some(ref handler) = trunc_handler {
+                        handler(tbl_trunc.clone(), window, cx);
+                    }
+                }),
+            );
+        }
+
+        // 8. Drop Table... / Drop View...
+        let drop_handler = actions.on_drop.clone();
+        let tbl_drop = info.clone();
+        let drop_label = if is_view {
+            t("table_menu.drop_view", lang)
+        } else {
+            t("table_menu.drop", lang)
+        };
+        let drop_icon = Icon::new(IconName::Trash).text_color(ThemeColors::ERROR);
+        menu = menu.item(
+            PopupMenuItem::element(move |_, _| {
+                div().text_color(ThemeColors::ERROR).child(drop_label)
+            })
+            .icon(drop_icon)
+            .on_click(move |_, window, cx| {
+                if let Some(ref handler) = drop_handler {
+                    handler(tbl_drop.clone(), window, cx);
+                }
+            }),
         );
 
         menu
@@ -705,13 +914,23 @@ impl RenderOnce for Sidebar {
                         IconName::Table,
                         self.on_create_table.clone(),
                     ));
+                    let tbl_actions = TableActionCallbacks {
+                        on_select: self.on_select_table.clone(),
+                        on_view_schema: self.on_view_schema.clone(),
+                        on_query_table: self.on_query_table.clone(),
+                        on_quick_query: on_quick.clone(),
+                        on_copy_name: self.on_copy_table_name.clone(),
+                        on_truncate: self.on_truncate_table.clone(),
+                        on_drop: self.on_drop_table.clone(),
+                    };
+
                     for tbl in &tables {
                         tbl_list = tbl_list.child(table_row(
                             tbl,
                             &self.selected_table,
                             active_family,
-                            self.on_select_table.clone(),
-                            on_quick.clone(),
+                            self.language,
+                            &tbl_actions,
                         ));
                     }
 
@@ -725,8 +944,8 @@ impl RenderOnce for Sidebar {
                             tbl,
                             &self.selected_table,
                             active_family,
-                            self.on_select_table.clone(),
-                            on_quick.clone(),
+                            self.language,
+                            &tbl_actions,
                         ));
                     }
                 }
@@ -856,16 +1075,17 @@ fn table_row(
     tbl: &TableInfo,
     selected_table: &Option<String>,
     family: DatabaseFamily,
-    on_select: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
-    on_quick: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
+    lang: AppLanguage,
+    actions: &TableActionCallbacks,
 ) -> impl IntoElement {
     let is_selected = selected_table.as_deref() == Some(&tbl.name);
     let info = tbl.clone();
     let info_click = info.clone();
     let qualified = tbl.qualified_name(family);
     let qualified_count = qualified.clone();
-    let on_quick_select = on_quick.clone();
-    let on_quick_count = on_quick.clone();
+    let on_select = actions.on_select.clone();
+    let on_quick_select = actions.on_quick_query.clone();
+    let on_quick_count = actions.on_quick_query.clone();
     let icon_name = if tbl.is_view() {
         IconName::Eye
     } else {
@@ -876,6 +1096,28 @@ fn table_row(
         tbl.schema.as_deref().unwrap_or("default"),
         tbl.name
     );
+
+    let info_for_menu = tbl.clone();
+    let actions_for_menu = actions.clone();
+    let info_for_ctx = tbl.clone();
+    let actions_for_ctx = actions.clone();
+
+    let more_btn = Button::new(ElementId::Name(format!("table_more_{}", tbl.name).into()))
+        .ghost()
+        .xsmall()
+        .icon(IconName::Ellipsis)
+        .tooltip(t("table_menu.open_data", lang))
+        .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, window, cx| {
+            Sidebar::render_table_menu(
+                &info_for_menu,
+                family,
+                lang,
+                &actions_for_menu,
+                menu,
+                window,
+                cx,
+            )
+        });
 
     h_flex()
         .id(ElementId::Name(row_id.into()))
@@ -961,11 +1203,23 @@ fn table_row(
                                 );
                             })
                         }),
-                ),
+                )
+                .child(more_btn),
         )
         .on_click(move |_, window, cx| {
             if let Some(ref handler) = on_select {
                 handler(info_click.clone(), window, cx);
             }
+        })
+        .context_menu(move |menu, window, cx| {
+            Sidebar::render_table_menu(
+                &info_for_ctx,
+                family,
+                lang,
+                &actions_for_ctx,
+                menu,
+                window,
+                cx,
+            )
         })
 }

@@ -115,6 +115,30 @@ fn translate_en(key: &'static str) -> &'static str {
         "language.zh" => "简体中文 (Simplified Chinese)",
         "language.zh_desc" => "完整的中文本地化界面",
 
+        // Table context menu & actions
+        "table_menu.open_data" => "Open Data",
+        "table_menu.view_schema" => "View Structure",
+        "table_menu.query_console" => "Query in Console",
+        "table_menu.count_rows" => "Count Rows",
+        "table_menu.copy_name" => "Copy Table Name",
+        "table_menu.copy_select" => "Copy SELECT Statement",
+        "table_menu.truncate" => "Truncate Table...",
+        "table_menu.drop" => "Drop Table...",
+        "table_menu.drop_view" => "Drop View...",
+
+        // Table deletion & truncate dialog
+        "dialog.drop_table_title" => "Drop Table",
+        "dialog.drop_view_title" => "Drop View",
+        "dialog.truncate_table_title" => "Truncate Table",
+        "dialog.drop_table_desc" => "This action is permanent and cannot be undone. The table and all its data, constraints, and indexes will be permanently removed.",
+        "dialog.drop_view_desc" => "This action is permanent and cannot be undone. The view definition will be permanently removed.",
+        "dialog.truncate_table_desc" => "This will delete all records stored in this table. The table schema will remain intact, but data cannot be recovered.",
+        "dialog.confirm_drop" => "Drop Table",
+        "dialog.confirm_drop_view" => "Drop View",
+        "dialog.confirm_truncate" => "Truncate Table",
+        "dialog.cancel" => "Cancel",
+        "dialog.sql_statement" => "SQL Statement",
+
         // Other tabs
         "about.desc" => "A modern, high-performance database IDE built with Rust & GPUI",
 
@@ -226,6 +250,30 @@ fn translate_zh(key: &'static str) -> &'static str {
         "language.en_desc" => "Standard English interface",
         "language.zh" => "简体中文 (Simplified Chinese)",
         "language.zh_desc" => "完整的中文本地化界面",
+
+        // Table context menu & actions
+        "table_menu.open_data" => "浏览数据",
+        "table_menu.view_schema" => "查看表结构",
+        "table_menu.query_console" => "在控制台查询",
+        "table_menu.count_rows" => "统计总行数",
+        "table_menu.copy_name" => "复制表名",
+        "table_menu.copy_select" => "复制 SELECT 语句",
+        "table_menu.truncate" => "清空数据表...",
+        "table_menu.drop" => "删除数据表...",
+        "table_menu.drop_view" => "删除视图...",
+
+        // Table deletion & truncate dialog
+        "dialog.drop_table_title" => "删除数据表",
+        "dialog.drop_view_title" => "删除视图",
+        "dialog.truncate_table_title" => "清空数据表",
+        "dialog.drop_table_desc" => "此操作不可逆！该表及其包含的所有数据、约束和索引将被永久删除，无法恢复。",
+        "dialog.drop_view_desc" => "此操作不可逆！该视图的定义将被永久删除。",
+        "dialog.truncate_table_desc" => "此操作将清空该表中的所有数据记录。表结构将保留，但数据将无法恢复。",
+        "dialog.confirm_drop" => "确认删除",
+        "dialog.confirm_drop_view" => "确认删除视图",
+        "dialog.confirm_truncate" => "确认清空",
+        "dialog.cancel" => "取消",
+        "dialog.sql_statement" => "即将执行的 SQL 语句",
 
         // Other tabs
         "about.desc" => "基于 Rust 与 GPUI 打造的高性能现代化桌面数据库客户端",
