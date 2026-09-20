@@ -12,6 +12,7 @@ use gpui_kit::component::{
     input::{Input, InputState},
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem},
     resizable::{ResizableState, resizable_panel, v_resizable},
+    tooltip::Tooltip,
 };
 use gpui_kit::gpui::{
     Anchor, App, Context, ElementId, Entity, FontWeight, InteractiveElement as _, IntoElement,
@@ -887,24 +888,36 @@ impl RenderOnce for Sidebar {
                     .p_1();
 
                 for (schema, (tables, views)) in grouped {
+                    let schema_label = schema.clone();
+                    let schema_tip = schema.clone();
                     tbl_list = tbl_list.child(
                         h_flex()
+                            .id(ElementId::Name(format!("schema_folder_{}", schema).into()))
                             .w_full()
+                            .min_w_0()
                             .px_2()
                             .py_1()
                             .items_center()
                             .gap_1p5()
+                            .tooltip(move |window, cx| {
+                                Tooltip::new(schema_tip.clone()).build(window, cx)
+                            })
                             .child(
                                 Icon::new(IconName::Folder)
                                     .size(px(13.0))
+                                    .flex_shrink_0()
                                     .text_color(ThemeColors::PRIMARY_LIGHT),
                             )
                             .child(
                                 div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .overflow_hidden()
+                                    .text_ellipsis()
                                     .text_xs()
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(ThemeColors::TEXT_PRIMARY)
-                                    .child(schema.clone()),
+                                    .child(schema_label),
                             ),
                     );
 
@@ -1102,6 +1115,9 @@ fn table_row(
     let info_for_ctx = tbl.clone();
     let actions_for_ctx = actions.clone();
 
+    let full_name = tbl.name.clone();
+    let tooltip_name = full_name.clone();
+
     let more_btn = Button::new(ElementId::Name(format!("table_more_{}", tbl.name).into()))
         .ghost()
         .xsmall()
@@ -1119,15 +1135,100 @@ fn table_row(
             )
         });
 
+    let left_area = h_flex()
+        .id(ElementId::Name(
+            format!(
+                "tbl_left_{}_{}",
+                tbl.schema.as_deref().unwrap_or("default"),
+                tbl.name
+            )
+            .into(),
+        ))
+        .flex_1()
+        .min_w_0()
+        .items_center()
+        .gap_1p5()
+        .tooltip(move |window, cx| {
+            Tooltip::new(tooltip_name.clone()).build(window, cx)
+        })
+        .child(
+            Icon::new(icon_name)
+                .size(px(13.0))
+                .flex_shrink_0()
+                .text_color(if is_selected {
+                    ThemeColors::TEXT_PRIMARY
+                } else {
+                    ThemeColors::SUCCESS
+                }),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .overflow_hidden()
+                .text_ellipsis()
+                .text_xs()
+                .text_color(ThemeColors::TEXT_PRIMARY)
+                .child(tbl.name.clone()),
+        );
+
+    let actions_area = h_flex()
+        .flex_shrink_0()
+        .items_center()
+        .gap_0p5()
+        .child(
+            Button::new(ElementId::Name(format!("quick_sel_{}", info.name).into()))
+                .ghost()
+                .xsmall()
+                .icon(IconName::Play)
+                .tooltip("SELECT * LIMIT 100")
+                .when_some(on_quick_select, |btn, handler| {
+                    let on_sel_quick = on_select.clone();
+                    let info_quick = info.clone();
+                    btn.on_click(move |_, window, cx| {
+                        if let Some(ref sel_h) = on_sel_quick {
+                            sel_h(info_quick.clone(), window, cx);
+                        }
+                        handler(
+                            format!("SELECT * FROM {qualified} LIMIT 100;"),
+                            window,
+                            cx,
+                        );
+                    })
+                }),
+        )
+        .child(
+            Button::new(ElementId::Name(format!("quick_cnt_{}", info.name).into()))
+                .ghost()
+                .xsmall()
+                .tooltip("COUNT(*)")
+                .child("#")
+                .when_some(on_quick_count, |btn, handler| {
+                    btn.on_click(move |_, window, cx| {
+                        handler(
+                            format!(
+                                "SELECT COUNT(*) AS total_count FROM {qualified_count};"
+                            ),
+                            window,
+                            cx,
+                        );
+                    })
+                }),
+        )
+        .child(more_btn);
+
     h_flex()
         .id(ElementId::Name(row_id.into()))
         .w_full()
+        .min_w_0()
+        .overflow_hidden()
         .py_1()
         .px_2()
         .pl_6()
         .rounded_sm()
         .items_center()
         .justify_between()
+        .gap_1()
         .cursor_pointer()
         .bg(if is_selected {
             ThemeColors::PRIMARY
@@ -1141,71 +1242,8 @@ fn table_row(
                 s
             }
         })
-        .child(
-            h_flex()
-                .items_center()
-                .gap_2()
-                .child(
-                    Icon::new(icon_name)
-                        .size(px(13.0))
-                        .text_color(if is_selected {
-                            ThemeColors::TEXT_PRIMARY
-                        } else {
-                            ThemeColors::SUCCESS
-                        }),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(ThemeColors::TEXT_PRIMARY)
-                        .child(tbl.name.clone()),
-                ),
-        )
-        .child(
-            h_flex()
-                .items_center()
-                .gap_1()
-                .child(
-                    Button::new(ElementId::Name(format!("quick_sel_{}", info.name).into()))
-                        .ghost()
-                        .xsmall()
-                        .icon(IconName::Play)
-                        .tooltip("SELECT * LIMIT 100")
-                        .when_some(on_quick_select, |btn, handler| {
-                            let on_sel_quick = on_select.clone();
-                            let info_quick = info.clone();
-                            btn.on_click(move |_, window, cx| {
-                                if let Some(ref sel_h) = on_sel_quick {
-                                    sel_h(info_quick.clone(), window, cx);
-                                }
-                                handler(
-                                    format!("SELECT * FROM {qualified} LIMIT 100;"),
-                                    window,
-                                    cx,
-                                );
-                            })
-                        }),
-                )
-                .child(
-                    Button::new(ElementId::Name(format!("quick_cnt_{}", info.name).into()))
-                        .ghost()
-                        .xsmall()
-                        .tooltip("COUNT(*)")
-                        .child("#")
-                        .when_some(on_quick_count, |btn, handler| {
-                            btn.on_click(move |_, window, cx| {
-                                handler(
-                                    format!(
-                                        "SELECT COUNT(*) AS total_count FROM {qualified_count};"
-                                    ),
-                                    window,
-                                    cx,
-                                );
-                            })
-                        }),
-                )
-                .child(more_btn),
-        )
+        .child(left_area)
+        .child(actions_area)
         .on_click(move |_, window, cx| {
             if let Some(ref handler) = on_select {
                 handler(info_click.clone(), window, cx);
