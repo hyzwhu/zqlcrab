@@ -3979,9 +3979,8 @@ impl Render for CrabStudioApp {
                     cx.notify();
                 } else {
                     window.remove_window();
-                    if cx.windows().is_empty() {
-                        cx.quit();
-                    }
+                    #[cfg(not(target_os = "macos"))]
+                    cx.quit();
                 }
             }))
             .on_action(cx.listener(|_this, _: &Quit, _, cx| {

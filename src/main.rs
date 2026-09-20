@@ -8,7 +8,7 @@ use gpui_kit::AppContext;
 use gpui_kit::component::input::{Copy, Cut, Paste, SelectAll};
 use gpui_kit::component::{Root, Theme, ThemeMode, TitleBar};
 use gpui_kit::gpui::{
-    Bounds, KeyBinding, Menu, MenuItem, OsAction, SystemMenuType, WindowBounds, px, size,
+    App, Bounds, KeyBinding, Menu, MenuItem, OsAction, SystemMenuType, WindowBounds, px, size,
 };
 use ui::app::{
     AboutZqlcrab, AddNewRow, CheckForUpdates, CloseDialog, CloseWindow, CrabStudioApp,
@@ -17,6 +17,10 @@ use ui::app::{
     SaveGridChanges, SelectConsoleTab, SelectGridTab, SelectHistoryTab, SelectSchemaTab,
     ToggleActivityBar, ToggleFullscreen, ToggleStatusBar, ZoomWindow,
 };
+
+#[cfg(target_os = "macos")]
+#[allow(unexpected_cfgs, deprecated, unused_imports)]
+use objc::{msg_send, sel, sel_impl};
 
 #[cfg(target_os = "macos")]
 #[allow(unexpected_cfgs, deprecated)]
@@ -51,7 +55,7 @@ fn setup_macos_status_bar() {
     use cocoa::base::{id, nil};
     use cocoa::foundation::{NSData, NSSize, NSString};
     use objc::declare::ClassDecl;
-    use objc::runtime::{BOOL, Class, Object, Sel, YES};
+    use objc::runtime::{BOOL, Class, Object, Sel, YES, NO};
     use objc::{class, msg_send, sel, sel_impl};
 
     extern "C" fn show_window(_this: &Object, _cmd: Sel, _sender: id) {
@@ -59,16 +63,32 @@ fn setup_macos_status_bar() {
             let app = cocoa::appkit::NSApp();
             if !app.is_null() {
                 let _: () = msg_send![app, activateIgnoringOtherApps: YES];
+                let _: () = msg_send![app, unhide: nil];
                 let windows: id = msg_send![app, windows];
                 let count: usize = msg_send![windows, count];
+                let mut has_main_window = false;
                 for i in 0..count {
                     let win: id = msg_send![windows, objectAtIndex: i];
                     if !win.is_null() {
-                        let is_mini: BOOL = msg_send![win, isMiniaturized];
-                        if is_mini == YES {
-                            let _: () = msg_send![win, deminiaturize: nil];
+                        let can_key: BOOL = msg_send![win, canBecomeKeyWindow];
+                        if can_key == YES {
+                            has_main_window = true;
+                            let is_mini: BOOL = msg_send![win, isMiniaturized];
+                            if is_mini == YES {
+                                let _: () = msg_send![win, deminiaturize: nil];
+                            }
+                            let _: () = msg_send![win, makeKeyAndOrderFront: nil];
                         }
-                        let _: () = msg_send![win, makeKeyAndOrderFront: nil];
+                    }
+                }
+                if !has_main_window {
+                    let delegate: id = msg_send![app, delegate];
+                    if !delegate.is_null() {
+                        let _: BOOL = msg_send![
+                            delegate,
+                            applicationShouldHandleReopen: app
+                            hasVisibleWindows: NO
+                        ];
                     }
                 }
             }
@@ -188,13 +208,62 @@ fn setup_macos_status_bar() {
     }
 }
 
+fn open_main_window(cx: &mut App) {
+    cx.activate(true);
+
+    let bounds = Bounds::centered(None, size(px(1200.0), px(800.0)), cx);
+    let mut window_options = TitleBar::window_options();
+    window_options.window_bounds = Some(WindowBounds::Windowed(bounds));
+    if let Some(titlebar) = window_options.titlebar.as_mut() {
+        titlebar.title = Some("zqlcrab".into());
+    }
+
+    let _ = cx.open_window(window_options, |window, cx| {
+        let view = cx.new(|cx| CrabStudioApp::new(window, cx));
+        cx.new(|cx| Root::new(view, window, cx))
+    });
+}
+
+#[allow(unexpected_cfgs, deprecated)]
 fn main() {
     // Initialize background Tokio runtime and set ambient context on main thread
     let _tokio_guard = db::tokio_runtime().enter();
 
-    gpui_kit::application()
-        .with_assets(gpui_kit::assets::AllAssets)
-        .run(|cx| {
+    let app = gpui_kit::application().with_assets(gpui_kit::assets::AllAssets);
+
+    #[allow(clippy::redundant_closure)]
+    app.on_reopen(|cx| {
+        if cx.windows().is_empty() {
+            open_main_window(cx);
+        } else {
+            cx.activate(true);
+            #[cfg(target_os = "macos")]
+            unsafe {
+                let app = cocoa::appkit::NSApp();
+                if !app.is_null() {
+                    let _: () = objc::msg_send![app, activateIgnoringOtherApps: objc::runtime::YES];
+                    let _: () = objc::msg_send![app, unhide: cocoa::base::nil];
+                    let windows: cocoa::base::id = objc::msg_send![app, windows];
+                    let count: usize = objc::msg_send![windows, count];
+                    for i in 0..count {
+                        let win: cocoa::base::id = objc::msg_send![windows, objectAtIndex: i];
+                        if !win.is_null() {
+                            let can_key: objc::runtime::BOOL = objc::msg_send![win, canBecomeKeyWindow];
+                            if can_key == objc::runtime::YES {
+                                let is_mini: objc::runtime::BOOL = objc::msg_send![win, isMiniaturized];
+                                if is_mini == objc::runtime::YES {
+                                    let _: () = objc::msg_send![win, deminiaturize: cocoa::base::nil];
+                                }
+                                let _: () = objc::msg_send![win, makeKeyAndOrderFront: cocoa::base::nil];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    app.run(|cx| {
             gpui_kit::init(cx);
             #[cfg(target_os = "macos")]
             {
@@ -318,22 +387,6 @@ fn main() {
                 ]),
             ]);
 
-            cx.activate(true);
-
-            let bounds = Bounds::centered(None, size(px(1200.0), px(800.0)), cx);
-            let mut window_options = TitleBar::window_options();
-            window_options.window_bounds = Some(WindowBounds::Windowed(bounds));
-            if let Some(titlebar) = window_options.titlebar.as_mut() {
-                titlebar.title = Some("zqlcrab".into());
-            }
-
-            cx.spawn(async move |cx| {
-                cx.open_window(window_options, |window, cx| {
-                    let view = cx.new(|cx| CrabStudioApp::new(window, cx));
-                    cx.new(|cx| Root::new(view, window, cx))
-                })
-                .expect("Failed to open zqlcrab window");
-            })
-            .detach();
+            open_main_window(cx);
         });
 }
