@@ -76,16 +76,20 @@ jobs:
           cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} dmg-pack/zqlcrab.app/Contents/MacOS/
           cp assets/icon.icns dmg-pack/zqlcrab.app/Contents/Resources/AppIcon.icns
           cp assets/Info.plist dmg-pack/zqlcrab.app/Contents/Info.plist
+          cp "assets/双击复制修复命令.command" dmg-pack/
           chmod +x dmg-pack/zqlcrab.app/Contents/MacOS/${{ matrix.artifact_name }}
+          chmod +x "dmg-pack/双击复制修复命令.command"
 
           create-dmg \
             --volname "zqlcrab Installer" \
             --window-pos 200 120 \
-            --window-size 800 420 \
-            --icon-size 100 \
-            --icon "zqlcrab.app" 200 190 \
+            --window-size 800 480 \
+            --icon-size 75 \
+            --icon "zqlcrab.app" 190 145 \
             --hide-extension "zqlcrab.app" \
-            --app-drop-link 600 190 \
+            --app-drop-link 610 145 \
+            --icon "双击复制修复命令.command" 668 354 \
+            --hide-extension "双击复制修复命令.command" \
             --background "assets/dmg-background.png" \
             "${{ matrix.asset_name }}.dmg" \
             "dmg-pack/" || test -f "${{ matrix.asset_name }}.dmg"

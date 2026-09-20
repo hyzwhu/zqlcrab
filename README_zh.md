@@ -88,6 +88,7 @@ cd zqlcrab
 > ```bash
 > sudo xattr -rd com.apple.quarantine /Applications/zqlcrab.app
 > ```
+> 或在挂载的 DMG 安装窗口中直接双击运行「双击复制修复命令.command」脚本，自动复制命令或一键执行修复。
 
 源码编译：
 ```bash
