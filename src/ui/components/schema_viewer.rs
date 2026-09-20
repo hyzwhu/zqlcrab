@@ -374,7 +374,12 @@ impl RenderOnce for SchemaViewer {
             .small()
             .w_full()
             .min_w(px(810.0))
-            .child(TableHeader::new().w_full().min_w(px(810.0)).child(col_header_row))
+            .child(
+                TableHeader::new()
+                    .w_full()
+                    .min_w(px(810.0))
+                    .child(col_header_row),
+            )
             .child(col_body);
 
         // Indexes section

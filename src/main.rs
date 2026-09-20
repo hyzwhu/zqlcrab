@@ -12,6 +12,33 @@ use ui::app::{
     FormatSql, RunQuery, SaveGridChanges,
 };
 
+#[cfg(target_os = "macos")]
+#[allow(unexpected_cfgs, deprecated)]
+fn setup_macos_app_icon() {
+    use cocoa::base::id;
+    use cocoa::foundation::NSData;
+    use objc::{msg_send, sel, sel_impl};
+
+    unsafe {
+        let app = cocoa::appkit::NSApp();
+        if !app.is_null() {
+            let bytes = ui::app::LOGO_PNG_BYTES;
+            let data = NSData::dataWithBytes_length_(
+                cocoa::base::nil,
+                bytes.as_ptr() as *const std::ffi::c_void,
+                bytes.len() as u64,
+            );
+            if let Some(cls) = objc::runtime::Class::get("NSImage") {
+                let alloc_image: id = msg_send![cls, alloc];
+                let image: id = msg_send![alloc_image, initWithData: data];
+                if !image.is_null() {
+                    let _: () = msg_send![app, setApplicationIconImage: image];
+                }
+            }
+        }
+    }
+}
+
 fn main() {
     // Initialize background Tokio runtime and set ambient context on main thread
     let _tokio_guard = db::tokio_runtime().enter();
@@ -20,6 +47,9 @@ fn main() {
         .with_assets(gpui_kit::assets::AllAssets)
         .run(|cx| {
             gpui_kit::init(cx);
+            #[cfg(target_os = "macos")]
+            setup_macos_app_icon();
+
             let settings = settings::SettingsManager::new();
             let initial_theme = match settings.settings().appearance.theme {
                 settings::ThemePreference::Light => ThemeMode::Light,

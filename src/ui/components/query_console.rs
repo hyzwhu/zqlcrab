@@ -368,7 +368,10 @@ impl RenderOnce for QueryConsole {
         let line_gutter = if show_line_numbers {
             let mut col = v_flex()
                 .h_full()
-                .min_w(px((28.0 + (line_count.to_string().len().saturating_sub(2) as f32) * 8.0).max(28.0)))
+                .min_w(px((28.0
+                    + (line_count.to_string().len().saturating_sub(2) as f32)
+                        * 8.0)
+                    .max(28.0)))
                 .py_2()
                 .px_1p5()
                 .bg(ThemeColors::BG_SURFACE)
@@ -399,16 +402,12 @@ impl RenderOnce for QueryConsole {
             .text_size(px(ed_font_size))
             .children(line_gutter)
             .child(
-                div()
-                    .flex_1()
-                    .h_full()
-                    .min_w_0()
-                    .child(
-                        Textarea::new(&self.editor_state)
-                            .h_full()
-                            .bg(ThemeColors::BG_APP)
-                            .text_color(ThemeColors::TEXT_PRIMARY),
-                    ),
+                div().flex_1().h_full().min_w_0().child(
+                    Textarea::new(&self.editor_state)
+                        .h_full()
+                        .bg(ThemeColors::BG_APP)
+                        .text_color(ThemeColors::TEXT_PRIMARY),
+                ),
             );
 
         let bottom_selected = match self.bottom_tab {

@@ -79,7 +79,10 @@ impl RenderOnce for AppStatusBar {
         let (status_color, status_text) = if self.is_connected {
             (ThemeColors::SUCCESS, t("status.connected", self.language))
         } else {
-            (ThemeColors::TEXT_FAINT, t("status.disconnected", self.language))
+            (
+                ThemeColors::TEXT_FAINT,
+                t("status.disconnected", self.language),
+            )
         };
 
         let left_part = h_flex()

@@ -166,7 +166,9 @@ impl RenderOnce for ConfirmDialog {
             }
 
             if self.is_executing {
-                btn = btn.icon(IconName::RotateCw).label(t("console.running", lang));
+                btn = btn
+                    .icon(IconName::RotateCw)
+                    .label(t("console.running", lang));
             } else {
                 btn = btn
                     .icon(if is_drop {

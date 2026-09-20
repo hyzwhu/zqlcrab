@@ -1148,9 +1148,7 @@ fn table_row(
         .min_w_0()
         .items_center()
         .gap_1p5()
-        .tooltip(move |window, cx| {
-            Tooltip::new(tooltip_name.clone()).build(window, cx)
-        })
+        .tooltip(move |window, cx| Tooltip::new(tooltip_name.clone()).build(window, cx))
         .child(
             Icon::new(icon_name)
                 .size(px(13.0))
@@ -1189,11 +1187,7 @@ fn table_row(
                         if let Some(ref sel_h) = on_sel_quick {
                             sel_h(info_quick.clone(), window, cx);
                         }
-                        handler(
-                            format!("SELECT * FROM {qualified} LIMIT 100;"),
-                            window,
-                            cx,
-                        );
+                        handler(format!("SELECT * FROM {qualified} LIMIT 100;"), window, cx);
                     })
                 }),
         )
@@ -1206,9 +1200,7 @@ fn table_row(
                 .when_some(on_quick_count, |btn, handler| {
                     btn.on_click(move |_, window, cx| {
                         handler(
-                            format!(
-                                "SELECT COUNT(*) AS total_count FROM {qualified_count};"
-                            ),
+                            format!("SELECT COUNT(*) AS total_count FROM {qualified_count};"),
                             window,
                             cx,
                         );

@@ -66,9 +66,13 @@ fn translate_en(key: &'static str) -> &'static str {
         "appearance.light" => "Light",
         "appearance.light_desc" => "Clean high-contrast light theme",
         "appearance.show_activity_bar" => "Show Activity Bar",
-        "appearance.show_activity_bar_desc" => "Toggle visibility of the left-hand navigation activity bar",
+        "appearance.show_activity_bar_desc" => {
+            "Toggle visibility of the left-hand navigation activity bar"
+        }
         "appearance.show_status_bar" => "Show Status Bar",
-        "appearance.show_status_bar_desc" => "Toggle visibility of the bottom session and metrics status bar",
+        "appearance.show_status_bar_desc" => {
+            "Toggle visibility of the bottom session and metrics status bar"
+        }
         "appearance.updates" => "Check for Updates",
         "appearance.updates_desc" => "Check for new releases, patches, and feature updates",
         "appearance.current_ver" => "Current Version",
@@ -99,9 +103,13 @@ fn translate_en(key: &'static str) -> &'static str {
         "query.timeout" => "Query Timeout (seconds)",
         "query.timeout_desc" => "Abort long-running queries after the specified threshold",
         "query.safe_mode" => "Safe Mode (Confirm Unbounded Mutations)",
-        "query.safe_mode_desc" => "Require explicit confirmation for UPDATE/DELETE without WHERE and DROP TABLE",
+        "query.safe_mode_desc" => {
+            "Require explicit confirmation for UPDATE/DELETE without WHERE and DROP TABLE"
+        }
         "query.auto_explain" => "Auto Explain Slow Queries (>500ms)",
-        "query.auto_explain_desc" => "Automatically fetch query execution plan when latency exceeds 500ms",
+        "query.auto_explain_desc" => {
+            "Automatically fetch query execution plan when latency exceeds 500ms"
+        }
         "query.history_limit" => "History Retention Limit",
         "query.history_limit_desc" => "Maximum number of executed queries preserved in history",
 
@@ -130,9 +138,15 @@ fn translate_en(key: &'static str) -> &'static str {
         "dialog.drop_table_title" => "Drop Table",
         "dialog.drop_view_title" => "Drop View",
         "dialog.truncate_table_title" => "Truncate Table",
-        "dialog.drop_table_desc" => "This action is permanent and cannot be undone. The table and all its data, constraints, and indexes will be permanently removed.",
-        "dialog.drop_view_desc" => "This action is permanent and cannot be undone. The view definition will be permanently removed.",
-        "dialog.truncate_table_desc" => "This will delete all records stored in this table. The table schema will remain intact, but data cannot be recovered.",
+        "dialog.drop_table_desc" => {
+            "This action is permanent and cannot be undone. The table and all its data, constraints, and indexes will be permanently removed."
+        }
+        "dialog.drop_view_desc" => {
+            "This action is permanent and cannot be undone. The view definition will be permanently removed."
+        }
+        "dialog.truncate_table_desc" => {
+            "This will delete all records stored in this table. The table schema will remain intact, but data cannot be recovered."
+        }
         "dialog.confirm_drop" => "Drop Table",
         "dialog.confirm_drop_view" => "Drop View",
         "dialog.confirm_truncate" => "Truncate Table",
@@ -266,9 +280,13 @@ fn translate_zh(key: &'static str) -> &'static str {
         "dialog.drop_table_title" => "删除数据表",
         "dialog.drop_view_title" => "删除视图",
         "dialog.truncate_table_title" => "清空数据表",
-        "dialog.drop_table_desc" => "此操作不可逆！该表及其包含的所有数据、约束和索引将被永久删除，无法恢复。",
+        "dialog.drop_table_desc" => {
+            "此操作不可逆！该表及其包含的所有数据、约束和索引将被永久删除，无法恢复。"
+        }
         "dialog.drop_view_desc" => "此操作不可逆！该视图的定义将被永久删除。",
-        "dialog.truncate_table_desc" => "此操作将清空该表中的所有数据记录。表结构将保留，但数据将无法恢复。",
+        "dialog.truncate_table_desc" => {
+            "此操作将清空该表中的所有数据记录。表结构将保留，但数据将无法恢复。"
+        }
         "dialog.confirm_drop" => "确认删除",
         "dialog.confirm_drop_view" => "确认删除视图",
         "dialog.confirm_truncate" => "确认清空",

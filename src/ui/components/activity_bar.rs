@@ -146,12 +146,7 @@ impl RenderOnce for ActivityBar {
                     .child(db_item)
                     .child(console_item),
             )
-            .child(
-                v_flex()
-                    .w_full()
-                    .items_center()
-                    .child(settings_item),
-            )
+            .child(v_flex().w_full().items_center().child(settings_item))
     }
 }
 

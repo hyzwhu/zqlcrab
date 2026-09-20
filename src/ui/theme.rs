@@ -95,10 +95,7 @@ impl From<Rgba> for ThemeToken {
 pub struct ThemeColors;
 
 impl ThemeColors {
-    pub const TRANSPARENT: ThemeToken = ThemeToken::new(
-        transparent_black(),
-        transparent_black(),
-    );
+    pub const TRANSPARENT: ThemeToken = ThemeToken::new(transparent_black(), transparent_black());
     // Primary / Accent
     pub const PRIMARY: ThemeToken = ThemeToken::new(
         hsla(201.0 / 360.0, 0.96, 0.32, 1.0), // Dark: #0369A1

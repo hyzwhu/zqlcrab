@@ -69,6 +69,37 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           mkdir -p release-pack
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            mkdir -p release-pack/zqlcrab.app/Contents/{MacOS,Resources}
+            cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} release-pack/zqlcrab.app/Contents/MacOS/
+            cp assets/icon.icns release-pack/zqlcrab.app/Contents/Resources/AppIcon.icns
+            cat << 'EOF' > release-pack/zqlcrab.app/Contents/Info.plist
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>zqlcrab</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.zqlcrab.app</string>
+    <key>CFBundleName</key>
+    <string>zqlcrab</string>
+    <key>CFBundleDisplayName</key>
+    <string>zqlcrab</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+</dict>
+</plist>
+EOF
+          fi
           cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} release-pack/
           cp README.md LICENSE-MIT LICENSE-APACHE release-pack/
           tar -czvf ${{ matrix.asset_name }}.tar.gz -C release-pack .
@@ -80,6 +111,7 @@ jobs:
         run: |
           mkdir -p release-pack
           cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} release-pack/
+          cp assets/icon.ico release-pack/
           cp README.md LICENSE-MIT LICENSE-APACHE release-pack/
           7z a ${{ matrix.asset_name }}.zip ./release-pack/*
           certutil -hashfile ${{ matrix.asset_name }}.zip SHA256 | findstr -v "hash" | findstr -v "CertUtil" > ${{ matrix.asset_name }}.zip.sha256

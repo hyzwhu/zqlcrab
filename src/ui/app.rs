@@ -659,7 +659,8 @@ impl CrabStudioApp {
         cx.spawn(async move |this, cx: &mut AsyncApp| {
             let start = std::time::Instant::now();
             let timeout_duration = std::time::Duration::from_secs(timeout_secs);
-            let timed_res = tokio::time::timeout(timeout_duration, conn.execute_query(&sql_for_exec)).await;
+            let timed_res =
+                tokio::time::timeout(timeout_duration, conn.execute_query(&sql_for_exec)).await;
             let duration = start.elapsed().as_millis() as u64;
 
             let res = match timed_res {
@@ -2071,53 +2072,51 @@ impl CrabStudioApp {
         cx.spawn(async move |this, cx: &mut AsyncApp| {
             let res = conn.execute_batch(&sql).await;
 
-            this.update(cx, |app, cx| {
-                match res {
-                    Ok(_) => {
-                        app.table_confirm_modal = None;
-                        let action_desc = match kind {
-                            ConfirmActionKind::DropTable => {
-                                format!("Table '{table_name}' dropped successfully")
-                            }
-                            ConfirmActionKind::DropView => {
-                                format!("View '{table_name}' dropped successfully")
-                            }
-                            ConfirmActionKind::TruncateTable => {
-                                format!("Table '{table_name}' truncated successfully")
-                            }
-                        };
-                        app.status_message = Some(action_desc);
-
-                        if is_drop {
-                            if app.selected_table.as_deref() == Some(&table_name) {
-                                app.selected_table = None;
-                                app.table_data = None;
-                                app.schema_columns.clear();
-                                app.schema_indexes.clear();
-                                app.schema_ddl = None;
-                            }
-                        } else if app.selected_table.as_deref() == Some(&table_name) {
-                            if let Some(tbl) = app
-                                .active_tables
-                                .iter()
-                                .find(|t| t.name == table_name)
-                                .cloned()
-                            {
-                                app.select_table(tbl, cx);
-                            }
+            this.update(cx, |app, cx| match res {
+                Ok(_) => {
+                    app.table_confirm_modal = None;
+                    let action_desc = match kind {
+                        ConfirmActionKind::DropTable => {
+                            format!("Table '{table_name}' dropped successfully")
                         }
-
-                        app.refresh_schema(cx);
-                        cx.notify();
-                    }
-                    Err(err) => {
-                        if let Some(ref mut state) = app.table_confirm_modal {
-                            state.is_executing = false;
-                            state.error = Some(err.to_string());
+                        ConfirmActionKind::DropView => {
+                            format!("View '{table_name}' dropped successfully")
                         }
-                        app.status_message = Some(format!("Action failed: {err}"));
-                        cx.notify();
+                        ConfirmActionKind::TruncateTable => {
+                            format!("Table '{table_name}' truncated successfully")
+                        }
+                    };
+                    app.status_message = Some(action_desc);
+
+                    if is_drop {
+                        if app.selected_table.as_deref() == Some(&table_name) {
+                            app.selected_table = None;
+                            app.table_data = None;
+                            app.schema_columns.clear();
+                            app.schema_indexes.clear();
+                            app.schema_ddl = None;
+                        }
+                    } else if app.selected_table.as_deref() == Some(&table_name) {
+                        if let Some(tbl) = app
+                            .active_tables
+                            .iter()
+                            .find(|t| t.name == table_name)
+                            .cloned()
+                        {
+                            app.select_table(tbl, cx);
+                        }
                     }
+
+                    app.refresh_schema(cx);
+                    cx.notify();
+                }
+                Err(err) => {
+                    if let Some(ref mut state) = app.table_confirm_modal {
+                        state.is_executing = false;
+                        state.error = Some(err.to_string());
+                    }
+                    app.status_message = Some(format!("Action failed: {err}"));
+                    cx.notify();
                 }
             })
             .ok();
@@ -2702,11 +2701,7 @@ impl Render for CrabStudioApp {
                         .items_center()
                         .gap_2()
                         .flex_shrink_0()
-                        .child(
-                            img(logo_img)
-                                .size(px(18.0))
-                                .rounded(px(3.0)),
-                        )
+                        .child(img(logo_img).size(px(18.0)).rounded(px(3.0)))
                         .child(
                             div()
                                 .text_sm()
@@ -3041,24 +3036,31 @@ impl Render for CrabStudioApp {
                                 });
                             })
                     })
-                    .when(!self.settings_manager.settings().appearance.show_activity_bar, |this| {
-                        let handle = app_handle.clone();
-                        this.child(
-                            h_flex().ml_auto().child(
-                                Button::new("btn_open_settings_fallback")
-                                    .ghost()
-                                    .small()
-                                    .icon(IconName::Settings)
-                                    .tooltip("Settings")
-                                    .on_click(move |_, _, cx| {
-                                        handle.update(cx, |this, cx| {
-                                            this.active_nav = ActivityNav::Settings;
-                                            cx.notify();
-                                        });
-                                    }),
-                            ),
-                        )
-                    }),
+                    .when(
+                        !self
+                            .settings_manager
+                            .settings()
+                            .appearance
+                            .show_activity_bar,
+                        |this| {
+                            let handle = app_handle.clone();
+                            this.child(
+                                h_flex().ml_auto().child(
+                                    Button::new("btn_open_settings_fallback")
+                                        .ghost()
+                                        .small()
+                                        .icon(IconName::Settings)
+                                        .tooltip("Settings")
+                                        .on_click(move |_, _, cx| {
+                                            handle.update(cx, |this, cx| {
+                                                this.active_nav = ActivityNav::Settings;
+                                                cx.notify();
+                                            });
+                                        }),
+                                ),
+                            )
+                        },
+                    ),
             );
 
         // Workspace main content
@@ -3675,38 +3677,42 @@ impl Render for CrabStudioApp {
         };
 
         // Left rail Activity Bar
-        let activity_bar = ActivityBar::new(self.active_nav, self.settings_manager.settings().language)
-            .on_select_nav({
-                let handle = app_handle.clone();
-                move |nav, _, cx| {
-                    handle.update(cx, |this, cx| {
-                        match nav {
-                            ActivityNav::Databases => {
-                                this.active_nav = ActivityNav::Databases;
-                                if this.active_tab == WorkspaceTab::QueryConsole && this.selected_table.is_some() {
-                                    this.active_tab = WorkspaceTab::DataGrid;
+        let activity_bar =
+            ActivityBar::new(self.active_nav, self.settings_manager.settings().language)
+                .on_select_nav({
+                    let handle = app_handle.clone();
+                    move |nav, _, cx| {
+                        handle.update(cx, |this, cx| {
+                            match nav {
+                                ActivityNav::Databases => {
+                                    this.active_nav = ActivityNav::Databases;
+                                    if this.active_tab == WorkspaceTab::QueryConsole
+                                        && this.selected_table.is_some()
+                                    {
+                                        this.active_tab = WorkspaceTab::DataGrid;
+                                    }
                                 }
-                            }
-                            ActivityNav::Console => {
-                                this.active_nav = ActivityNav::Console;
-                                this.active_tab = WorkspaceTab::QueryConsole;
-                            }
-                            ActivityNav::Settings => {
-                                if this.active_nav == ActivityNav::Settings {
-                                    this.active_nav = if this.active_tab == WorkspaceTab::QueryConsole {
-                                        ActivityNav::Console
+                                ActivityNav::Console => {
+                                    this.active_nav = ActivityNav::Console;
+                                    this.active_tab = WorkspaceTab::QueryConsole;
+                                }
+                                ActivityNav::Settings => {
+                                    if this.active_nav == ActivityNav::Settings {
+                                        this.active_nav =
+                                            if this.active_tab == WorkspaceTab::QueryConsole {
+                                                ActivityNav::Console
+                                            } else {
+                                                ActivityNav::Databases
+                                            };
                                     } else {
-                                        ActivityNav::Databases
-                                    };
-                                } else {
-                                    this.active_nav = ActivityNav::Settings;
+                                        this.active_nav = ActivityNav::Settings;
+                                    }
                                 }
                             }
-                        }
-                        cx.notify();
-                    });
-                }
-            });
+                            cx.notify();
+                        });
+                    }
+                });
 
         // Settings View component
         let settings_view = SettingsView::new(
@@ -3778,8 +3784,10 @@ impl Render for CrabStudioApp {
                     let _ = cx.update(|cx| {
                         handle_for_task.update(cx, |app, cx| {
                             app.is_checking_update = false;
-                            app.update_status_msg =
-                                Some(format!("You are running the latest version (v{})", env!("CARGO_PKG_VERSION")));
+                            app.update_status_msg = Some(format!(
+                                "You are running the latest version (v{})",
+                                env!("CARGO_PKG_VERSION")
+                            ));
                             app.status_message =
                                 Some("Check for updates completed: Up to date".to_string());
                             cx.notify();
@@ -3863,43 +3871,41 @@ impl Render for CrabStudioApp {
             .bg(ThemeColors::BG_APP)
             .child(title_bar)
             .child({
-                let show_act_bar = self.settings_manager.settings().appearance.show_activity_bar;
+                let show_act_bar = self
+                    .settings_manager
+                    .settings()
+                    .appearance
+                    .show_activity_bar;
                 h_flex()
                     .items_stretch()
                     .flex_1()
                     .w_full()
                     .min_h_0()
-                    .when(show_act_bar, |this| {
-                        this.child(activity_bar)
-                    })
+                    .when(show_act_bar, |this| this.child(activity_bar))
                     .child(sidebar)
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .h_full()
-                            .min_w_0()
-                            .min_h_0()
-                            .child(if self.active_nav == ActivityNav::Settings {
-                                settings_view.into_any_element()
-                            } else {
-                                v_flex()
-                                    .size_full()
-                                    .child(tabs_bar)
-                                    .child(
-                                        v_flex()
-                                            .size_full()
-                                            .flex_1()
-                                            .min_h_0()
-                                            .w_full()
-                                            .child(main_content),
-                                    )
-                                    .into_any_element()
-                            }),
-                    )
+                    .child(v_flex().flex_1().h_full().min_w_0().min_h_0().child(
+                        if self.active_nav == ActivityNav::Settings {
+                            settings_view.into_any_element()
+                        } else {
+                            v_flex()
+                                .size_full()
+                                .child(tabs_bar)
+                                .child(
+                                    v_flex()
+                                        .size_full()
+                                        .flex_1()
+                                        .min_h_0()
+                                        .w_full()
+                                        .child(main_content),
+                                )
+                                .into_any_element()
+                        },
+                    ))
             })
-            .when(self.settings_manager.settings().appearance.show_status_bar, |this| {
-                this.child(status_bar)
-            })
+            .when(
+                self.settings_manager.settings().appearance.show_status_bar,
+                |this| this.child(status_bar),
+            )
             .children(dialog_overlay)
             .children(sql_review_overlay)
             .children(create_table_overlay)
