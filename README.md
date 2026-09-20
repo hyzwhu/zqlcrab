@@ -16,6 +16,10 @@
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg" alt="Platforms">
 </p>
 
+<p align="center">
+  <strong>English</strong> | <a href="README_zh.md">简体中文</a>
+</p>
+
 ---
 
 **zqlcrab** is a modern, high-performance database desktop client engineered in Rust using [GPUI](https://github.com/zed-industries/zed) and [gpui-kit](https://github.com/longbridge/gpui-kit). Designed for software developers, DBAs, and data engineers who value speed, responsive zero-latency input, and a polished developer experience without webview or Electron overhead.
@@ -90,16 +94,16 @@ cd zqlcrab
 #### 2. Platform Dependencies & Installation
 
 ##### macOS
-下载 Release 中的 `.dmg` 文件打开后，将 `zqlcrab` 拖拽至 `Applications` 文件夹即可完成安装。
+Download the `.dmg` package from [Releases](https://github.com/hyzwhu/zqlcrab/releases), open it, and drag `zqlcrab` into your `Applications` folder.
 
-> **⚠️ macOS 首次打开提示“应用已损坏，无法打开”解决方式：**  
-> 这是由于开源免签应用触发了 macOS Gatekeeper 隔离保护。可打开「终端」(Terminal) 执行以下命令解除隔离：
+> **⚠️ macOS Gatekeeper Notice ("App is damaged and can't be opened"):**  
+> Because zqlcrab is an open-source binary distributed without Apple Developer ID notarization, macOS Gatekeeper may quarantine the application on first launch. To resolve this, open **Terminal** and run:
 > ```bash
 > sudo xattr -rd com.apple.quarantine /Applications/zqlcrab.app
 > ```
-> 或在打开的 DMG 镜像中直接双击运行 `若打不开请双击修复.command`。
+> Alternatively, double-click the `若打不开请双击修复.command` helper script inside the DMG installer window.
 
-本地编译：
+Build from source:
 ```bash
 cargo build --release
 ```
