@@ -7,3 +7,5 @@ release-pack/
 *.tar.gz.sha256
 *.zip
 *.zip.sha256
+*.dmg
+*.dmg.sha256
