@@ -594,17 +594,14 @@ impl SettingsView {
                                             id: 0x7a716c63726162,
                                         });
                                         div()
-                                            .w(px(40.0))
-                                            .h(px(40.0))
+                                            .size(px(40.0))
                                             .rounded_lg()
-                                            .bg(ThemeColors::PRIMARY_BG)
-                                            .items_center()
-                                            .justify_center()
+                                            .overflow_hidden()
                                             .flex_shrink_0()
                                             .child(
                                                 img(logo_img)
-                                                    .size(px(28.0))
-                                                    .rounded(px(4.0)),
+                                                    .size(px(40.0))
+                                                    .rounded_lg(),
                                             )
                                     })
                                     .child(
