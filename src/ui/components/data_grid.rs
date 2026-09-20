@@ -2273,11 +2273,12 @@ impl RenderOnce for DataGrid {
                             // Inspector Content Area
                             .child(
                                 v_flex()
+                                    .id("data_grid_inspector_scroll")
                                     .flex_1()
                                     .w_full()
                                     .min_w_0()
                                     .min_h_0()
-                                    .overflow_scrollbar()
+                                    .overflow_y_scroll()
                                     .p_3()
                                     .gap_3()
                                     // Selected Field Overview Card
@@ -2345,6 +2346,7 @@ impl RenderOnce for DataGrid {
                                         };
 
                                         div()
+                                            .id("data_grid_inspector_cell_preview")
                                             .w_full()
                                             .min_w_0()
                                             .h(preview_h)
@@ -2353,7 +2355,7 @@ impl RenderOnce for DataGrid {
                                             .bg(ThemeColors::BG_APP)
                                             .border_1()
                                             .border_color(ThemeColors::BORDER)
-                                            .overflow_scrollbar()
+                                            .overflow_y_scroll()
                                             .child(
                                                 if current_val.is_null() {
                                                     div()
@@ -2824,11 +2826,12 @@ impl RenderOnce for DataGrid {
                         // Modal Body
                         .child(
                             div()
+                                .id("data_grid_modal_body_scroll")
                                 .flex_1()
                                 .min_h_0()
                                 .p_4()
                                 .bg(ThemeColors::BG_APP)
-                                .overflow_scrollbar()
+                                .overflow_y_scroll()
                                 .child(if current_val.is_null() {
                                     div()
                                         .text_sm()
