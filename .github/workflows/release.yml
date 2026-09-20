@@ -122,9 +122,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
+          name: "zqlcrab ${{ github.ref_name }}"
+          body_path: RELEASE_NOTES.md
           files: |
             ${{ matrix.asset_name }}.*
           fail_on_unmatched_files: false
           draft: false
           prerelease: false
-          generate_release_notes: true
+          generate_release_notes: false
