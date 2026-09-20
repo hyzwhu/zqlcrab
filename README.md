@@ -101,7 +101,6 @@ Download the `.dmg` package from [Releases](https://github.com/hyzwhu/zqlcrab/re
 > ```bash
 > sudo xattr -rd com.apple.quarantine /Applications/zqlcrab.app
 > ```
-> Alternatively, double-click the `若打不开请双击修复.command` helper script inside the DMG installer window.
 
 Build from source:
 ```bash

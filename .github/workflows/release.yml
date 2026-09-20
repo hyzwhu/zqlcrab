@@ -76,9 +76,7 @@ jobs:
           cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} dmg-pack/zqlcrab.app/Contents/MacOS/
           cp assets/icon.icns dmg-pack/zqlcrab.app/Contents/Resources/AppIcon.icns
           cp assets/Info.plist dmg-pack/zqlcrab.app/Contents/Info.plist
-          cp "assets/若打不开请双击修复.command" dmg-pack/
           chmod +x dmg-pack/zqlcrab.app/Contents/MacOS/${{ matrix.artifact_name }}
-          chmod +x "dmg-pack/若打不开请双击修复.command"
 
           create-dmg \
             --volname "zqlcrab Installer" \
@@ -87,7 +85,7 @@ jobs:
             --icon-size 100 \
             --icon "zqlcrab.app" 200 190 \
             --hide-extension "zqlcrab.app" \
-            --app-drop-link 600 185 \
+            --app-drop-link 600 190 \
             --background "assets/dmg-background.png" \
             "${{ matrix.asset_name }}.dmg" \
             "dmg-pack/" || test -f "${{ matrix.asset_name }}.dmg"
