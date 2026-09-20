@@ -101,7 +101,7 @@ Download the `.dmg` package from [Releases](https://github.com/hyzwhu/zqlcrab/re
 > ```bash
 > sudo xattr -rd com.apple.quarantine /Applications/zqlcrab.app
 > ```
-> Alternatively, double-click the `双击复制修复命令.command` helper script inside the DMG installer window to automatically copy the command or execute the fix with one click.
+> Alternatively, open the `复制修复命令.txt` file inside the DMG installer window to copy the exact command.
 
 Build from source:
 ```bash

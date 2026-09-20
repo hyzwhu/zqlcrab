@@ -1,0 +1,24 @@
+============================================================
+  zqlcrab macOS Gatekeeper 隔离修复命令 / Quarantine Fix
+============================================================
+
+【修复命令 / Fix Command】
+sudo xattr -rd com.apple.quarantine /Applications/zqlcrab.app
+
+------------------------------------------------------------
+【使用步骤 / Steps】
+1. 选中并复制上方整行命令（Cmd + C）。
+   Select and copy the command line above (Cmd + C).
+
+2. 打开「终端」(Terminal) 应用程序。
+   (快捷键: 按 Command + 空格，输入 Terminal 后按回车)
+   Open Terminal (Cmd + Space, type Terminal, press Enter).
+
+3. 粘贴命令 (Cmd + V) 并回车运行。
+   Paste the command (Cmd + V) and press Enter.
+
+4. 提示 Password 时，输入您的 Mac 开机登录密码并回车。
+   (输入密码时屏幕不会显示字符，直接输入并回车即可)
+   Type your Mac login password when prompted and press Enter.
+   (Password will not be displayed on screen while typing).
+============================================================

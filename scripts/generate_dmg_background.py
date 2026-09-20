@@ -106,8 +106,8 @@ badge_w = badge_bb[2] - badge_bb[0]
 draw.text((badge_x1 + (130 - badge_w) // 2, badge_y1 + 10), badge_text, font=font_badge, fill=(245, 158, 11))
 
 # Bilingual Tip Text
-tip_zh = '首次打开若提示 “已损坏”，可双击右侧脚本自动复制命令，或在「终端」执行以下命令解除隔离:'
-tip_en = 'If prompted "Damaged", double-click script to copy, or run command below in Terminal:'
+tip_zh = '首次打开若提示 “已损坏”，可双击右侧文件复制命令，或在「终端」执行以下命令解除隔离:'
+tip_en = 'If prompted "Damaged", open file on right to copy, or run command below in Terminal:'
 draw.text((badge_x2 + 20, badge_y1 + 1), tip_zh, font=font_text_zh, fill=(241, 245, 249))
 draw.text((badge_x2 + 20, badge_y1 + 28), tip_en, font=font_text_en, fill=(148, 163, 184))
 
