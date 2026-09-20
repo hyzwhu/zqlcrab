@@ -48,6 +48,26 @@ pub const LOGO_PNG_BYTES: &[u8] = include_bytes!("../../assets/logo.png");
 gpui_kit::actions!(
     zqlcrab,
     [
+        Quit,
+        CloseWindow,
+        OpenSettings,
+        NewConnection,
+        NewQueryTab,
+        RefreshTables,
+        SelectConsoleTab,
+        SelectGridTab,
+        SelectSchemaTab,
+        SelectHistoryTab,
+        ToggleActivityBar,
+        ToggleStatusBar,
+        MinimizeWindow,
+        ZoomWindow,
+        ToggleFullscreen,
+        AboutZqlcrab,
+        CheckForUpdates,
+        OpenDocs,
+        OpenGithub,
+        ReportIssue,
         RunQuery,
         CloseDialog,
         FormatSql,
@@ -235,8 +255,7 @@ pub struct CrabStudioApp {
 
 impl CrabStudioApp {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let mut manager = ConnectionManager::new();
-        manager.ensure_default_presets();
+        let manager = ConnectionManager::new();
         let saved = manager.list_configs();
         let settings_manager = SettingsManager::new();
         crate::ui::theme::set_active_theme_mode(
@@ -244,13 +263,17 @@ impl CrabStudioApp {
         );
 
         let handle = cx.entity().clone();
-        let first_conn_id = saved
-            .iter()
-            .find(|c| c.name.contains("Docker MySQL"))
-            .or_else(|| saved.iter().find(|c| c.db_type == DatabaseType::Sqlite))
-            .or_else(|| saved.first())
-            .map(|c| c.id.clone());
-        if let Some(conn_id) = first_conn_id {
+        let target_conn_id = settings_manager
+            .settings()
+            .last_connection_id
+            .as_ref()
+            .and_then(|last_id| {
+                saved
+                    .iter()
+                    .find(|c| &c.id == last_id)
+                    .map(|c| c.id.clone())
+            });
+        if let Some(conn_id) = target_conn_id {
             cx.defer(move |cx| {
                 handle.update(cx, |this, cx| {
                     this.select_connection(&conn_id, cx);
@@ -425,7 +448,10 @@ impl CrabStudioApp {
                     let tables_res = conn.list_tables(None, None).await.unwrap_or_default();
                     this.update(cx, |app, cx| {
                         let name = conn.config.name.clone();
+                        let conn_id = conn.config.id.clone();
                         app.active_connection = Some(conn);
+                        app.settings_manager.settings_mut().last_connection_id = Some(conn_id);
+                        let _ = app.settings_manager.save();
                         app.active_tables = tables_res;
                         app.selected_table = None;
                         app.table_data = None;
@@ -549,6 +575,29 @@ impl CrabStudioApp {
             this.update(cx, |app, cx| {
                 app.active_tables = tables;
                 app.status_message = Some("Schema refreshed".to_string());
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Trigger application update check
+    pub fn trigger_check_for_updates(&mut self, cx: &mut Context<Self>) {
+        self.is_checking_update = true;
+        self.update_status_msg = None;
+        cx.notify();
+
+        cx.spawn(async move |this, cx: &mut AsyncApp| {
+            tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+            this.update(cx, |app, cx| {
+                app.is_checking_update = false;
+                app.update_status_msg = Some(format!(
+                    "You are running the latest version (v{})",
+                    env!("CARGO_PKG_VERSION")
+                ));
+                app.status_message =
+                    Some("Check for updates completed: Up to date".to_string());
                 cx.notify();
             })
             .ok();
@@ -2246,6 +2295,16 @@ impl CrabStudioApp {
             return;
         }
         self.saved_connections = self.manager.list_configs();
+        if self
+            .settings_manager
+            .settings()
+            .last_connection_id
+            .as_deref()
+            == Some(conn_id)
+        {
+            self.settings_manager.settings_mut().last_connection_id = None;
+            let _ = self.settings_manager.save();
+        }
         self.status_message = Some(format!("Deleted profile '{config_name}'"));
         cx.notify();
     }
@@ -3064,7 +3123,52 @@ impl Render for CrabStudioApp {
             );
 
         // Workspace main content
-        let main_content = match self.active_tab {
+        let main_content = if !is_connected && self.saved_connections.is_empty() {
+            let handle = app_handle.clone();
+            v_flex()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .gap_4()
+                .child(
+                    Icon::new(IconName::Database)
+                        .size(px(56.0))
+                        .text_color(ThemeColors::TEXT_FAINT),
+                )
+                .child(
+                    v_flex()
+                        .items_center()
+                        .gap_1()
+                        .child(
+                            div()
+                                .text_base()
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(ThemeColors::TEXT_PRIMARY)
+                                .child("No connections yet"),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(ThemeColors::TEXT_MUTED)
+                                .child(
+                                    "Add your first database connection to start exploring schemas and queries.",
+                                ),
+                        ),
+                )
+                .child(
+                    Button::new("empty_add_conn")
+                        .primary()
+                        .icon(IconName::Plus)
+                        .label("Add connection")
+                        .on_click(move |_, window, cx| {
+                            handle.update(cx, |this, cx| {
+                                this.open_connection_dialog(window, cx);
+                            });
+                        }),
+                )
+                .into_any_element()
+        } else {
+            match self.active_tab {
             WorkspaceTab::QueryConsole => {
                 let on_run = {
                     let handle = app_handle.clone();
@@ -3329,7 +3433,8 @@ impl Render for CrabStudioApp {
                     .on_clear_history(on_clear)
                     .into_any_element()
             }
-        };
+        }
+    };
 
         // Footer status bar
         let query_row_count = match self.active_tab {
@@ -3773,28 +3878,8 @@ impl Render for CrabStudioApp {
             let handle = app_handle.clone();
             move |_, cx| {
                 handle.update(cx, |this, cx| {
-                    this.is_checking_update = true;
-                    this.update_status_msg = None;
-                    cx.notify();
+                    this.trigger_check_for_updates(cx);
                 });
-
-                let handle_for_task = handle.clone();
-                cx.spawn(async move |cx| {
-                    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
-                    let _ = cx.update(|cx| {
-                        handle_for_task.update(cx, |app, cx| {
-                            app.is_checking_update = false;
-                            app.update_status_msg = Some(format!(
-                                "You are running the latest version (v{})",
-                                env!("CARGO_PKG_VERSION")
-                            ));
-                            app.status_message =
-                                Some("Check for updates completed: Up to date".to_string());
-                            cx.notify();
-                        });
-                    });
-                })
-                .detach();
             }
         });
 
@@ -3866,6 +3951,114 @@ impl Render for CrabStudioApp {
                 } else if this.dialog_open {
                     this.close_connection_dialog(cx);
                 }
+            }))
+            .on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
+                if this.table_confirm_modal.is_some() {
+                    this.table_confirm_modal = None;
+                    cx.notify();
+                } else if this.create_table_modal_open {
+                    this.create_table_modal_open = false;
+                    this.create_table_error = None;
+                    cx.notify();
+                } else if this.sql_review_modal_open {
+                    this.sql_review_modal_open = false;
+                    this.sql_review_error = None;
+                    cx.notify();
+                } else if this.grid_modal_open {
+                    this.grid_modal_open = false;
+                    cx.notify();
+                } else if this.dialog_open {
+                    this.close_connection_dialog(cx);
+                } else if this.active_nav == ActivityNav::Settings {
+                    this.active_nav = ActivityNav::Databases;
+                    cx.notify();
+                } else {
+                    window.remove_window();
+                    if cx.windows().is_empty() {
+                        cx.quit();
+                    }
+                }
+            }))
+            .on_action(cx.listener(|_this, _: &Quit, _, cx| {
+                cx.quit();
+            }))
+            .on_action(cx.listener(|this, _: &OpenSettings, _, cx| {
+                this.active_nav = ActivityNav::Settings;
+                this.active_settings_tab = SettingsTab::Appearance;
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &NewConnection, window, cx| {
+                this.open_connection_dialog(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &NewQueryTab, _, cx| {
+                this.active_nav = ActivityNav::Databases;
+                this.active_tab = WorkspaceTab::QueryConsole;
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &RefreshTables, _, cx| {
+                this.refresh_schema(cx);
+            }))
+            .on_action(cx.listener(|this, _: &SelectConsoleTab, _, cx| {
+                this.active_nav = ActivityNav::Databases;
+                this.active_tab = WorkspaceTab::QueryConsole;
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &SelectGridTab, _, cx| {
+                this.active_nav = ActivityNav::Databases;
+                this.active_tab = WorkspaceTab::DataGrid;
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &SelectSchemaTab, _, cx| {
+                this.active_nav = ActivityNav::Databases;
+                this.active_tab = WorkspaceTab::Schema;
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &SelectHistoryTab, _, cx| {
+                this.active_nav = ActivityNav::Databases;
+                this.active_tab = WorkspaceTab::History;
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &ToggleActivityBar, _, cx| {
+                let curr = this.settings_manager.settings().appearance.show_activity_bar;
+                let _ = this.settings_manager.update(|s| {
+                    s.appearance.show_activity_bar = !curr;
+                });
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &ToggleStatusBar, _, cx| {
+                let curr = this.settings_manager.settings().appearance.show_status_bar;
+                let _ = this.settings_manager.update(|s| {
+                    s.appearance.show_status_bar = !curr;
+                });
+                cx.notify();
+            }))
+            .on_action(cx.listener(|_this, _: &MinimizeWindow, window, _cx| {
+                window.minimize_window();
+            }))
+            .on_action(cx.listener(|_this, _: &ZoomWindow, window, _cx| {
+                window.zoom_window();
+            }))
+            .on_action(cx.listener(|_this, _: &ToggleFullscreen, window, _cx| {
+                window.toggle_fullscreen();
+            }))
+            .on_action(cx.listener(|this, _: &AboutZqlcrab, _, cx| {
+                this.active_nav = ActivityNav::Settings;
+                this.active_settings_tab = SettingsTab::About;
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &CheckForUpdates, _, cx| {
+                this.active_nav = ActivityNav::Settings;
+                this.active_settings_tab = SettingsTab::Appearance;
+                this.trigger_check_for_updates(cx);
+            }))
+            .on_action(cx.listener(|_this, _: &OpenDocs, _, cx| {
+                cx.open_url("https://github.com/zqlcrab/zqlcrab#readme");
+            }))
+            .on_action(cx.listener(|_this, _: &OpenGithub, _, cx| {
+                cx.open_url("https://github.com/zqlcrab/zqlcrab");
+            }))
+            .on_action(cx.listener(|_this, _: &ReportIssue, _, cx| {
+                cx.open_url("https://github.com/zqlcrab/zqlcrab/issues");
             }))
             .size_full()
             .bg(ThemeColors::BG_APP)

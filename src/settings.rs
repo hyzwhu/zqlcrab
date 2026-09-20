@@ -140,6 +140,8 @@ pub struct AppSettings {
     pub editor: EditorSettings,
     pub query: QuerySettings,
     pub language: AppLanguage,
+    #[serde(default)]
+    pub last_connection_id: Option<String>,
 }
 
 /// Persistent settings manager loading from and saving to ~/.config/zqlcrab/settings.json

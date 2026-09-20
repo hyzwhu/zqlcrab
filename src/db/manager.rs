@@ -28,15 +28,10 @@ impl ConnectionManager {
         let _ = fs::create_dir_all(&base_dir);
         let config_file_path = base_dir.join("connections.json");
 
-        let mut manager = Self {
+        Self {
             active_connections: Arc::new(RwLock::new(HashMap::new())),
             config_file_path,
-        };
-
-        // Ensure default presets (Docker MySQL and SQLite) are present
-        manager.ensure_default_presets();
-
-        manager
+        }
     }
 
     /// Ensure default friendly presets (Local Docker MySQL, Demo SQLite) exist in profile list.

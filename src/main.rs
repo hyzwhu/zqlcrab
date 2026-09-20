@@ -5,11 +5,17 @@ pub mod settings;
 pub mod ui;
 
 use gpui_kit::AppContext;
+use gpui_kit::component::input::{Copy, Cut, Paste, SelectAll};
 use gpui_kit::component::{Root, Theme, ThemeMode, TitleBar};
-use gpui_kit::gpui::{Bounds, KeyBinding, WindowBounds, px, size};
+use gpui_kit::gpui::{
+    Bounds, KeyBinding, Menu, MenuItem, OsAction, SystemMenuType, WindowBounds, px, size,
+};
 use ui::app::{
-    AddNewRow, CloseDialog, CrabStudioApp, DeleteGridRow, DuplicateGridRow, ExplainQuery,
-    FormatSql, RunQuery, SaveGridChanges,
+    AboutZqlcrab, AddNewRow, CheckForUpdates, CloseDialog, CloseWindow, CrabStudioApp,
+    DeleteGridRow, DuplicateGridRow, ExplainQuery, FormatSql, MinimizeWindow, NewConnection,
+    NewQueryTab, OpenDocs, OpenGithub, OpenSettings, Quit, RefreshTables, ReportIssue, RunQuery,
+    SaveGridChanges, SelectConsoleTab, SelectGridTab, SelectHistoryTab, SelectSchemaTab,
+    ToggleActivityBar, ToggleFullscreen, ToggleStatusBar, ZoomWindow,
 };
 
 #[cfg(target_os = "macos")]
@@ -58,12 +64,55 @@ fn main() {
             Theme::change(initial_theme, None, cx);
             ui::theme::set_active_theme_mode(initial_theme == ThemeMode::Light);
 
+            // Global application action listeners
+            cx.on_action(|_: &Quit, cx| {
+                cx.quit();
+            });
+
+            // Application Keybindings (macOS Command & Cross-platform Ctrl)
             cx.bind_keys([
+                // Application Lifecycle (Quit) - cmd-q and ctrl-q
+                KeyBinding::new("cmd-q", Quit, None),
+                KeyBinding::new("ctrl-q", Quit, None),
+
+                // Window & Dialog Controls
+                KeyBinding::new("cmd-w", CloseWindow, None),
+                KeyBinding::new("ctrl-w", CloseWindow, None),
+                KeyBinding::new("escape", CloseDialog, Some("CrabStudio")),
+                KeyBinding::new("cmd-m", MinimizeWindow, None),
+                KeyBinding::new("ctrl-m", MinimizeWindow, None),
+                KeyBinding::new("ctrl-cmd-f", ToggleFullscreen, None),
+
+                // Preferences / Settings
+                KeyBinding::new("cmd-,", OpenSettings, None),
+                KeyBinding::new("ctrl-,", OpenSettings, None),
+
+                // Navigation & Connection Management
+                KeyBinding::new("cmd-shift-n", NewConnection, None),
+                KeyBinding::new("ctrl-shift-n", NewConnection, None),
+                KeyBinding::new("cmd-t", NewQueryTab, None),
+                KeyBinding::new("ctrl-t", NewQueryTab, None),
+                KeyBinding::new("cmd-r", RefreshTables, None),
+                KeyBinding::new("ctrl-r", RefreshTables, None),
+
+                // Workspace Tab Switching
+                KeyBinding::new("cmd-1", SelectConsoleTab, None),
+                KeyBinding::new("ctrl-1", SelectConsoleTab, None),
+                KeyBinding::new("cmd-2", SelectGridTab, None),
+                KeyBinding::new("ctrl-2", SelectGridTab, None),
+                KeyBinding::new("cmd-3", SelectSchemaTab, None),
+                KeyBinding::new("ctrl-3", SelectSchemaTab, None),
+                KeyBinding::new("cmd-4", SelectHistoryTab, None),
+                KeyBinding::new("ctrl-4", SelectHistoryTab, None),
+
+                // Query Execution & Formatting
                 KeyBinding::new("cmd-enter", RunQuery, Some("CrabStudio")),
                 KeyBinding::new("ctrl-enter", RunQuery, Some("CrabStudio")),
                 KeyBinding::new("alt-shift-f", FormatSql, Some("CrabStudio")),
                 KeyBinding::new("cmd-shift-e", ExplainQuery, Some("CrabStudio")),
                 KeyBinding::new("ctrl-shift-e", ExplainQuery, Some("CrabStudio")),
+
+                // Grid Data Editing & Mutation
                 KeyBinding::new("cmd-s", SaveGridChanges, Some("CrabStudio")),
                 KeyBinding::new("ctrl-s", SaveGridChanges, Some("CrabStudio")),
                 KeyBinding::new("cmd-n", AddNewRow, Some("CrabStudio")),
@@ -72,8 +121,64 @@ fn main() {
                 KeyBinding::new("ctrl-d", DuplicateGridRow, Some("CrabStudio")),
                 KeyBinding::new("cmd-backspace", DeleteGridRow, Some("CrabStudio")),
                 KeyBinding::new("ctrl-backspace", DeleteGridRow, Some("CrabStudio")),
-                KeyBinding::new("escape", CloseDialog, Some("CrabStudio")),
             ]);
+
+            // Top-left native Application Menus
+            cx.set_menus([
+                Menu::new("zqlcrab").items([
+                    MenuItem::action("About zqlcrab", AboutZqlcrab),
+                    MenuItem::action("Check for Updates...", CheckForUpdates),
+                    MenuItem::separator(),
+                    MenuItem::action("Settings...", OpenSettings),
+                    MenuItem::separator(),
+                    MenuItem::os_submenu("Services", SystemMenuType::Services),
+                    MenuItem::separator(),
+                    MenuItem::action("Quit zqlcrab", Quit),
+                ]),
+                Menu::new("File").items([
+                    MenuItem::action("New Connection...", NewConnection),
+                    MenuItem::action("New Query Tab", NewQueryTab),
+                    MenuItem::separator(),
+                    MenuItem::action("Save Changes", SaveGridChanges),
+                    MenuItem::separator(),
+                    MenuItem::action("Close Window", CloseWindow),
+                ]),
+                Menu::new("Edit").items([
+                    MenuItem::os_action("Cut", Cut, OsAction::Cut),
+                    MenuItem::os_action("Copy", Copy, OsAction::Copy),
+                    MenuItem::os_action("Paste", Paste, OsAction::Paste),
+                    MenuItem::os_action("Select All", SelectAll, OsAction::SelectAll),
+                    MenuItem::separator(),
+                    MenuItem::action("Format SQL", FormatSql),
+                ]),
+                Menu::new("View").items([
+                    MenuItem::action("Query Console", SelectConsoleTab),
+                    MenuItem::action("Data Grid", SelectGridTab),
+                    MenuItem::action("Table Schema", SelectSchemaTab),
+                    MenuItem::action("Query History", SelectHistoryTab),
+                    MenuItem::separator(),
+                    MenuItem::action("Toggle Activity Bar", ToggleActivityBar),
+                    MenuItem::action("Toggle Status Bar", ToggleStatusBar),
+                    MenuItem::separator(),
+                    MenuItem::action("Refresh Tables", RefreshTables),
+                ]),
+                Menu::new("Window").items([
+                    MenuItem::action("Minimize", MinimizeWindow),
+                    MenuItem::action("Zoom", ZoomWindow),
+                    MenuItem::action("Toggle Full Screen", ToggleFullscreen),
+                    MenuItem::separator(),
+                    MenuItem::action("Close Window", CloseWindow),
+                ]),
+                Menu::new("Help").items([
+                    MenuItem::action("Documentation", OpenDocs),
+                    MenuItem::action("GitHub Repository", OpenGithub),
+                    MenuItem::action("Report Issue", ReportIssue),
+                    MenuItem::separator(),
+                    MenuItem::action("About zqlcrab", AboutZqlcrab),
+                ]),
+            ]);
+
+            cx.activate(true);
 
             let bounds = Bounds::centered(None, size(px(1200.0), px(800.0)), cx);
             let mut window_options = TitleBar::window_options();

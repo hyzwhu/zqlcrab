@@ -46,12 +46,15 @@
   - Visual query execution plan tree viewer (`EXPLAIN` / `EXPLAIN QUERY PLAN`).
   - Read-only safe mode toggle to protect production instances from accidental writes.
   - Fast result export to **CSV**, **JSON**, **Markdown**, and **SQL INSERT** statements.
-- 🗄️ **Persistent Connection Profiles**:
-  - Secure local configuration (`~/.config/zqlcrab/connections.json` on macOS/Linux or `%APPDATA%\zqlcrab` on Windows).
+- 🗄️ **Persistent Connection Profiles & Session Restore**:
+  - Secure local configuration (`~/.config/zqlcrab/connections.json` or macOS `Application Support`).
+  - True persistence lifecycle: deleted profiles stay deleted without unwanted default presets reinjected on restart.
+  - Automatic reconnection to your last active database profile across sessions.
   - Latency ping indicator, test connection diagnostics, and instant database switching.
-- 🖥️ **Responsive Desktop Layout**:
+- 🖥️ **macOS Native Integration & Responsive Layout**:
+  - Native macOS menu bar (`zqlcrab`, `File`, `Edit`, `View`, `Window`, `Help`) with keyboard shortcuts.
   - Fluid titlebar navigation that gracefully collapses and preserves critical action controls on smaller screens.
-  - Dark obsidian theme tuned for long-session coding comfort.
+  - Dark obsidian and crisp light themes with high-contrast UI tokens.
 
 ---
 
@@ -116,14 +119,49 @@ cargo run --release
 
 ---
 
-## ⌨️ Keyboard Shortcuts
+## ⌨️ Keyboard Shortcuts & Native Menus
+
+`zqlcrab` provides a full native macOS menu bar (`zqlcrab`, `File`, `Edit`, `View`, `Window`, `Help`) and comprehensive keyboard shortcuts designed for high productivity:
+
+### General & Window Management
 
 | Shortcut (macOS) | Shortcut (Win / Linux) | Action |
 | :--- | :--- | :--- |
-| `⌘ + ↵` | `Ctrl + Enter` | Execute SQL Query in Console |
-| `⌘ + S` | `Ctrl + S` | Open Staged Review & Commit Dialog |
-| `⌘ + F` | `Ctrl + F` | Format SQL Query |
-| `Esc` | `Esc` | Close Active Modal Dialog / Deselect |
+| `⌘ + Q` | `Ctrl + Q` | **Quit application** |
+| `⌘ + W` | `Ctrl + W` | **Close current modal / dialog / window** |
+| `Esc` | `Esc` | Close active dialog or modal |
+| `⌘ + ,` | `Ctrl + ,` | Open Settings & Preferences |
+| `⌘ + M` | `Ctrl + M` | Minimize window |
+| `⌃ + ⌘ + F` | `F11` | Toggle Full Screen |
+
+### Navigation & Connections
+
+| Shortcut (macOS) | Shortcut (Win / Linux) | Action |
+| :--- | :--- | :--- |
+| `⇧ + ⌘ + N` | `Ctrl + Shift + N` | Open New Connection dialog |
+| `⌘ + T` | `Ctrl + T` | Switch to Query Console / New Tab |
+| `⌘ + R` | `Ctrl + R` | Refresh tables and schema |
+| `⌘ + 1` | `Ctrl + 1` | Switch to **Query Console** tab |
+| `⌘ + 2` | `Ctrl + 2` | Switch to **Data Grid** tab |
+| `⌘ + 3` | `Ctrl + 3` | Switch to **Table Schema** tab |
+| `⌘ + 4` | `Ctrl + 4` | Switch to **Query History** tab |
+
+### SQL Console & Execution
+
+| Shortcut (macOS) | Shortcut (Win / Linux) | Action |
+| :--- | :--- | :--- |
+| `⌘ + ↵` | `Ctrl + Enter` | **Execute SQL Query** |
+| `⌥ + ⇧ + F` | `Alt + Shift + F` | **Format SQL** (via `sqlformat`) |
+| `⌘ + ⇧ + E` | `Ctrl + Shift + E` | **Explain Query Plan** (`EXPLAIN`) |
+
+### Data Grid & In-Place Editing
+
+| Shortcut (macOS) | Shortcut (Win / Linux) | Action |
+| :--- | :--- | :--- |
+| `⌘ + S` | `Ctrl + S` | **Review staged changes & Commit** (Atomic transaction) |
+| `⌘ + N` | `Ctrl + N` | Insert blank new row |
+| `⌘ + D` | `Ctrl + D` | Duplicate selected row as template |
+| `⌘ + ⌫` | `Ctrl + Backspace` | Delete / discard selected row |
 
 ---
 
