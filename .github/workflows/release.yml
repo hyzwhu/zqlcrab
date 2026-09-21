@@ -97,7 +97,7 @@ jobs:
           mkdir -p release-pack
           cp -r dmg-pack/zqlcrab.app release-pack/
           cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} release-pack/
-          cp README.md README_zh.md LICENSE-MIT LICENSE-APACHE release-pack/
+          cp README.md README_zh.md LICENSE-APACHE release-pack/
           tar -czvf ${{ matrix.asset_name }}.tar.gz -C release-pack .
           shasum -a 256 ${{ matrix.asset_name }}.tar.gz > ${{ matrix.asset_name }}.tar.gz.sha256
 
@@ -106,7 +106,7 @@ jobs:
         run: |
           mkdir -p release-pack
           cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} release-pack/
-          cp README.md README_zh.md LICENSE-MIT LICENSE-APACHE release-pack/
+          cp README.md README_zh.md LICENSE-APACHE release-pack/
           tar -czvf ${{ matrix.asset_name }}.tar.gz -C release-pack .
           shasum -a 256 ${{ matrix.asset_name }}.tar.gz > ${{ matrix.asset_name }}.tar.gz.sha256
 
@@ -117,7 +117,7 @@ jobs:
           mkdir -p release-pack
           cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} release-pack/
           cp assets/icon.ico release-pack/
-          cp README.md README_zh.md LICENSE-MIT LICENSE-APACHE release-pack/
+          cp README.md README_zh.md LICENSE-APACHE release-pack/
           7z a ${{ matrix.asset_name }}.zip ./release-pack/*
           certutil -hashfile ${{ matrix.asset_name }}.zip SHA256 | findstr -v "hash" | findstr -v "CertUtil" > ${{ matrix.asset_name }}.zip.sha256
 

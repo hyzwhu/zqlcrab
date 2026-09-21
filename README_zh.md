@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/hyzwhu/zqlcrab/releases"><img src="https://img.shields.io/github/v/release/hyzwhu/zqlcrab?include_prereleases&color=orange" alt="Release"></a>
-  <a href="LICENSE-MIT"><img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg" alt="License"></a>
+  <a href="LICENSE-APACHE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License"></a>
   <img src="https://img.shields.io/badge/rust-2024%20edition-lightgrey.svg?logo=rust" alt="Rust 2024">
   <img src="https://img.shields.io/badge/UI-GPUI%20120%20FPS-cyan.svg" alt="GPUI">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg" alt="Platforms">
@@ -205,4 +205,4 @@ zqlcrab/
 
 ## 📄 开源许可证
 
-本项目基于 [MIT](LICENSE-MIT) 与 [Apache 2.0](LICENSE-APACHE) 双重许可开源。
+本项目基于 [Apache 2.0](LICENSE-APACHE) 许可证开源。

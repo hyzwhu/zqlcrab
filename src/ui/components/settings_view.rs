@@ -1385,7 +1385,7 @@ impl RenderOnce for SettingsView {
                         ("Application", "CrabStudio by zqlcrab contributors"),
                         ("Version", "0.1.0 (Darwin/Linux)"),
                         ("GUI Toolkit", "GPUI Kit 0.6.1 + GPUI Engine"),
-                        ("License", "MIT OR Apache-2.0 (Dual Licensed)"),
+                        ("License", "Apache-2.0"),
                         ("GitHub", "https://github.com/hyzwhu/zqlcrab"),
                     ],
                 )
