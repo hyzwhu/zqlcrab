@@ -32,7 +32,7 @@ use gpui_kit::base::{h_flex, v_flex};
 use gpui_kit::component::{
     Icon, Sizable as _, Theme, ThemeMode, TitleBar,
     button::{Button, ButtonVariants as _},
-    input::{InputEvent, InputState, TextareaState},
+    input::{EditorState, InputEvent, InputState},
     resizable::ResizableState,
 };
 use gpui_kit::gpui::{
@@ -40,7 +40,8 @@ use gpui_kit::gpui::{
     IntoElement, ParentElement, Render, ScrollHandle, Styled, Window, div, img, point, prelude::*,
     px,
 };
-use std::sync::Arc;
+use std::rc::Rc;
+use std::sync::{Arc, RwLock};
 use uuid::Uuid;
 
 pub const LOGO_PNG_BYTES: &[u8] = include_bytes!("../../assets/logo.png");
@@ -183,7 +184,8 @@ pub struct CrabStudioApp {
     table_confirm_modal: Option<TableConfirmActionState>,
 
     // Query console state
-    query_editor: Entity<TextareaState>,
+    query_editor: Entity<EditorState>,
+    sql_metadata_cache: Arc<RwLock<crate::db::autocomplete::SqlMetadataCache>>,
     console_split: Entity<ResizableState>,
     console_result: Option<QueryResult>,
     console_error: Option<String>,
@@ -303,11 +305,24 @@ impl CrabStudioApp {
             .detach();
         }
 
-        let query_editor = cx.new(|cx| {
-            TextareaState::new(window, cx).default_value(
-                "-- Press ⌘↵ (Ctrl+Enter) to run · Shift+Alt+F formats SQL\nSELECT 1 AS id, 'Welcome to CrabStudio' AS message;\n",
-            )
-        });
+        let sql_metadata_cache = Arc::new(RwLock::new(
+            crate::db::autocomplete::SqlMetadataCache::default(),
+        ));
+
+        let query_editor = {
+            let cache_ref = sql_metadata_cache.clone();
+            cx.new(|cx| {
+                let mut ed = EditorState::new(window, cx).language("sql");
+                ed.set_value(
+                    "-- Press ⌘↵ (Ctrl+Enter) to run · Shift+Alt+F formats SQL\nSELECT 1 AS id, 'Welcome to CrabStudio' AS message;\n",
+                    window,
+                    cx,
+                );
+                let provider = crate::db::autocomplete::SqlCompletionProvider::new(cache_ref);
+                ed.lsp_mut().completion_provider = Some(Rc::new(provider));
+                ed
+            })
+        };
         let console_split = cx.new(|_cx| ResizableState::default());
         let sidebar_split = cx.new(|_cx| ResizableState::default());
         let grid_inspector_split = cx.new(|_cx| ResizableState::default());
@@ -391,6 +406,7 @@ impl CrabStudioApp {
             active_tab: WorkspaceTab::QueryConsole,
             table_confirm_modal: None,
             query_editor,
+            sql_metadata_cache,
             console_split,
             console_result: None,
             console_error: None,
@@ -471,6 +487,7 @@ impl CrabStudioApp {
                     this.update(cx, |app, cx| {
                         let name = conn.config.name.clone();
                         let conn_id = conn.config.id.clone();
+                        let db_family = conn.config.db_type.family();
                         let db_name = conn
                             .status
                             .as_ref()
@@ -486,13 +503,22 @@ impl CrabStudioApp {
                         crate::ui::tray::update_tray_status(Some(crate::ui::tray::TrayStatus {
                             active_conn_id: Some(conn_id.clone()),
                             active_name: Some(name.clone()),
-                            db_name,
+                            db_name: db_name.clone(),
                             ping_ms,
                         }));
                         app.active_connection = Some(conn);
                         app.settings_manager.settings_mut().last_connection_id = Some(conn_id);
                         let _ = app.settings_manager.save();
-                        app.active_tables = tables_res;
+                        app.active_tables = tables_res.clone();
+
+                        // Sync autocomplete metadata cache
+                        if let Ok(mut cache) = app.sql_metadata_cache.write() {
+                            cache.set_family(Some(db_family));
+                            if let Some(ref db) = db_name {
+                                cache.set_databases(vec![db.clone()]);
+                            }
+                            cache.set_tables(tables_res);
+                        }
                         app.selected_table = None;
                         app.table_data = None;
                         app.grid_changeset.clear();
@@ -564,6 +590,10 @@ impl CrabStudioApp {
 
             this.update(cx, |app, cx| {
                 app.table_data = data_res.ok();
+                // Cache columns for autocomplete
+                if let Ok(mut cache) = app.sql_metadata_cache.write() {
+                    cache.set_columns_for_table(&tbl, cols.clone());
+                }
                 app.schema_columns = cols;
                 app.schema_indexes = idxs;
                 app.schema_ddl = ddl;
@@ -589,6 +619,9 @@ impl CrabStudioApp {
             .detach();
 
             self.active_tables.clear();
+            if let Ok(mut cache) = self.sql_metadata_cache.write() {
+                cache.clear();
+            }
             self.selected_table = None;
             self.table_data = None;
             self.grid_changeset.clear();
@@ -614,6 +647,9 @@ impl CrabStudioApp {
         cx.spawn(async move |this, cx: &mut AsyncApp| {
             let tables = conn.list_tables(None, None).await.unwrap_or_default();
             this.update(cx, |app, cx| {
+                if let Ok(mut cache) = app.sql_metadata_cache.write() {
+                    cache.set_tables(tables.clone());
+                }
                 app.active_tables = tables;
                 app.status_message = Some("Schema refreshed".to_string());
                 cx.notify();
@@ -719,6 +755,9 @@ impl CrabStudioApp {
                     .flatten();
 
                 this.update(cx, |app, cx| {
+                    if let Ok(mut cache) = app.sql_metadata_cache.write() {
+                        cache.set_columns_for_table(&tbl_for_cols, cols.clone());
+                    }
                     if app.selected_table.as_deref() == Some(&tbl_for_cols) {
                         app.schema_columns = cols;
                         app.schema_indexes = idxs;

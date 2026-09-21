@@ -12,7 +12,7 @@ use gpui_kit::base::{h_flex, v_flex};
 use gpui_kit::component::{
     Disableable as _, Icon, Sizable as _,
     button::{Button, ButtonVariants as _},
-    input::{Textarea, TextareaState},
+    input::{Editor, EditorState},
     resizable::{ResizableState, resizable_panel, v_resizable},
     tab::{Tab, TabBar},
 };
@@ -31,7 +31,7 @@ pub enum ConsoleBottomTab {
 
 #[derive(IntoElement)]
 pub struct QueryConsole {
-    editor_state: Entity<TextareaState>,
+    editor_state: Entity<EditorState>,
     split_state: Entity<ResizableState>,
     query_result: Option<QueryResult>,
     query_error: Option<String>,
@@ -54,7 +54,7 @@ pub struct QueryConsole {
 }
 
 impl QueryConsole {
-    pub fn new(editor_state: &Entity<TextareaState>, split_state: &Entity<ResizableState>) -> Self {
+    pub fn new(editor_state: &Entity<EditorState>, split_state: &Entity<ResizableState>) -> Self {
         Self {
             editor_state: editor_state.clone(),
             split_state: split_state.clone(),
@@ -403,7 +403,7 @@ impl RenderOnce for QueryConsole {
             .children(line_gutter)
             .child(
                 div().flex_1().h_full().min_w_0().child(
-                    Textarea::new(&self.editor_state)
+                    Editor::new(&self.editor_state)
                         .h_full()
                         .bg(ThemeColors::BG_APP)
                         .text_color(ThemeColors::TEXT_PRIMARY),

@@ -9361,6 +9361,7 @@ dependencies = [
  "cocoa 0.26.1",
  "dirs 5.0.1",
  "gpui-kit",
+ "lsp-types",
  "mysql_async",
  "objc",
  "rusqlite",
