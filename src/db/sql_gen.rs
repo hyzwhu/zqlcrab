@@ -105,7 +105,11 @@ pub fn generate_review_plan(
             }
 
             if let Some(c) = col_meta {
-                if !c.is_nullable && !is_auto && c.default_value.is_none() && matches!(val, QueryValue::Null) {
+                if !c.is_nullable
+                    && !is_auto
+                    && c.default_value.is_none()
+                    && matches!(val, QueryValue::Null)
+                {
                     warnings.push(format!(
                         "Column '{}' in new row #{} is NOT NULL and has no default value, but is currently NULL.",
                         col_name, inserts_count + 1
@@ -1687,10 +1691,7 @@ mod tests {
         // Case B: User left non-auto-increment NOT NULL PK as NULL - must NOT be omitted as auto, and triggers warning
         let mut cs_null = GridChangeset::new();
         cs_null.add_inserted_row(
-            vec![
-                QueryValue::Null,
-                QueryValue::String("JOIN Syntax".into()),
-            ],
+            vec![QueryValue::Null, QueryValue::String("JOIN Syntax".into())],
             crate::db::changeset::InsertAnchor::default(),
         );
 
@@ -1750,6 +1751,10 @@ mod tests {
         );
 
         assert!(plan_auto.warnings.is_empty());
-        assert!(plan_auto.full_script.contains("INSERT INTO `posts` (`title`) VALUES ('New Post');"));
+        assert!(
+            plan_auto
+                .full_script
+                .contains("INSERT INTO `posts` (`title`) VALUES ('New Post');")
+        );
     }
 }

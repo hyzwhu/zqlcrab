@@ -550,13 +550,17 @@ impl CrabStudioApp {
 
                         cx.spawn(async move |_this, _cx: &mut AsyncApp| {
                             for tbl in prefetch_tables {
-                                if let Ok(cols) = prefetch_conn.list_columns(None, tbl.schema.as_deref(), &tbl.name).await {
+                                if let Ok(cols) = prefetch_conn
+                                    .list_columns(None, tbl.schema.as_deref(), &tbl.name)
+                                    .await
+                                {
                                     if let Ok(mut cache) = prefetch_cache.write() {
                                         cache.set_columns_for_table(&tbl.name, cols);
                                     }
                                 }
                             }
-                        }).detach();
+                        })
+                        .detach();
                         app.selected_table = None;
                         app.table_data = None;
                         app.grid_changeset.clear();
@@ -724,13 +728,17 @@ impl CrabStudioApp {
                 let prefetch_cache = app.sql_metadata_cache.clone();
                 cx.spawn(async move |_this, _cx: &mut AsyncApp| {
                     for tbl in tables {
-                        if let Ok(cols) = prefetch_conn.list_columns(None, tbl.schema.as_deref(), &tbl.name).await {
+                        if let Ok(cols) = prefetch_conn
+                            .list_columns(None, tbl.schema.as_deref(), &tbl.name)
+                            .await
+                        {
                             if let Ok(mut cache) = prefetch_cache.write() {
                                 cache.set_columns_for_table(&tbl.name, cols);
                             }
                         }
                     }
-                }).detach();
+                })
+                .detach();
 
                 app.status_message = Some("Schema refreshed".to_string());
                 cx.notify();

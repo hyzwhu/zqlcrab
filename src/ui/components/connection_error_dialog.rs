@@ -437,8 +437,10 @@ impl RenderOnce for ConnectionErrorDialog {
                         retry_btn
                     })
                     .child({
-                        let mut dismiss_btn =
-                            Button::new("conn_error_close_btn").ghost().small().label(close_label);
+                        let mut dismiss_btn = Button::new("conn_error_close_btn")
+                            .ghost()
+                            .small()
+                            .label(close_label);
                         if let Some(ref handler) = on_close {
                             let handler = handler.clone();
                             dismiss_btn = dismiss_btn.on_click(move |_, window, cx| {

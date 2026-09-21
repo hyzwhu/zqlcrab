@@ -174,24 +174,56 @@ const MYSQL_KEYWORDS: &[&str] = &[
 
 /// Built-in SQL functions and their details
 const SQL_FUNCTIONS: &[(&str, &str, &str)] = &[
-    ("COUNT", "COUNT(expression)", "Counts rows or non-null values"),
+    (
+        "COUNT",
+        "COUNT(expression)",
+        "Counts rows or non-null values",
+    ),
     ("SUM", "SUM(expression)", "Calculates the sum of values"),
     ("AVG", "AVG(expression)", "Calculates the average of values"),
     ("MIN", "MIN(expression)", "Returns the minimum value"),
     ("MAX", "MAX(expression)", "Returns the maximum value"),
-    ("COALESCE", "COALESCE(val1, val2, ...)", "Returns the first non-null argument"),
-    ("IFNULL", "IFNULL(expr1, expr2)", "Returns expr2 if expr1 is null"),
-    ("NULLIF", "NULLIF(expr1, expr2)", "Returns null if expr1 equals expr2"),
-    ("CONCAT", "CONCAT(s1, s2, ...)", "Concatenates string expressions"),
-    ("SUBSTR", "SUBSTR(str, pos, len)", "Extracts a substring from text"),
-    ("LENGTH", "LENGTH(str)", "Returns string character or byte length"),
+    (
+        "COALESCE",
+        "COALESCE(val1, val2, ...)",
+        "Returns the first non-null argument",
+    ),
+    (
+        "IFNULL",
+        "IFNULL(expr1, expr2)",
+        "Returns expr2 if expr1 is null",
+    ),
+    (
+        "NULLIF",
+        "NULLIF(expr1, expr2)",
+        "Returns null if expr1 equals expr2",
+    ),
+    (
+        "CONCAT",
+        "CONCAT(s1, s2, ...)",
+        "Concatenates string expressions",
+    ),
+    (
+        "SUBSTR",
+        "SUBSTR(str, pos, len)",
+        "Extracts a substring from text",
+    ),
+    (
+        "LENGTH",
+        "LENGTH(str)",
+        "Returns string character or byte length",
+    ),
     ("UPPER", "UPPER(str)", "Converts string to uppercase"),
     ("LOWER", "LOWER(str)", "Converts string to lowercase"),
     ("TRIM", "TRIM(str)", "Trims leading and trailing whitespace"),
     ("ROUND", "ROUND(num, decimals)", "Rounds a numeric value"),
     ("ABS", "ABS(num)", "Returns the absolute value"),
     ("NOW", "NOW()", "Returns the current date and time"),
-    ("CURRENT_TIMESTAMP", "CURRENT_TIMESTAMP", "Current transaction timestamp"),
+    (
+        "CURRENT_TIMESTAMP",
+        "CURRENT_TIMESTAMP",
+        "Current transaction timestamp",
+    ),
     ("DATE", "DATE(expression)", "Extracts or formats date"),
 ];
 
@@ -238,7 +270,10 @@ pub fn parse_completion_prefix(rope: &Rope, offset: usize) -> (CompletionTrigger
         )
     } else {
         let clean_token = token.trim_matches(|c| c == '`' || c == '"' || c == '[' || c == ']');
-        (CompletionTriggerTarget::Word(clean_token.to_string()), start)
+        (
+            CompletionTriggerTarget::Word(clean_token.to_string()),
+            start,
+        )
     }
 }
 
@@ -444,7 +479,9 @@ pub fn compute_completions(
                             filter_text: Some(prefix.to_string()),
                             kind: Some(CompletionItemKind::SNIPPET),
                             detail: Some(desc.to_string()),
-                            documentation: Some(lsp_types::Documentation::String(snippet.to_string())),
+                            documentation: Some(lsp_types::Documentation::String(
+                                snippet.to_string(),
+                            )),
                             text_edit: Some(CompletionTextEdit::Edit(TextEdit {
                                 range: LspRange {
                                     start: start_pos,
@@ -474,23 +511,25 @@ pub fn compute_completions(
                                     .description
                                     .as_ref()
                                     .map(|c| lsp_types::Documentation::String(c.clone())),
-                            text_edit: Some(CompletionTextEdit::Edit(TextEdit {
-                                range: LspRange {
-                                    start: start_pos,
-                                    end: end_pos,
-                                },
-                                new_text: col.name.clone(),
-                            })),
-                            ..Default::default()
-                        });
-                        col_count += 1;
-                        if col_count >= MAX_GLOBAL_COLUMNS || items.len() >= MAX_COMPLETION_ITEMS {
-                            break 'col_outer;
+                                text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                                    range: LspRange {
+                                        start: start_pos,
+                                        end: end_pos,
+                                    },
+                                    new_text: col.name.clone(),
+                                })),
+                                ..Default::default()
+                            });
+                            col_count += 1;
+                            if col_count >= MAX_GLOBAL_COLUMNS
+                                || items.len() >= MAX_COMPLETION_ITEMS
+                            {
+                                break 'col_outer;
+                            }
                         }
                     }
                 }
             }
-        }
 
             // Sort so exact matches appear first, followed by shorter matches
             items.sort_by(|a, b| {
@@ -543,7 +582,9 @@ impl CompletionProvider for SqlCompletionProvider {
 
     fn is_completion_trigger(&self, _: usize, new_text: &str, _: &mut App) -> bool {
         // Trigger completion on alphanumeric character, underscore, or dot
-        new_text.chars().any(|c| c.is_alphanumeric() || c == '_' || c == '.')
+        new_text
+            .chars()
+            .any(|c| c.is_alphanumeric() || c == '_' || c == '.')
     }
 }
 
@@ -636,8 +677,7 @@ mod tests {
         );
 
         // Dot match on table column with specific prefix
-        let target_col =
-            CompletionTriggerTarget::Dot("customers".to_string(), "em".to_string());
+        let target_col = CompletionTriggerTarget::Dot("customers".to_string(), "em".to_string());
         let res_col = compute_completions(&cache, target_col, pos, pos);
         assert_eq!(res_col.len(), 1);
         assert_eq!(res_col[0].label, "email");

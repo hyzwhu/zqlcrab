@@ -379,18 +379,14 @@ impl RenderOnce for QueryConsole {
                 )
         });
 
-        let editor_pane = div()
-            .size_full()
-            .min_h_0()
-            .bg(ThemeColors::BG_APP)
-            .child(
-                Editor::new(&self.editor_state)
-                    .h_full()
-                    .bg(ThemeColors::BG_APP)
-                    .text_color(ThemeColors::TEXT_PRIMARY)
-                    .font_family(ed_font_family)
-                    .text_size(px(ed_font_size)),
-            );
+        let editor_pane = div().size_full().min_h_0().bg(ThemeColors::BG_APP).child(
+            Editor::new(&self.editor_state)
+                .h_full()
+                .bg(ThemeColors::BG_APP)
+                .text_color(ThemeColors::TEXT_PRIMARY)
+                .font_family(ed_font_family)
+                .text_size(px(ed_font_size)),
+        );
 
         let bottom_selected = match self.bottom_tab {
             ConsoleBottomTab::Results => 0,

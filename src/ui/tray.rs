@@ -18,7 +18,7 @@ use cocoa::foundation::{NSData, NSSize, NSString};
 use objc::declare::ClassDecl;
 #[cfg(target_os = "macos")]
 #[allow(unexpected_cfgs, deprecated, unused_imports)]
-use objc::runtime::{BOOL, Class, Object, Sel, NO, YES};
+use objc::runtime::{BOOL, Class, NO, Object, Sel, YES};
 #[cfg(target_os = "macos")]
 #[allow(unexpected_cfgs, deprecated, unused_imports)]
 use objc::{class, msg_send, sel, sel_impl};
@@ -261,7 +261,8 @@ unsafe fn populate_menu(menu: id, target: id) {
         ),
     };
 
-    let mem_mb = get_process_memory_mb().or_else(|| current_status.as_ref().and_then(|s| s.memory_mb));
+    let mem_mb =
+        get_process_memory_mb().or_else(|| current_status.as_ref().and_then(|s| s.memory_mb));
     let mem_label = match mem_mb {
         Some(mb) if mb >= 1024.0 => format!("Memory: {:.2} GB", mb / 1024.0),
         Some(mb) => format!("Memory: {mb:.1} MB"),
@@ -280,7 +281,8 @@ unsafe fn populate_menu(menu: id, target: id) {
         let alloc_item: id = msg_send![item_cls, alloc];
         let qc_title = NSString::alloc(nil).init_str("Quick Connect");
         let qc_key = NSString::alloc(nil).init_str("");
-        let qc_item: id = msg_send![alloc_item, initWithTitle: qc_title action: nil keyEquivalent: qc_key];
+        let qc_item: id =
+            msg_send![alloc_item, initWithTitle: qc_title action: nil keyEquivalent: qc_key];
 
         let alloc_submenu: id = msg_send![menu_cls, alloc];
         let sub_title = NSString::alloc(nil).init_str("Quick Connect");
@@ -289,7 +291,9 @@ unsafe fn populate_menu(menu: id, target: id) {
 
         let manager = crate::db::manager::ConnectionManager::new();
         let configs = manager.list_configs();
-        let active_id = current_status.as_ref().and_then(|s| s.active_conn_id.as_deref());
+        let active_id = current_status
+            .as_ref()
+            .and_then(|s| s.active_conn_id.as_deref());
 
         if configs.is_empty() {
             let no_item_alloc: id = msg_send![item_cls, alloc];
@@ -363,7 +367,9 @@ pub fn setup_macos_status_bar() {
                 if !rep.is_null() {
                     let cstr: *const std::os::raw::c_char = msg_send![rep, UTF8String];
                     if !cstr.is_null() {
-                        let id_str = std::ffi::CStr::from_ptr(cstr).to_string_lossy().into_owned();
+                        let id_str = std::ffi::CStr::from_ptr(cstr)
+                            .to_string_lossy()
+                            .into_owned();
                         send_tray_action(TrayAction::Connect(id_str));
                     }
                 }
@@ -547,7 +553,10 @@ mod tests {
             let mem = get_process_memory_mb();
             assert!(mem.is_some());
             let mb = mem.unwrap();
-            assert!(mb > 0.0, "Process memory should be greater than 0MB, got {mb}");
+            assert!(
+                mb > 0.0,
+                "Process memory should be greater than 0MB, got {mb}"
+            );
         }
     }
 
@@ -562,4 +571,3 @@ mod tests {
         assert_eq!(format!("{action3:?}"), "OpenSettings");
     }
 }
-

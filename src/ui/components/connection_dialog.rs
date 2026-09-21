@@ -610,7 +610,8 @@ impl RenderOnce for ConnectionDialog {
                         .child(msg),
                 ),
             Err(err) => {
-                let safe_err = crate::ui::components::connection_error_dialog::wrap_error_text(&err, 56);
+                let safe_err =
+                    crate::ui::components::connection_error_dialog::wrap_error_text(&err, 56);
                 h_flex()
                     .w_full()
                     .min_w_0()
