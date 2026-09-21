@@ -24,6 +24,22 @@
 
 **zqlcrab** is a modern, high-performance database desktop client engineered in Rust using [GPUI](https://github.com/zed-industries/zed) and [gpui-kit](https://github.com/longbridge/gpui-kit). Designed for software developers, DBAs, and data engineers who value speed, responsive zero-latency input, and a polished developer experience without webview or Electron overhead.
 
+<p align="center">
+  <img src="assets/screenshots/zqlcrab-hero.jpg" width="100%" alt="zqlcrab SQL Workspace Overview" style="border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);" />
+</p>
+
+---
+
+## 📸 Screenshots
+
+| SQL Console & Split Plan | Data Grid & Inspector |
+| :---: | :---: |
+| <img src="assets/screenshots/zqlcrab-sql.jpg" width="100%" alt="SQL Console" /> | <img src="assets/screenshots/zqlcrab-data.jpg" width="100%" alt="Data Grid" /> |
+| **Visual EXPLAIN Query Plan** | **Interactive Schema Viewer** |
+| <img src="assets/screenshots/zqlcrab-explain.jpg" width="100%" alt="Visual Explain Plan" /> | <img src="assets/screenshots/zqlcrab-schema.jpg" width="100%" alt="Schema Viewer" /> |
+| **Query History & Search** | **Connection Profiles & Diagnostics** |
+| <img src="assets/screenshots/zqlcrab-history.jpg" width="100%" alt="Query History" /> | <img src="assets/screenshots/zqlcrab-connection.jpg" width="100%" alt="Connection Management" /> |
+
 ---
 
 ## ✨ Features

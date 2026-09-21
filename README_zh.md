@@ -24,6 +24,22 @@
 
 **zqlcrab** 是一款专为开发者、DBA 和数据工程师打造的现代关系型数据库桌面客户端，采用 Rust 语言与 [GPUI](https://github.com/zed-industries/zed) / [gpui-kit](https://github.com/longbridge/gpui-kit) 框架深度打造。告别 Electron 与 Webview 的高内存占用与输入延迟，畅享极速启动与零延迟的丝滑体验。
 
+<p align="center">
+  <img src="assets/screenshots/zqlcrab-hero.jpg" width="100%" alt="zqlcrab 工作台全貌" style="border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);" />
+</p>
+
+---
+
+## 📸 界面预览 (Screenshots)
+
+| 现代 SQL 控制台与执行分屏 | 高性能数据表格与行内编辑 |
+| :---: | :---: |
+| <img src="assets/screenshots/zqlcrab-sql.jpg" width="100%" alt="SQL 查询控制台" /> | <img src="assets/screenshots/zqlcrab-data.jpg" width="100%" alt="数据表格与检查器" /> |
+| **可视化 EXPLAIN 执行计划分析** | **直观表结构与索引设计器** |
+| <img src="assets/screenshots/zqlcrab-explain.jpg" width="100%" alt="EXPLAIN 执行计划分析" /> | <img src="assets/screenshots/zqlcrab-schema.jpg" width="100%" alt="表结构与索引查看器" /> |
+| **执行历史追溯与快速重载** | **多引擎连接管理与测试** |
+| <img src="assets/screenshots/zqlcrab-history.jpg" width="100%" alt="查询历史" /> | <img src="assets/screenshots/zqlcrab-connection.jpg" width="100%" alt="多引擎数据库连接管理" /> |
+
 ---
 
 ## ✨ 核心特性
