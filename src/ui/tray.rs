@@ -145,6 +145,10 @@ unsafe fn populate_menu(menu: id, target: id) {
                 let _: () = msg_send![item, setEnabled: NO];
             }
             let _: () = msg_send![menu, addItem: item];
+            // Release caller-allocated objects so menu has sole ownership (MRC rules)
+            let _: () = msg_send![t, release];
+            let _: () = msg_send![k, release];
+            let _: () = msg_send![item, release];
             item
         } else {
             nil
@@ -338,6 +342,7 @@ pub fn setup_macos_status_bar() {
                     let size = NSSize::new(18.0, 18.0);
                     let _: () = msg_send![image, setSize: size];
                     let _: () = msg_send![button, setImage: image];
+                    let _: () = msg_send![image, release];
                 }
             }
         }
@@ -394,12 +399,14 @@ pub fn setup_macos_status_bar() {
             let alloc_menu: id = msg_send![menu_cls, alloc];
             let menu_title = NSString::alloc(nil).init_str("zqlcrab");
             let menu: id = msg_send![alloc_menu, initWithTitle: menu_title];
+            let _: () = msg_send![menu_title, release];
             let _: () = msg_send![menu, setDelegate: target];
 
             // Populate initial menu
             populate_menu(menu, target);
 
             let _: () = msg_send![status_item, setMenu: menu];
+            let _: () = msg_send![menu, release];
         }
     }
 }

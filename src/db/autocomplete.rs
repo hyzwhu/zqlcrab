@@ -242,6 +242,40 @@ pub fn parse_completion_prefix(rope: &Rope, offset: usize) -> (CompletionTrigger
     }
 }
 
+/// Maximum number of completion candidates returned to the editor popover.
+/// Keeps popover rendering snappy and instantaneous without UI frame drops.
+pub const MAX_COMPLETION_ITEMS: usize = 64;
+
+/// Fast case-insensitive prefix check with zero heap allocation.
+#[inline]
+pub fn starts_with_ignore_case(s: &str, prefix: &str) -> bool {
+    if prefix.len() > s.len() {
+        return false;
+    }
+    if s.is_ascii() && prefix.is_ascii() {
+        s.as_bytes()[..prefix.len()].eq_ignore_ascii_case(prefix.as_bytes())
+    } else {
+        s.chars()
+            .zip(prefix.chars())
+            .all(|(sc, pc)| sc.to_lowercase().eq(pc.to_lowercase()))
+    }
+}
+
+/// Fast case-insensitive equality check with zero heap allocation.
+#[inline]
+pub fn eq_ignore_case(a: &str, b: &str) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    if a.is_ascii() && b.is_ascii() {
+        a.eq_ignore_ascii_case(b)
+    } else {
+        a.chars()
+            .zip(b.chars())
+            .all(|(ac, bc)| ac.to_lowercase().eq(bc.to_lowercase()))
+    }
+}
+
 /// Generate completion candidates based on parsed trigger and cache.
 pub fn compute_completions(
     cache: &SqlMetadataCache,
@@ -253,13 +287,25 @@ pub fn compute_completions(
 
     match target {
         CompletionTriggerTarget::Dot(table_ref, col_prefix) => {
-            let col_prefix_lower = col_prefix.to_lowercase();
-            let table_ref_lower = table_ref.to_lowercase();
+            // Find matching table columns in cache - fast lookup or case-insensitive match
+            let cols_opt = cache
+                .columns_by_table
+                .get(table_ref.as_str())
+                .or_else(|| {
+                    let lower = table_ref.to_lowercase();
+                    cache.columns_by_table.get(&lower)
+                })
+                .or_else(|| {
+                    cache
+                        .columns_by_table
+                        .iter()
+                        .find(|(k, _)| eq_ignore_case(k, &table_ref))
+                        .map(|(_, cols)| cols)
+                });
 
-            // Find matching table columns in cache
-            if let Some(cols) = cache.columns_by_table.get(&table_ref_lower) {
+            if let Some(cols) = cols_opt {
                 for col in cols {
-                    if col.name.to_lowercase().starts_with(&col_prefix_lower) {
+                    if starts_with_ignore_case(&col.name, &col_prefix) {
                         items.push(CompletionItem {
                             label: col.name.clone(),
                             filter_text: Some(col.name.clone()),
@@ -278,80 +324,22 @@ pub fn compute_completions(
                             })),
                             ..Default::default()
                         });
+
+                        if items.len() >= MAX_COMPLETION_ITEMS {
+                            break;
+                        }
                     }
                 }
             }
         }
-        CompletionTriggerTarget::Word(word_prefix) => {
-            let prefix_lower = word_prefix.to_lowercase();
-            if prefix_lower.is_empty() {
+        CompletionTriggerTarget::Word(ref word_prefix) => {
+            if word_prefix.is_empty() {
                 return items;
             }
 
-            // 1. Tables & Views
-            for tbl in &cache.tables {
-                let tbl_lower = tbl.name.to_lowercase();
-                if tbl_lower.starts_with(&prefix_lower) {
-                    let is_view = tbl.is_view();
-                    let kind = if is_view {
-                        CompletionItemKind::INTERFACE
-                    } else {
-                        CompletionItemKind::STRUCT
-                    };
-                    let detail = if let Some(ref schema) = tbl.schema {
-                        format!("{} (schema: {})", tbl.table_type, schema)
-                    } else {
-                        tbl.table_type.clone()
-                    };
+            let mut seen = std::collections::HashSet::new();
 
-                    items.push(CompletionItem {
-                        label: tbl.name.clone(),
-                        filter_text: Some(tbl.name.clone()),
-                        kind: Some(kind),
-                        detail: Some(detail),
-                        documentation: tbl
-                            .comment
-                            .as_ref()
-                            .map(|c| lsp_types::Documentation::String(c.clone())),
-                        text_edit: Some(CompletionTextEdit::Edit(TextEdit {
-                            range: LspRange {
-                                start: start_pos,
-                                end: end_pos,
-                            },
-                            new_text: tbl.name.clone(),
-                        })),
-                        ..Default::default()
-                    });
-                }
-            }
-
-            // 2. Global known columns across cached tables
-            for (tbl_name, cols) in &cache.columns_by_table {
-                for col in cols {
-                    if col.name.to_lowercase().starts_with(&prefix_lower) {
-                        items.push(CompletionItem {
-                            label: col.name.clone(),
-                            filter_text: Some(col.name.clone()),
-                            kind: Some(CompletionItemKind::FIELD),
-                            detail: Some(format!("Column in {} ({})", tbl_name, col.data_type)),
-                            documentation: col
-                                .description
-                                .as_ref()
-                                .map(|c| lsp_types::Documentation::String(c.clone())),
-                            text_edit: Some(CompletionTextEdit::Edit(TextEdit {
-                                range: LspRange {
-                                    start: start_pos,
-                                    end: end_pos,
-                                },
-                                new_text: col.name.clone(),
-                            })),
-                            ..Default::default()
-                        });
-                    }
-                }
-            }
-
-            // 3. SQL Keywords (ANSI + Dialect)
+            // 1. SQL Keywords (ANSI + Dialect) - Top priority for SQL editing
             let mut keywords: Vec<&str> = ANSI_KEYWORDS.to_vec();
             match cache.family {
                 Some(DatabaseFamily::Sqlite) => keywords.extend_from_slice(SQLITE_KEYWORDS),
@@ -361,79 +349,163 @@ pub fn compute_completions(
             }
 
             for kw in keywords {
-                if kw.to_lowercase().starts_with(&prefix_lower) {
-                    items.push(CompletionItem {
-                        label: kw.to_string(),
-                        filter_text: Some(kw.to_lowercase()),
-                        kind: Some(CompletionItemKind::KEYWORD),
-                        detail: Some("SQL Keyword".to_string()),
-                        text_edit: Some(CompletionTextEdit::Edit(TextEdit {
-                            range: LspRange {
-                                start: start_pos,
-                                end: end_pos,
-                            },
-                            new_text: kw.to_string(),
-                        })),
-                        ..Default::default()
-                    });
+                if starts_with_ignore_case(kw, word_prefix) {
+                    if seen.insert((kw.to_string(), 1u8)) {
+                        items.push(CompletionItem {
+                            label: kw.to_string(),
+                            filter_text: Some(kw.to_lowercase()),
+                            kind: Some(CompletionItemKind::KEYWORD),
+                            detail: Some("SQL Keyword".to_string()),
+                            text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                                range: LspRange {
+                                    start: start_pos,
+                                    end: end_pos,
+                                },
+                                new_text: kw.to_string(),
+                            })),
+                            ..Default::default()
+                        });
+                    }
                 }
             }
 
-            // 4. Built-in SQL Functions
-            for (fn_name, signature, doc) in SQL_FUNCTIONS {
-                if fn_name.to_lowercase().starts_with(&prefix_lower) {
-                    let insert_text = if signature.ends_with("()") {
-                        format!("{}()", fn_name)
+            // 2. Tables & Views
+            for tbl in &cache.tables {
+                if starts_with_ignore_case(&tbl.name, word_prefix) {
+                    let is_view = tbl.is_view();
+                    let kind = if is_view {
+                        CompletionItemKind::INTERFACE
                     } else {
-                        format!("{}(", fn_name)
+                        CompletionItemKind::STRUCT
                     };
-                    items.push(CompletionItem {
-                        label: fn_name.to_string(),
-                        filter_text: Some(fn_name.to_lowercase()),
-                        kind: Some(CompletionItemKind::FUNCTION),
-                        detail: Some(signature.to_string()),
-                        documentation: Some(lsp_types::Documentation::String(doc.to_string())),
-                        text_edit: Some(CompletionTextEdit::Edit(TextEdit {
-                            range: LspRange {
-                                start: start_pos,
-                                end: end_pos,
-                            },
-                            new_text: insert_text,
-                        })),
-                        ..Default::default()
-                    });
+                    if seen.insert((tbl.name.clone(), 2u8)) {
+                        let detail = if let Some(ref schema) = tbl.schema {
+                            format!("{} (schema: {})", tbl.table_type, schema)
+                        } else {
+                            tbl.table_type.clone()
+                        };
+
+                        items.push(CompletionItem {
+                            label: tbl.name.clone(),
+                            filter_text: Some(tbl.name.clone()),
+                            kind: Some(kind),
+                            detail: Some(detail),
+                            documentation: tbl
+                                .comment
+                                .as_ref()
+                                .map(|c| lsp_types::Documentation::String(c.clone())),
+                            text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                                range: LspRange {
+                                    start: start_pos,
+                                    end: end_pos,
+                                },
+                                new_text: tbl.name.clone(),
+                            })),
+                            ..Default::default()
+                        });
+                    }
                 }
             }
 
-            // 5. Snippets
+            // 3. Built-in SQL Functions
+            for (fn_name, signature, doc) in SQL_FUNCTIONS {
+                if starts_with_ignore_case(fn_name, word_prefix) {
+                    if seen.insert((fn_name.to_string(), 3u8)) {
+                        let insert_text = if signature.ends_with("()") {
+                            format!("{}()", fn_name)
+                        } else {
+                            format!("{}(", fn_name)
+                        };
+                        items.push(CompletionItem {
+                            label: fn_name.to_string(),
+                            filter_text: Some(fn_name.to_lowercase()),
+                            kind: Some(CompletionItemKind::FUNCTION),
+                            detail: Some(signature.to_string()),
+                            documentation: Some(lsp_types::Documentation::String(doc.to_string())),
+                            text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                                range: LspRange {
+                                    start: start_pos,
+                                    end: end_pos,
+                                },
+                                new_text: insert_text,
+                            })),
+                            ..Default::default()
+                        });
+                    }
+                }
+            }
+
+            // 4. SQL Templates / Snippets
             for (prefix, snippet, desc) in SQL_SNIPPETS {
-                if prefix.starts_with(&prefix_lower) {
-                    items.push(CompletionItem {
-                        label: prefix.to_string(),
-                        filter_text: Some(prefix.to_string()),
-                        kind: Some(CompletionItemKind::SNIPPET),
-                        detail: Some(desc.to_string()),
-                        documentation: Some(lsp_types::Documentation::String(snippet.to_string())),
-                        text_edit: Some(CompletionTextEdit::Edit(TextEdit {
-                            range: LspRange {
-                                start: start_pos,
-                                end: end_pos,
-                            },
-                            new_text: snippet.to_string(),
-                        })),
-                        ..Default::default()
-                    });
+                if starts_with_ignore_case(prefix, word_prefix) {
+                    if seen.insert((prefix.to_string(), 4u8)) {
+                        items.push(CompletionItem {
+                            label: prefix.to_string(),
+                            filter_text: Some(prefix.to_string()),
+                            kind: Some(CompletionItemKind::SNIPPET),
+                            detail: Some(desc.to_string()),
+                            documentation: Some(lsp_types::Documentation::String(snippet.to_string())),
+                            text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                                range: LspRange {
+                                    start: start_pos,
+                                    end: end_pos,
+                                },
+                                new_text: snippet.to_string(),
+                            })),
+                            ..Default::default()
+                        });
+                    }
+                }
+            }
+
+            // 5. Global known columns across cached tables (early exit and deduplication)
+            const MAX_GLOBAL_COLUMNS: usize = 30;
+            let mut col_count = 0;
+            'col_outer: for (tbl_name, cols) in &cache.columns_by_table {
+                for col in cols {
+                    if starts_with_ignore_case(&col.name, word_prefix) {
+                        if seen.insert((col.name.clone(), 5u8)) {
+                            items.push(CompletionItem {
+                                label: col.name.clone(),
+                                filter_text: Some(col.name.clone()),
+                                kind: Some(CompletionItemKind::FIELD),
+                                detail: Some(format!("Column in {} ({})", tbl_name, col.data_type)),
+                                documentation: col
+                                    .description
+                                    .as_ref()
+                                    .map(|c| lsp_types::Documentation::String(c.clone())),
+                            text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                                range: LspRange {
+                                    start: start_pos,
+                                    end: end_pos,
+                                },
+                                new_text: col.name.clone(),
+                            })),
+                            ..Default::default()
+                        });
+                        col_count += 1;
+                        if col_count >= MAX_GLOBAL_COLUMNS || items.len() >= MAX_COMPLETION_ITEMS {
+                            break 'col_outer;
+                        }
+                    }
                 }
             }
         }
-    }
 
-    // Deduplicate items by label and kind
-    let mut seen = std::collections::HashSet::new();
-    items.retain(|item| {
-        let key = (item.label.clone(), format!("{:?}", item.kind));
-        seen.insert(key)
-    });
+            // Sort so exact matches appear first, followed by shorter matches
+            items.sort_by(|a, b| {
+                let a_exact = eq_ignore_case(&a.label, word_prefix);
+                let b_exact = eq_ignore_case(&b.label, word_prefix);
+                b_exact
+                    .cmp(&a_exact)
+                    .then_with(|| a.label.len().cmp(&b.label.len()))
+            });
+
+            if items.len() > MAX_COMPLETION_ITEMS {
+                items.truncate(MAX_COMPLETION_ITEMS);
+            }
+        }
+    }
 
     items
 }
@@ -460,13 +532,12 @@ impl CompletionProvider for SqlCompletionProvider {
         let start_pos = text.offset_to_position(replace_start);
         let end_pos = text.offset_to_position(offset);
 
-        let cache = if let Ok(guard) = self.cache.read() {
-            guard.clone()
+        // Zero-copy read lock: avoid deep cloning the entire metadata cache on every keystroke
+        let items = if let Ok(guard) = self.cache.read() {
+            compute_completions(&guard, target, start_pos, end_pos)
         } else {
-            SqlMetadataCache::default()
+            Vec::new()
         };
-
-        let items = compute_completions(&cache, target, start_pos, end_pos);
         Task::ready(Ok(CompletionResponse::Array(items)))
     }
 
@@ -609,5 +680,66 @@ mod tests {
             Position::new(0, 0),
         );
         assert!(res_pg.iter().any(|c| c.label == "ILIKE"));
+    }
+
+    #[test]
+    fn test_completion_limit_and_ranking() {
+        let mut cache = SqlMetadataCache::default();
+        // Populate 100 tables and 500 columns
+        let mut tables = Vec::new();
+        for i in 0..100 {
+            let tbl_name = format!("table_{i}");
+            tables.push(TableInfo {
+                name: tbl_name.clone(),
+                schema: None,
+                table_type: "BASE TABLE".to_string(),
+                comment: None,
+                row_count_estimate: None,
+            });
+            let cols = vec![
+                ColumnInfo {
+                    name: "id".to_string(),
+                    data_type: "INT".to_string(),
+                    is_primary_key: true,
+                    is_nullable: false,
+                    is_auto_increment: true,
+                    default_value: None,
+                    description: None,
+                },
+                ColumnInfo {
+                    name: format!("name_{i}"),
+                    data_type: "VARCHAR".to_string(),
+                    is_primary_key: false,
+                    is_nullable: true,
+                    is_auto_increment: false,
+                    default_value: None,
+                    description: None,
+                },
+            ];
+            cache.set_columns_for_table(&tbl_name, cols);
+        }
+        cache.set_tables(tables);
+
+        let pos = Position::new(0, 0);
+        // Prefix matching many tables
+        let res = compute_completions(
+            &cache,
+            CompletionTriggerTarget::Word("tab".to_string()),
+            pos,
+            pos,
+        );
+        // Must be capped by MAX_COMPLETION_ITEMS
+        assert!(res.len() <= MAX_COMPLETION_ITEMS);
+        assert!(res.iter().any(|c| c.label.starts_with("table_")));
+
+        // Exact match should be ranked first
+        let res_exact = compute_completions(
+            &cache,
+            CompletionTriggerTarget::Word("select".to_string()),
+            pos,
+            pos,
+        );
+        assert!(!res_exact.is_empty());
+        assert_eq!(res_exact[0].label, "SELECT");
     }
 }
