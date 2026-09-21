@@ -281,6 +281,28 @@ impl CrabStudioApp {
             });
         }
 
+        if let Some(mut tray_rx) = crate::ui::tray::take_tray_receiver() {
+            cx.spawn(async move |this, cx: &mut AsyncApp| {
+                while let Some(action) = tray_rx.recv().await {
+                    this.update(cx, |app, cx| match action {
+                        crate::ui::tray::TrayAction::Connect(conn_id) => {
+                            app.select_connection(&conn_id, cx);
+                        }
+                        crate::ui::tray::TrayAction::NewConnection => {
+                            app.open_new_connection_dialog(cx);
+                        }
+                        crate::ui::tray::TrayAction::OpenSettings => {
+                            app.active_nav = ActivityNav::Settings;
+                            app.active_settings_tab = SettingsTab::Appearance;
+                            cx.notify();
+                        }
+                    })
+                    .ok();
+                }
+            })
+            .detach();
+        }
+
         let query_editor = cx.new(|cx| {
             TextareaState::new(window, cx).default_value(
                 "-- Press ⌘↵ (Ctrl+Enter) to run · Shift+Alt+F formats SQL\nSELECT 1 AS id, 'Welcome to CrabStudio' AS message;\n",
@@ -449,6 +471,24 @@ impl CrabStudioApp {
                     this.update(cx, |app, cx| {
                         let name = conn.config.name.clone();
                         let conn_id = conn.config.id.clone();
+                        let db_name = conn
+                            .status
+                            .as_ref()
+                            .and_then(|s| s.current_database.clone())
+                            .or_else(|| {
+                                if conn.config.database.is_empty() {
+                                    None
+                                } else {
+                                    Some(conn.config.database.clone())
+                                }
+                            });
+                        let ping_ms = conn.status.as_ref().and_then(|s| s.ping_ms);
+                        crate::ui::tray::update_tray_status(Some(crate::ui::tray::TrayStatus {
+                            active_conn_id: Some(conn_id.clone()),
+                            active_name: Some(name.clone()),
+                            db_name,
+                            ping_ms,
+                        }));
                         app.active_connection = Some(conn);
                         app.settings_manager.settings_mut().last_connection_id = Some(conn_id);
                         let _ = app.settings_manager.save();
@@ -541,6 +581,7 @@ impl CrabStudioApp {
     /// Disconnect from the active database
     pub fn disconnect(&mut self, cx: &mut Context<Self>) {
         if let Some(conn) = self.active_connection.take() {
+            crate::ui::tray::update_tray_status(None);
             let name = conn.config.name.clone();
             cx.spawn(async move |_, _| {
                 let _ = conn.disconnect().await;
@@ -745,6 +786,10 @@ impl CrabStudioApp {
                     Ok(qr) => {
                         let rows = qr.rows.len();
                         let dur = qr.execution_time_ms.unwrap_or(duration);
+                        if let Some(mut tray) = crate::ui::tray::get_tray_status() {
+                            tray.ping_ms = Some(dur);
+                            crate::ui::tray::update_tray_status(Some(tray));
+                        }
                         app.console_result = Some(qr.clone());
                         app.table_data = Some(qr);
                         app.grid_selected_cell = None;
@@ -2185,6 +2230,17 @@ impl CrabStudioApp {
         self.console_error = None;
         self.explain_plan = None;
         self.explain_error = None;
+        cx.notify();
+    }
+
+    /// Open new connection dialog without window handle (e.g. triggered from tray or action)
+    pub fn open_new_connection_dialog(&mut self, cx: &mut Context<Self>) {
+        self.dialog_open = true;
+        self.dialog_editing_id = None;
+        self.dialog_db_type = DatabaseType::Sqlite;
+        self.dialog_test_result = None;
+        self.dialog_is_testing = false;
+        self.dialog_is_read_only = false;
         cx.notify();
     }
 
