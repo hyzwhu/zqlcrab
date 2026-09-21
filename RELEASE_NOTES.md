@@ -5,6 +5,12 @@ Fast, lightweight, GPU-accelerated database desktop client built with Rust & GPU
 ### 📋 Changelog
 
 #### v0.1.1 Release Highlights:
+- ⚡ **Zero-Copy Autocompletion Engine & Keystroke Optimization**:
+  - Eliminated UI freezes during SQL editing by switching to zero-copy schema cache reads under read lock.
+  - Implemented zero-heap-allocation case-insensitive token matching and a 64-item cap to maintain a snappy 120 FPS.
+  - Prioritized completion ranking: Keywords > Tables & Views > Built-in Functions > Snippets > Global Columns.
+- 🛡️ **Native macOS Status Bar Memory Leak Fix**:
+  - Resolved Objective-C MRC retention leak in `NSMenuItem` and `NSString` references during status bar menu updates.
 - 💡 **Instant Dot Syntax Column Autocomplete**:
   - Typing `.` after any table name (e.g. `SELECT users.`) immediately triggers the full list of columns for that table, even when no column prefix character has been entered yet.
   - Smart identifier parsing with automatic stripping of quotes (`` ` ``, `"`, `[]`).
