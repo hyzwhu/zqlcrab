@@ -220,7 +220,7 @@ pub fn parse_completion_prefix(rope: &Rope, offset: usize) -> (CompletionTrigger
     while left < 64 && offset > left {
         let idx = offset - left - 1;
         match rope.char_at(idx) {
-            Some(c) if c.is_alphanumeric() || c == '_' || c == '.' => {
+            Some(c) if c.is_alphanumeric() || c == '_' || c == '.' || c == '`' || c == '"' => {
                 left += 1;
             }
             _ => break,
@@ -231,12 +231,14 @@ pub fn parse_completion_prefix(rope: &Rope, offset: usize) -> (CompletionTrigger
     let token = rope.slice(start..offset).to_string();
 
     if let Some((table, col_prefix)) = token.rsplit_once('.') {
+        let clean_table = table.trim_matches(|c| c == '`' || c == '"' || c == '[' || c == ']');
         (
-            CompletionTriggerTarget::Dot(table.to_string(), col_prefix.to_string()),
+            CompletionTriggerTarget::Dot(clean_table.to_string(), col_prefix.to_string()),
             start + table.len() + 1,
         )
     } else {
-        (CompletionTriggerTarget::Word(token), start)
+        let clean_token = token.trim_matches(|c| c == '`' || c == '"' || c == '[' || c == ']');
+        (CompletionTriggerTarget::Word(clean_token.to_string()), start)
     }
 }
 
@@ -449,7 +451,8 @@ impl CompletionProvider for SqlCompletionProvider {
 
         if match &target {
             CompletionTriggerTarget::Word(w) => w.is_empty(),
-            CompletionTriggerTarget::Dot(_, col) => col.is_empty(),
+            // When user types `ecrm_yb.` with empty col prefix, allow suggestions so all columns popup!
+            CompletionTriggerTarget::Dot(tbl, _) => tbl.is_empty(),
         } {
             return Task::ready(Ok(CompletionResponse::Array(vec![])));
         }
@@ -561,13 +564,28 @@ mod tests {
                 .any(|c| c.label == "customers" && c.kind == Some(CompletionItemKind::STRUCT))
         );
 
-        // Dot match on table column
+        // Dot match on table column with specific prefix
         let target_col =
             CompletionTriggerTarget::Dot("customers".to_string(), "em".to_string());
         let res_col = compute_completions(&cache, target_col, pos, pos);
         assert_eq!(res_col.len(), 1);
         assert_eq!(res_col[0].label, "email");
         assert_eq!(res_col[0].kind, Some(CompletionItemKind::FIELD));
+
+        // Dot match on table with EMPTY column prefix (typing `table.` immediately)
+        let target_empty_col =
+            CompletionTriggerTarget::Dot("customers".to_string(), "".to_string());
+        let res_empty_col = compute_completions(&cache, target_empty_col, pos, pos);
+        assert_eq!(res_empty_col.len(), 2);
+        assert!(res_empty_col.iter().any(|c| c.label == "id"));
+        assert!(res_empty_col.iter().any(|c| c.label == "email"));
+
+        // Quoted table reference `customers`.
+        let (parsed_target, _) = parse_completion_prefix(&Rope::from("SELECT `customers`."), 19);
+        assert_eq!(
+            parsed_target,
+            CompletionTriggerTarget::Dot("customers".to_string(), "".to_string())
+        );
     }
 
     #[test]

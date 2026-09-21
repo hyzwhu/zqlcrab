@@ -506,6 +506,10 @@ impl CrabStudioApp {
                             db_name: db_name.clone(),
                             ping_ms,
                         }));
+                        // Asynchronously prefetch column metadata for cached tables so dot completion is instant
+                        let prefetch_conn = conn.clone();
+                        let prefetch_cache = app.sql_metadata_cache.clone();
+                        let prefetch_tables = tables_res.clone();
                         app.active_connection = Some(conn);
                         app.settings_manager.settings_mut().last_connection_id = Some(conn_id);
                         let _ = app.settings_manager.save();
@@ -519,6 +523,16 @@ impl CrabStudioApp {
                             }
                             cache.set_tables(tables_res);
                         }
+
+                        cx.spawn(async move |_this, _cx: &mut AsyncApp| {
+                            for tbl in prefetch_tables {
+                                if let Ok(cols) = prefetch_conn.list_columns(None, tbl.schema.as_deref(), &tbl.name).await {
+                                    if let Ok(mut cache) = prefetch_cache.write() {
+                                        cache.set_columns_for_table(&tbl.name, cols);
+                                    }
+                                }
+                            }
+                        }).detach();
                         app.selected_table = None;
                         app.table_data = None;
                         app.grid_changeset.clear();
@@ -650,7 +664,20 @@ impl CrabStudioApp {
                 if let Ok(mut cache) = app.sql_metadata_cache.write() {
                     cache.set_tables(tables.clone());
                 }
-                app.active_tables = tables;
+                app.active_tables = tables.clone();
+
+                let prefetch_conn = conn.clone();
+                let prefetch_cache = app.sql_metadata_cache.clone();
+                cx.spawn(async move |_this, _cx: &mut AsyncApp| {
+                    for tbl in tables {
+                        if let Ok(cols) = prefetch_conn.list_columns(None, tbl.schema.as_deref(), &tbl.name).await {
+                            if let Ok(mut cache) = prefetch_cache.write() {
+                                cache.set_columns_for_table(&tbl.name, cols);
+                            }
+                        }
+                    }
+                }).detach();
+
                 app.status_message = Some("Schema refreshed".to_string());
                 cx.notify();
             })
@@ -681,17 +708,24 @@ impl CrabStudioApp {
         .detach();
     }
 
-    /// Execute the query written in the query editor
+    /// Execute the query written in the query editor (or currently selected text range if active)
     pub fn run_query(&mut self, cx: &mut Context<Self>) {
-        let mut sql = self.query_editor.read(cx).value().to_string();
+        let editor_read = self.query_editor.read(cx);
+        let selected_text = editor_read.selected_text().to_string();
+        let is_selected_exec = !selected_text.trim().is_empty();
+        let mut sql = if is_selected_exec {
+            selected_text
+        } else {
+            editor_read.value().to_string()
+        };
         if sql.trim().is_empty() {
             return;
         }
 
         let settings = self.settings_manager.settings();
 
-        // Format SQL before execution if configured
-        if settings.editor.format_on_run {
+        // Format SQL before execution if configured (only full text format to avoid breaking selected ranges)
+        if settings.editor.format_on_run && !is_selected_exec {
             let formatted = format_sql_with_indent(&sql, settings.editor.tab_size);
             if formatted != sql {
                 sql = formatted;
@@ -777,7 +811,11 @@ impl CrabStudioApp {
         self.is_executing_query = true;
         self.console_error = None;
         self.console_bottom_tab = ConsoleBottomTab::Results;
-        self.status_message = Some("Executing query...".to_string());
+        self.status_message = Some(if is_selected_exec {
+            "Executing selected query...".to_string()
+        } else {
+            "Executing query...".to_string()
+        });
         cx.notify();
 
         let sql_for_exec = sql.clone();
@@ -869,9 +907,15 @@ impl CrabStudioApp {
         cx.notify();
     }
 
-    /// Run EXPLAIN on the editor SQL and show the plan panel.
+    /// Run EXPLAIN on the editor SQL (or currently selected SQL) and show the plan panel.
     pub fn run_explain(&mut self, cx: &mut Context<Self>) {
-        let sql = self.query_editor.read(cx).value().to_string();
+        let editor_read = self.query_editor.read(cx);
+        let selected_text = editor_read.selected_text().to_string();
+        let sql = if !selected_text.trim().is_empty() {
+            selected_text
+        } else {
+            editor_read.value().to_string()
+        };
         if sql.trim().is_empty() {
             return;
         }

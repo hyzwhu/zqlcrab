@@ -11,6 +11,7 @@ pub mod history;
 pub mod manager;
 pub mod mysql;
 pub mod postgres;
+pub mod remote_adapter;
 pub mod runtime;
 pub mod safety;
 pub mod sql_format;
@@ -28,6 +29,7 @@ pub use history::{QueryHistoryItem, QueryHistoryManager, QueryHistoryStatus};
 pub use manager::ConnectionManager;
 pub use mysql::MysqlAdapter;
 pub use postgres::PostgresAdapter;
+pub use remote_adapter::RemoteHttpAdapter;
 pub use runtime::{run_on_tokio, tokio_runtime};
 pub use safety::QuerySafetyValidator;
 pub use sql_gen::{
