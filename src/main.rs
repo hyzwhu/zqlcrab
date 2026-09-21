@@ -3,6 +3,7 @@
 pub mod db;
 pub mod settings;
 pub mod ui;
+pub mod update;
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;

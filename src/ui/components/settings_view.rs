@@ -6,7 +6,7 @@ use crate::ui::theme::ThemeColors;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::{h_flex, v_flex};
 use gpui_kit::component::{
-    Icon, Sizable as _,
+    Disableable as _, Icon, Sizable as _,
     button::{Button, ButtonVariants as _},
 };
 use gpui_kit::gpui::{
@@ -33,10 +33,12 @@ pub struct SettingsView {
     active_tab: SettingsTab,
     is_checking_update: bool,
     update_status_msg: Option<String>,
+    update_result: Option<crate::update::UpdateCheckResult>,
     on_change_settings:
         Option<Rc<dyn Fn(Box<dyn FnOnce(&mut AppSettings)>, &mut Window, &mut App) + 'static>>,
     on_reset_defaults: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_check_updates: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
+    on_open_release_url: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
     on_select_tab: Option<Rc<dyn Fn(SettingsTab, &mut Window, &mut App) + 'static>>,
 }
 
@@ -47,9 +49,11 @@ impl SettingsView {
             active_tab,
             is_checking_update: false,
             update_status_msg: None,
+            update_result: None,
             on_change_settings: None,
             on_reset_defaults: None,
             on_check_updates: None,
+            on_open_release_url: None,
             on_select_tab: None,
         }
     }
@@ -61,6 +65,19 @@ impl SettingsView {
 
     pub fn update_status_msg(mut self, msg: Option<String>) -> Self {
         self.update_status_msg = msg;
+        self
+    }
+
+    pub fn update_result(mut self, result: Option<crate::update::UpdateCheckResult>) -> Self {
+        self.update_result = result;
+        self
+    }
+
+    pub fn on_open_release_url<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(String, &mut Window, &mut App) + 'static,
+    {
+        self.on_open_release_url = Some(Rc::new(handler));
         self
     }
 
@@ -520,29 +537,145 @@ impl SettingsView {
         let on_change = self.on_change_settings.clone();
         let is_checking = self.is_checking_update;
 
-        let status_msg = if is_checking {
-            t("appearance.checking", lang).to_string()
-        } else if let Some(ref msg) = self.update_status_msg {
-            msg.clone()
-        } else {
-            t("appearance.status_latest", lang).to_string()
-        };
-
         let mut check_btn = Button::new("btn_check_updates")
-            .primary()
             .small()
             .icon(if is_checking {
                 IconName::RotateCw
             } else {
                 IconName::RefreshCw
             })
-            .label(t("appearance.check_now", lang));
+            .label(t("appearance.check_now", lang))
+            .disabled(is_checking);
+
+        if is_checking {
+            check_btn = check_btn.outline();
+        } else {
+            check_btn = check_btn.primary();
+        }
 
         if let Some(handler) = on_check {
             check_btn = check_btn.on_click(move |_, window, cx| {
                 handler(window, cx);
             });
         }
+
+        let (status_node, action_buttons, new_ver_badge) = if is_checking {
+            (
+                div()
+                    .text_xs()
+                    .text_color(ThemeColors::TEXT_MUTED)
+                    .child(t("appearance.checking", lang)),
+                check_btn.into_any_element(),
+                None,
+            )
+        } else if let Some(ref res) = self.update_result {
+            match res {
+                crate::update::UpdateCheckResult::NewVersionAvailable {
+                    current_version,
+                    latest_version,
+                    release_url,
+                    ..
+                } => {
+                    let on_open = self.on_open_release_url.clone();
+                    let url_clone = release_url.clone();
+                    let view_btn = Button::new("btn_view_release")
+                        .primary()
+                        .small()
+                        .icon(IconName::ExternalLink)
+                        .label(format!(
+                            "{} v{}",
+                            t("appearance.view_release", lang),
+                            latest_version
+                        ))
+                        .on_click(move |_, window, cx| {
+                            if let Some(ref handler) = on_open {
+                                handler(url_clone.clone(), window, cx);
+                            } else {
+                                cx.open_url(&url_clone);
+                            }
+                        });
+
+                    let badge = div()
+                        .flex_shrink_0()
+                        .px_2()
+                        .py_0p5()
+                        .rounded_sm()
+                        .bg(ThemeColors::SUCCESS)
+                        .text_xs()
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(ThemeColors::TEXT_PRIMARY)
+                        .child(format!("NEW v{latest_version}"));
+
+                    let msg = format!(
+                        "🎉 {} v{} (Current: v{})",
+                        t("appearance.new_version", lang),
+                        latest_version,
+                        current_version
+                    );
+
+                    (
+                        div()
+                            .text_xs()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(ThemeColors::SUCCESS)
+                            .child(msg),
+                        h_flex()
+                            .gap_2()
+                            .child(view_btn)
+                            .child(check_btn)
+                            .into_any_element(),
+                        Some(badge),
+                    )
+                }
+                crate::update::UpdateCheckResult::UpToDate {
+                    current_version,
+                    checked_time,
+                    ..
+                } => {
+                    let msg = format!(
+                        "✓ {} (v{}) · {} {}",
+                        t("appearance.status_latest", lang),
+                        current_version,
+                        t("console.time", lang),
+                        checked_time
+                    );
+                    (
+                        div()
+                            .text_xs()
+                            .text_color(ThemeColors::TEXT_MUTED)
+                            .child(msg),
+                        check_btn.into_any_element(),
+                        None,
+                    )
+                }
+                crate::update::UpdateCheckResult::Failed { error } => (
+                    div()
+                        .text_xs()
+                        .text_color(ThemeColors::ERROR)
+                        .child(format!("⚠️ {error}")),
+                    check_btn.into_any_element(),
+                    None,
+                ),
+            }
+        } else if let Some(ref msg) = self.update_status_msg {
+            (
+                div()
+                    .text_xs()
+                    .text_color(ThemeColors::TEXT_MUTED)
+                    .child(msg.clone()),
+                check_btn.into_any_element(),
+                None,
+            )
+        } else {
+            (
+                div()
+                    .text_xs()
+                    .text_color(ThemeColors::TEXT_MUTED)
+                    .child(t("appearance.updates_initial", lang)),
+                check_btn.into_any_element(),
+                None,
+            )
+        };
 
         v_flex()
             .w_full()
@@ -725,17 +858,13 @@ impl SettingsView {
                                                                 std::env::consts::OS,
                                                                 std::env::consts::ARCH
                                                             )),
-                                                    ),
+                                                    )
+                                                    .children(new_ver_badge),
                                             )
-                                            .child(
-                                                div()
-                                                    .text_xs()
-                                                    .text_color(ThemeColors::TEXT_MUTED)
-                                                    .child(status_msg),
-                                            ),
+                                            .child(status_node),
                                     ),
                             )
-                            .child(check_btn),
+                            .child(action_buttons),
                     ),
             )
     }
@@ -1383,7 +1512,7 @@ impl RenderOnce for SettingsView {
                     IconName::Info,
                     vec![
                         ("Application", "CrabStudio by zqlcrab contributors"),
-                        ("Version", "0.1.0 (Darwin/Linux)"),
+                        ("Version", concat!("v", env!("CARGO_PKG_VERSION"))),
                         ("GUI Toolkit", "GPUI Kit 0.6.1 + GPUI Engine"),
                         ("License", "Apache-2.0"),
                         ("GitHub", "https://github.com/hyzwhu/zqlcrab"),
@@ -1422,11 +1551,19 @@ mod tests {
     #[test]
     fn test_settings_view_builder() {
         let settings = AppSettings::default();
+        let res = crate::update::UpdateCheckResult::UpToDate {
+            current_version: "0.1.1".to_string(),
+            latest_version: "0.1.1".to_string(),
+            checked_time: "12:00:00".to_string(),
+        };
         let view = SettingsView::new(settings, SettingsTab::Editor)
             .checking_update(true)
-            .update_status_msg(Some("Checking...".into()));
+            .update_status_msg(Some("Checking...".into()))
+            .update_result(Some(res.clone()))
+            .on_open_release_url(|_, _, _| {});
         assert_eq!(view.active_tab, SettingsTab::Editor);
         assert!(view.is_checking_update);
         assert_eq!(view.update_status_msg.as_deref(), Some("Checking..."));
+        assert_eq!(view.update_result, Some(res));
     }
 }

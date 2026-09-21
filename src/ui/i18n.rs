@@ -80,6 +80,10 @@ fn translate_en(key: &'static str) -> &'static str {
         "appearance.checking" => "Checking for updates...",
         "appearance.checked_just_now" => "Checked just now: Up to date!",
         "appearance.check_now" => "Check Now",
+        "appearance.updates_initial" => "Click \"Check Now\" to check for new releases on GitHub",
+        "appearance.new_version" => "New version available",
+        "appearance.view_release" => "View Release",
+        "appearance.up_to_date" => "Up to date",
 
         // Editor tab
         "editor.font_family" => "Font Family",
@@ -236,6 +240,10 @@ fn translate_zh(key: &'static str) -> &'static str {
         "appearance.checking" => "正在检查更新...",
         "appearance.checked_just_now" => "刚刚完成检查：已是最新版本！",
         "appearance.check_now" => "立即检查",
+        "appearance.updates_initial" => "点击“立即检查”以获取来自 GitHub 的最新版本发布",
+        "appearance.new_version" => "发现新版本",
+        "appearance.view_release" => "查看发布",
+        "appearance.up_to_date" => "已是最新版本",
 
         // Editor tab
         "editor.font_family" => "字体族",

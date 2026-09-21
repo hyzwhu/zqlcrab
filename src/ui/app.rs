@@ -258,6 +258,7 @@ pub struct CrabStudioApp {
     active_settings_tab: SettingsTab,
     is_checking_update: bool,
     update_status_msg: Option<String>,
+    update_check_result: Option<crate::update::UpdateCheckResult>,
 }
 
 impl CrabStudioApp {
@@ -483,6 +484,7 @@ impl CrabStudioApp {
             active_settings_tab: SettingsTab::Appearance,
             is_checking_update: false,
             update_status_msg: None,
+            update_check_result: None,
         }
     }
 
@@ -748,21 +750,35 @@ impl CrabStudioApp {
         .detach();
     }
 
-    /// Trigger application update check
+    /// Trigger application update check against GitHub Releases API
     pub fn trigger_check_for_updates(&mut self, cx: &mut Context<Self>) {
         self.is_checking_update = true;
         self.update_status_msg = None;
         cx.notify();
 
+        let current_ver = env!("CARGO_PKG_VERSION").to_string();
         cx.spawn(async move |this, cx: &mut AsyncApp| {
-            tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+            let res = crate::update::check_for_updates(&current_ver).await;
             this.update(cx, |app, cx| {
                 app.is_checking_update = false;
-                app.update_status_msg = Some(format!(
-                    "You are running the latest version (v{})",
-                    env!("CARGO_PKG_VERSION")
-                ));
-                app.status_message = Some("Check for updates completed: Up to date".to_string());
+                match &res {
+                    crate::update::UpdateCheckResult::NewVersionAvailable {
+                        latest_version,
+                        ..
+                    } => {
+                        app.status_message = Some(format!("Update available: v{latest_version}"));
+                    }
+                    crate::update::UpdateCheckResult::UpToDate {
+                        current_version, ..
+                    } => {
+                        app.status_message =
+                            Some(format!("zqlcrab v{current_version} is up to date"));
+                    }
+                    crate::update::UpdateCheckResult::Failed { error } => {
+                        app.status_message = Some(format!("Check for updates failed: {error}"));
+                    }
+                }
+                app.update_check_result = Some(res);
                 cx.notify();
             })
             .ok();
@@ -4111,6 +4127,15 @@ impl Render for CrabStudioApp {
         )
         .checking_update(self.is_checking_update)
         .update_status_msg(self.update_status_msg.clone())
+        .update_result(self.update_check_result.clone())
+        .on_open_release_url({
+            let handle = app_handle.clone();
+            move |url, _, cx| {
+                handle.update(cx, |_, cx| {
+                    cx.open_url(&url);
+                });
+            }
+        })
         .on_select_tab({
             let handle = app_handle.clone();
             move |tab, _, cx| {

@@ -5,6 +5,10 @@ Fast, lightweight, GPU-accelerated database desktop client built with Rust & GPU
 ### 📋 Changelog
 
 #### v0.1.1 Release Highlights:
+- 🔄 **Real-Time GitHub Releases Update Checker**:
+  - Connected the **Check for Updates** button under **Settings -> Appearance** to live GitHub Releases REST API (`/repos/hyzwhu/zqlcrab/releases/latest`).
+  - Added robust semantic version comparison logic with prerelease handling.
+  - Interactive status badges: displays **NEW v{version}** badge with direct **View Release** navigation when updates are available, or a verified up-to-date timestamp.
 - 🛠️ **Live SQL Editor Customization & Real-Time Settings Synchronization**:
   - Full real-time synchronization for all configuration options under **Settings -> Editor**: Font Family, Font Size, Tab Size (indentation width), Line Numbers gutter, Word Wrapping, Format on Run, and Bracket / Quote Auto-closing.
   - Custom font family and font size apply directly to the query console editor without requiring application restarts or tab reloads.
