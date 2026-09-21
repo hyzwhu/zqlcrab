@@ -190,7 +190,7 @@ impl QueryConsole {
 }
 
 impl RenderOnce for QueryConsole {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut Window, _cx: &mut App) -> impl IntoElement {
         let busy = self.is_executing || self.is_explaining;
         let lang = self.language;
 
@@ -204,11 +204,6 @@ impl RenderOnce for QueryConsole {
             .as_ref()
             .map(|s| s.font_family.clone())
             .unwrap_or_else(|| "JetBrains Mono".to_string());
-        let show_line_numbers = self
-            .editor_settings
-            .as_ref()
-            .map(|s| s.line_numbers)
-            .unwrap_or(true);
 
         let run_label = if self.is_executing {
             t("console.running", lang)
@@ -384,50 +379,17 @@ impl RenderOnce for QueryConsole {
                 )
         });
 
-        let line_count = self.editor_state.read(cx).value().lines().count().max(1);
-        let line_gutter = if show_line_numbers {
-            let mut col = v_flex()
-                .h_full()
-                .min_w(px((28.0
-                    + (line_count.to_string().len().saturating_sub(2) as f32)
-                        * 8.0)
-                    .max(28.0)))
-                .py_2()
-                .px_1p5()
-                .bg(ThemeColors::BG_SURFACE)
-                .border_r_1()
-                .border_color(ThemeColors::BORDER)
-                .items_end();
-
-            for line_idx in 1..=line_count {
-                col = col.child(
-                    div()
-                        .h(px(ed_font_size * 1.5))
-                        .text_size(px(ed_font_size * 0.9))
-                        .font_family(ed_font_family.clone())
-                        .text_color(ThemeColors::TEXT_FAINT)
-                        .child(format!("{line_idx}")),
-                );
-            }
-            Some(col)
-        } else {
-            None
-        };
-
-        let editor_pane = h_flex()
+        let editor_pane = div()
             .size_full()
             .min_h_0()
             .bg(ThemeColors::BG_APP)
-            .font_family(ed_font_family)
-            .text_size(px(ed_font_size))
-            .children(line_gutter)
             .child(
-                div().flex_1().h_full().min_w_0().child(
-                    Editor::new(&self.editor_state)
-                        .h_full()
-                        .bg(ThemeColors::BG_APP)
-                        .text_color(ThemeColors::TEXT_PRIMARY),
-                ),
+                Editor::new(&self.editor_state)
+                    .h_full()
+                    .bg(ThemeColors::BG_APP)
+                    .text_color(ThemeColors::TEXT_PRIMARY)
+                    .font_family(ed_font_family)
+                    .text_size(px(ed_font_size)),
             );
 
         let bottom_selected = match self.bottom_tab {

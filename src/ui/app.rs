@@ -32,7 +32,7 @@ use gpui_kit::base::{h_flex, v_flex};
 use gpui_kit::component::{
     Icon, Sizable as _, Theme, ThemeMode, TitleBar,
     button::{Button, ButtonVariants as _},
-    input::{EditorState, InputEvent, InputState},
+    input::{EditorState, InputEvent, InputState, TabSize},
     resizable::ResizableState,
 };
 use gpui_kit::gpui::{
@@ -316,8 +316,17 @@ impl CrabStudioApp {
 
         let query_editor = {
             let cache_ref = sql_metadata_cache.clone();
+            let ed_cfg = settings_manager.settings().editor.clone();
             cx.new(|cx| {
-                let mut ed = EditorState::new(window, cx).language("sql");
+                let mut ed = EditorState::new(window, cx)
+                    .language("sql")
+                    .soft_wrap(ed_cfg.word_wrap)
+                    .line_number(ed_cfg.line_numbers)
+                    .tab_size(TabSize {
+                        tab_size: ed_cfg.tab_size,
+                        hard_tabs: false,
+                    })
+                    .auto_close(ed_cfg.bracket_matching);
                 ed.set_value(
                     "-- Press ⌘↵ (Ctrl+Enter) to run · Shift+Alt+F formats SQL\nSELECT 1 AS id, 'Welcome to CrabStudio' AS message;\n",
                     window,
@@ -753,8 +762,26 @@ impl CrabStudioApp {
         .detach();
     }
 
+    /// Synchronize settings into the live SQL query editor instance
+    pub fn sync_editor_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let s = self.settings_manager.settings().editor.clone();
+        self.query_editor.update(cx, |ed, cx| {
+            ed.set_soft_wrap(s.word_wrap, window, cx);
+            ed.set_line_number(s.line_numbers, window, cx);
+            ed.set_tab_size(
+                TabSize {
+                    tab_size: s.tab_size,
+                    hard_tabs: false,
+                },
+                cx,
+            );
+            ed.set_auto_close(s.bracket_matching, window, cx);
+        });
+        cx.notify();
+    }
+
     /// Execute the query written in the query editor (or currently selected text range if active)
-    pub fn run_query(&mut self, cx: &mut Context<Self>) {
+    pub fn run_query(&mut self, window: Option<&mut Window>, cx: &mut Context<Self>) {
         let editor_read = self.query_editor.read(cx);
         let selected_text = editor_read.selected_text().to_string();
         let is_selected_exec = !selected_text.trim().is_empty();
@@ -773,6 +800,11 @@ impl CrabStudioApp {
         if settings.editor.format_on_run && !is_selected_exec {
             let formatted = format_sql_with_indent(&sql, settings.editor.tab_size);
             if formatted != sql {
+                if let Some(win) = window {
+                    self.query_editor.update(cx, |editor, cx| {
+                        editor.replace_all(&formatted, win, cx);
+                    });
+                }
                 sql = formatted;
             }
         }
@@ -1021,7 +1053,7 @@ impl CrabStudioApp {
             editor.set_value(&sql_str, window, cx);
         });
         self.active_tab = WorkspaceTab::QueryConsole;
-        self.run_query(cx);
+        self.run_query(Some(window), cx);
     }
 
     /// Load a SQL string into the editor without executing
@@ -3362,9 +3394,9 @@ impl Render for CrabStudioApp {
                 WorkspaceTab::QueryConsole => {
                     let on_run = {
                         let handle = app_handle.clone();
-                        move |_: &mut Window, cx: &mut App| {
+                        move |window: &mut Window, cx: &mut App| {
                             handle.update(cx, |this, cx| {
-                                this.run_query(cx);
+                                this.run_query(Some(window), cx);
                             });
                         }
                     };
@@ -4095,6 +4127,7 @@ impl Render for CrabStudioApp {
                     };
                     crate::ui::theme::set_active_theme_mode(theme_mode == ThemeMode::Light);
                     Theme::change(theme_mode, Some(window), cx);
+                    this.sync_editor_settings(window, cx);
                     this.status_message = Some("Settings saved".to_string());
                     cx.notify();
                 });
@@ -4114,6 +4147,7 @@ impl Render for CrabStudioApp {
                     };
                     crate::ui::theme::set_active_theme_mode(theme_mode == ThemeMode::Light);
                     Theme::change(theme_mode, Some(window), cx);
+                    this.sync_editor_settings(window, cx);
                     this.status_message = Some("Settings reset to defaults".to_string());
                     cx.notify();
                 });
@@ -4132,8 +4166,8 @@ impl Render for CrabStudioApp {
         v_flex()
             .id("crabstudio_root")
             .key_context("CrabStudio")
-            .on_action(cx.listener(|this, _: &RunQuery, _, cx| {
-                this.run_query(cx);
+            .on_action(cx.listener(|this, _: &RunQuery, window, cx| {
+                this.run_query(Some(window), cx);
             }))
             .on_action(cx.listener(|this, _: &FormatSql, window, cx| {
                 this.format_editor_sql(window, cx);

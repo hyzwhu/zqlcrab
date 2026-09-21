@@ -264,6 +264,34 @@ mod tests {
     }
 
     #[test]
+    fn test_editor_settings_defaults_and_mutation() {
+        let mut settings = EditorSettings::default();
+        assert_eq!(settings.tab_size, 4);
+        assert_eq!(settings.font_family, "JetBrains Mono");
+        assert_eq!(settings.font_size, 13.0);
+        assert!(settings.line_numbers);
+        assert!(settings.word_wrap);
+        assert!(!settings.format_on_run);
+        assert!(settings.bracket_matching);
+
+        settings.tab_size = 2;
+        settings.line_numbers = false;
+        settings.word_wrap = false;
+        settings.format_on_run = true;
+        settings.bracket_matching = false;
+        settings.font_family = "Fira Code".to_string();
+        settings.font_size = 16.0;
+
+        assert_eq!(settings.tab_size, 2);
+        assert!(!settings.line_numbers);
+        assert!(!settings.word_wrap);
+        assert!(settings.format_on_run);
+        assert!(!settings.bracket_matching);
+        assert_eq!(settings.font_family, "Fira Code");
+        assert_eq!(settings.font_size, 16.0);
+    }
+
+    #[test]
     fn test_language_resolve_locale() {
         assert_eq!(AppLanguage::En.resolve_locale(), AppLanguage::En);
         assert_eq!(AppLanguage::ZhCn.resolve_locale(), AppLanguage::ZhCn);
