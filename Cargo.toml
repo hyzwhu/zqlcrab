@@ -6,8 +6,8 @@ description = "A modern, high-performance database IDE built with Rust & GPUI"
 authors = ["zqlcrab contributors"]
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-repository = "https://github.com/zqlcrab/zqlcrab"
-homepage = "https://github.com/zqlcrab/zqlcrab"
+repository = "https://github.com/hyzwhu/zqlcrab"
+homepage = "https://github.com/hyzwhu/zqlcrab"
 keywords = ["database", "sql", "sqlite", "postgres", "mysql"]
 categories = ["development-tools", "database-utilities", "gui"]
 

@@ -4060,13 +4060,13 @@ impl Render for CrabStudioApp {
                 this.trigger_check_for_updates(cx);
             }))
             .on_action(cx.listener(|_this, _: &OpenDocs, _, cx| {
-                cx.open_url("https://github.com/zqlcrab/zqlcrab#readme");
+                cx.open_url("https://github.com/hyzwhu/zqlcrab#readme");
             }))
             .on_action(cx.listener(|_this, _: &OpenGithub, _, cx| {
-                cx.open_url("https://github.com/zqlcrab/zqlcrab");
+                cx.open_url("https://github.com/hyzwhu/zqlcrab");
             }))
             .on_action(cx.listener(|_this, _: &ReportIssue, _, cx| {
-                cx.open_url("https://github.com/zqlcrab/zqlcrab/issues");
+                cx.open_url("https://github.com/hyzwhu/zqlcrab/issues");
             }))
             .size_full()
             .bg(ThemeColors::BG_APP)

@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/zqlcrab/zqlcrab/releases"><img src="https://img.shields.io/github/v/release/zqlcrab/zqlcrab?include_prereleases&color=orange" alt="Release"></a>
+  <a href="https://github.com/hyzwhu/zqlcrab/releases"><img src="https://img.shields.io/github/v/release/hyzwhu/zqlcrab?include_prereleases&color=orange" alt="Release"></a>
   <a href="LICENSE-MIT"><img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg" alt="License"></a>
   <img src="https://img.shields.io/badge/rust-2024%20edition-lightgrey.svg?logo=rust" alt="Rust 2024">
   <img src="https://img.shields.io/badge/UI-GPUI%20120%20FPS-cyan.svg" alt="GPUI">
@@ -74,7 +74,7 @@
 
 #### 1. 克隆代码仓库
 ```bash
-git clone https://github.com/zqlcrab/zqlcrab.git
+git clone https://github.com/hyzwhu/zqlcrab.git
 cd zqlcrab
 ```
 
