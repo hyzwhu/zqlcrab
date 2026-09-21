@@ -41,6 +41,57 @@ pub struct TrayStatus {
     pub active_name: Option<String>,
     pub db_name: Option<String>,
     pub ping_ms: Option<u64>,
+    pub memory_mb: Option<f64>,
+}
+
+/// Query current process physical resident memory (RSS in megabytes)
+#[cfg(target_os = "macos")]
+pub fn get_process_memory_mb() -> Option<f64> {
+    #[repr(C)]
+    struct MachTaskBasicInfo {
+        virtual_size: u64,
+        resident_size: u64,
+        resident_size_max: u64,
+        user_time: [u32; 2],
+        system_time: [u32; 2],
+        policy: i32,
+        suspend_count: i32,
+    }
+
+    unsafe extern "C" {
+        fn mach_task_self() -> u32;
+        fn task_info(
+            target_task: u32,
+            flavor: i32,
+            task_info_out: *mut MachTaskBasicInfo,
+            task_info_outCnt: *mut u32,
+        ) -> i32;
+    }
+
+    const MACH_TASK_BASIC_INFO: i32 = 20;
+
+    unsafe {
+        let mut info = std::mem::MaybeUninit::<MachTaskBasicInfo>::uninit();
+        let mut count = (std::mem::size_of::<MachTaskBasicInfo>() / std::mem::size_of::<u32>()) as u32;
+        let kret = task_info(
+            mach_task_self(),
+            MACH_TASK_BASIC_INFO,
+            info.as_mut_ptr(),
+            &mut count,
+        );
+        if kret == 0 {
+            let info = info.assume_init();
+            Some(info.resident_size as f64 / (1024.0 * 1024.0))
+        } else {
+            None
+        }
+    }
+}
+
+/// Cross-platform memory query fallback
+#[cfg(not(target_os = "macos"))]
+pub fn get_process_memory_mb() -> Option<f64> {
+    None
 }
 
 static TRAY_STATUS: RwLock<Option<TrayStatus>> = RwLock::new(None);
@@ -186,9 +237,17 @@ unsafe fn populate_menu(menu: id, target: id) {
         ),
     };
 
+    let mem_mb = get_process_memory_mb().or_else(|| current_status.as_ref().and_then(|s| s.memory_mb));
+    let mem_label = match mem_mb {
+        Some(mb) if mb >= 1024.0 => format!("Memory: {:.2} GB", mb / 1024.0),
+        Some(mb) => format!("Memory: {mb:.1} MB"),
+        None => "Memory: --".to_string(),
+    };
+
     add_item(&active_label, None, false);
     add_item(&db_label, None, false);
     add_item(&ping_label, None, false);
+    add_item(&mem_label, None, false);
 
     add_separator();
 
@@ -429,6 +488,7 @@ mod tests {
             active_name: Some("Local MySQL".to_string()),
             db_name: Some("test_db".to_string()),
             ping_ms: Some(42),
+            memory_mb: Some(58.5),
         };
         update_tray_status(Some(status.clone()));
 
@@ -437,9 +497,21 @@ mod tests {
         assert_eq!(current.active_name.as_deref(), Some("Local MySQL"));
         assert_eq!(current.db_name.as_deref(), Some("test_db"));
         assert_eq!(current.ping_ms, Some(42));
+        assert_eq!(current.memory_mb, Some(58.5));
 
         update_tray_status(None);
         assert!(get_tray_status().is_none());
+    }
+
+    #[test]
+    fn test_process_memory_mb_query() {
+        #[cfg(target_os = "macos")]
+        {
+            let mem = get_process_memory_mb();
+            assert!(mem.is_some());
+            let mb = mem.unwrap();
+            assert!(mb > 0.0, "Process memory should be greater than 0MB, got {mb}");
+        }
     }
 
     #[test]

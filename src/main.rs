@@ -4,6 +4,9 @@ pub mod db;
 pub mod settings;
 pub mod ui;
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use gpui_kit::AppContext;
 use gpui_kit::component::input::{Copy, Cut, Paste, SelectAll};
 use gpui_kit::component::{Root, Theme, ThemeMode, TitleBar};

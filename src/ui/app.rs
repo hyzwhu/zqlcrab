@@ -174,7 +174,7 @@ pub struct CrabStudioApp {
     active_connection: Option<ActiveConnection>,
     active_tables: Vec<TableInfo>,
     selected_table: Option<String>,
-    table_data: Option<QueryResult>,
+    table_data: Option<Arc<QueryResult>>,
     schema_columns: Vec<ColumnInfo>,
     schema_indexes: Vec<IndexInfo>,
     schema_ddl: Option<String>,
@@ -187,7 +187,7 @@ pub struct CrabStudioApp {
     query_editor: Entity<EditorState>,
     sql_metadata_cache: Arc<RwLock<crate::db::autocomplete::SqlMetadataCache>>,
     console_split: Entity<ResizableState>,
-    console_result: Option<QueryResult>,
+    console_result: Option<Arc<QueryResult>>,
     console_error: Option<String>,
     explain_plan: Option<ExplainPlan>,
     explain_error: Option<String>,
@@ -505,6 +505,7 @@ impl CrabStudioApp {
                             active_name: Some(name.clone()),
                             db_name: db_name.clone(),
                             ping_ms,
+                            memory_mb: crate::ui::tray::get_process_memory_mb(),
                         }));
                         // Asynchronously prefetch column metadata for cached tables so dot completion is instant
                         let prefetch_conn = conn.clone();
@@ -603,7 +604,7 @@ impl CrabStudioApp {
                 .flatten();
 
             this.update(cx, |app, cx| {
-                app.table_data = data_res.ok();
+                app.table_data = data_res.ok().map(Arc::new);
                 // Cache columns for autocomplete
                 if let Ok(mut cache) = app.sql_metadata_cache.write() {
                     cache.set_columns_for_table(&tbl, cols.clone());
@@ -865,10 +866,12 @@ impl CrabStudioApp {
                         let dur = qr.execution_time_ms.unwrap_or(duration);
                         if let Some(mut tray) = crate::ui::tray::get_tray_status() {
                             tray.ping_ms = Some(dur);
+                            tray.memory_mb = crate::ui::tray::get_process_memory_mb();
                             crate::ui::tray::update_tray_status(Some(tray));
                         }
-                        app.console_result = Some(qr.clone());
-                        app.table_data = Some(qr);
+                        let qr_arc = Arc::new(qr);
+                        app.console_result = Some(qr_arc.clone());
+                        app.table_data = Some(qr_arc);
                         app.grid_selected_cell = None;
                         app.grid_inspector_open = false;
                         app.console_error = None;
@@ -1723,8 +1726,9 @@ impl CrabStudioApp {
                         app.sql_review_plan = None;
                         app.grid_changeset.clear();
                         if let Some(qr) = reloaded {
-                            app.table_data = Some(qr.clone());
-                            app.console_result = Some(qr);
+                            let qr_arc = Arc::new(qr);
+                            app.table_data = Some(qr_arc.clone());
+                            app.console_result = Some(qr_arc);
                         }
                         app.status_message = Some(format!(
                             "Successfully applied {inserts_count} insertion(s), {updates_count} update(s), and {deletes_count} deletion(s)"
@@ -2617,7 +2621,7 @@ impl CrabStudioApp {
     pub fn build_data_grid(
         &self,
         app_handle: &Entity<Self>,
-        grid_data: Option<QueryResult>,
+        grid_data: Option<Arc<QueryResult>>,
         table_name: Option<String>,
         is_read_only: bool,
     ) -> DataGrid {

@@ -22,6 +22,7 @@ use gpui_kit::gpui::{
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
 /// Helper function to convert a single row into a formatted JSON object string.
 pub fn row_to_json(columns: &[String], row: &[QueryValue]) -> String {
@@ -214,7 +215,7 @@ impl GridCellCoord {
 
 #[derive(IntoElement)]
 pub struct DataGrid {
-    result: Option<QueryResult>,
+    result: Option<Arc<QueryResult>>,
     current_table: Option<String>,
     page_size: usize,
     current_page: usize,
@@ -252,7 +253,7 @@ pub struct DataGrid {
 }
 
 impl DataGrid {
-    pub fn new(result: Option<QueryResult>) -> Self {
+    pub fn new(result: Option<Arc<QueryResult>>) -> Self {
         Self {
             result,
             current_table: None,

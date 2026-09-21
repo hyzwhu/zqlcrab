@@ -21,6 +21,7 @@ use gpui_kit::gpui::{
     prelude::FluentBuilder as _, px,
 };
 use std::rc::Rc;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ConsoleBottomTab {
@@ -33,7 +34,7 @@ pub enum ConsoleBottomTab {
 pub struct QueryConsole {
     editor_state: Entity<EditorState>,
     split_state: Entity<ResizableState>,
-    query_result: Option<QueryResult>,
+    query_result: Option<Arc<QueryResult>>,
     query_error: Option<String>,
     explain_plan: Option<ExplainPlan>,
     explain_error: Option<String>,
@@ -79,7 +80,7 @@ impl QueryConsole {
         }
     }
 
-    pub fn result(mut self, result: Option<QueryResult>) -> Self {
+    pub fn result(mut self, result: Option<Arc<QueryResult>>) -> Self {
         self.query_result = result;
         self
     }

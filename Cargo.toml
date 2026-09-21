@@ -26,6 +26,7 @@ chrono = { version = "0.4", features = ["serde"] }
 dirs = "5.0"
 sqlformat = "0.2"
 lsp-types = { version = "0.97.0", features = ["proposed"] }
+mimalloc = { version = "0.1", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 cocoa = "0.26"
