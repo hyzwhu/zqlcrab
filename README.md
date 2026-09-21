@@ -86,10 +86,12 @@ Download pre-compiled release packages for your operating system from [GitHub Re
 
 | OS | Architecture | Package |
 | :--- | :--- | :--- |
-| **macOS** | Apple Silicon (M1/M2/M3/M4) | `zqlcrab-aarch64-apple-darwin.tar.gz` |
-| **macOS** | Intel x86_64 | `zqlcrab-x86_64-apple-darwin.tar.gz` |
+| **macOS** | Apple Silicon (M1/M2/M3/M4/M5) | `zqlcrab-aarch64-apple-darwin.dmg` / `.tar.gz` |
+| **macOS** | Intel x86_64 | `zqlcrab-x86_64-apple-darwin.dmg` / `.tar.gz` |
 | **Linux** | x86_64 | `zqlcrab-x86_64-unknown-linux-gnu.tar.gz` |
+| **Linux** | ARM64 / aarch64 | `zqlcrab-aarch64-unknown-linux-gnu.tar.gz` |
 | **Windows** | x86_64 | `zqlcrab-x86_64-pc-windows-msvc.zip` |
+| **Windows** | ARM64 / aarch64 | `zqlcrab-aarch64-pc-windows-msvc.zip` |
 
 ---
 

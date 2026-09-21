@@ -75,8 +75,8 @@
 前往 [GitHub Releases](https://github.com/hyzwhu/zqlcrab/releases) 下载适合您操作系统的最新版本：
 
 - **macOS**：提供 Apple Silicon (`aarch64`) 与 Intel (`x86_64`) 的 `.dmg` 安装包与 `.tar.gz` 压缩包。
-- **Linux**：提供 `x86_64-unknown-linux-gnu` 的 `.tar.gz` 独立运行包。
-- **Windows**：提供 `x86_64-pc-windows-msvc` 的 `.zip` 便携安装包。
+- **Linux**：提供 `x86_64-unknown-linux-gnu` 与 `aarch64-unknown-linux-gnu` (ARM64) 的 `.tar.gz` 独立运行包。
+- **Windows**：提供 `x86_64-pc-windows-msvc` 与 `aarch64-pc-windows-msvc` (ARM64) 的 `.zip` 便携安装包。
 
 ---
 
