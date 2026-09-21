@@ -5,6 +5,14 @@ Fast, lightweight, GPU-accelerated database desktop client built with Rust & GPU
 ### 📋 Changelog
 
 #### v0.1.1 Release Highlights:
+- 🚨 **Connection Error Diagnostic Dialog & Overflow Protection**:
+  - Clear modal diagnostic error alert whenever a database connection fails, equipped with **Retry**, **Edit Connection** (pre-fills profile settings for instant correction), and **Copy Error**.
+  - Bounded layout constraints and dynamic long-token wrapping (`wrap_error_text`) preventing unbroken error messages or URLs from overflowing modal boundaries across all dialogs.
+- 🧹 **Comprehensive Memory Optimization & Leak Fixes**:
+  - Integrated `mimalloc` global allocator for efficient query allocation recycling and lower RSS footprint under heavy query loads.
+  - Aligned tray memory metrics with macOS Activity Monitor (`PhysFootprint`).
+  - Resolved Objective-C MRC retention leaks in `NSMenuItem` and `NSString` references during macOS status bar menu updates (including Quick Connect submenus).
+  - Gracefully teardown and disconnect previous database connection pools upon profile switching.
 - ⚡ **Zero-Copy Autocompletion Engine & Keystroke Optimization**:
   - Eliminated UI freezes during SQL editing by switching to zero-copy schema cache reads under read lock.
   - Implemented zero-heap-allocation case-insensitive token matching and a 64-item cap to maintain a snappy 120 FPS.
