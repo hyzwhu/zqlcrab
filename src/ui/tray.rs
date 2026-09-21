@@ -44,18 +44,39 @@ pub struct TrayStatus {
     pub memory_mb: Option<f64>,
 }
 
-/// Query current process physical resident memory (RSS in megabytes)
+/// Query current process physical footprint memory (matching macOS Activity Monitor Memory column)
 #[cfg(target_os = "macos")]
 pub fn get_process_memory_mb() -> Option<f64> {
     #[repr(C)]
-    struct MachTaskBasicInfo {
+    struct TaskVmInfo {
         virtual_size: u64,
+        region_count: i32,
+        page_size: i32,
         resident_size: u64,
-        resident_size_max: u64,
-        user_time: [u32; 2],
-        system_time: [u32; 2],
-        policy: i32,
-        suspend_count: i32,
+        resident_size_peak: u64,
+        device: u64,
+        device_peak: u64,
+        internal: u64,
+        internal_peak: u64,
+        external: u64,
+        external_peak: u64,
+        reusable: u64,
+        reusable_peak: u64,
+        purgeable_volatile_pmap: u64,
+        purgeable_volatile_resident: u64,
+        purgeable_volatile_virtual: u64,
+        compressed: u64,
+        compressed_peak: u64,
+        compressed_lifetime: u64,
+        phys_footprint: u64,
+        min_address: u64,
+        max_address: u64,
+        ledger_tag_offset: i64,
+        ledger_tag_credit: i64,
+        ledger_tag_debit: i64,
+        ledger_tag_limit: i64,
+        ledger_tag_balance: i64,
+        unused: [u64; 2],
     }
 
     unsafe extern "C" {
@@ -63,25 +84,25 @@ pub fn get_process_memory_mb() -> Option<f64> {
         fn task_info(
             target_task: u32,
             flavor: i32,
-            task_info_out: *mut MachTaskBasicInfo,
+            task_info_out: *mut TaskVmInfo,
             task_info_outCnt: *mut u32,
         ) -> i32;
     }
 
-    const MACH_TASK_BASIC_INFO: i32 = 20;
+    const TASK_VM_INFO: i32 = 22;
 
     unsafe {
-        let mut info = std::mem::MaybeUninit::<MachTaskBasicInfo>::uninit();
-        let mut count = (std::mem::size_of::<MachTaskBasicInfo>() / std::mem::size_of::<u32>()) as u32;
+        let mut info = std::mem::MaybeUninit::<TaskVmInfo>::uninit();
+        let mut count = (std::mem::size_of::<TaskVmInfo>() / std::mem::size_of::<u32>()) as u32;
         let kret = task_info(
             mach_task_self(),
-            MACH_TASK_BASIC_INFO,
+            TASK_VM_INFO,
             info.as_mut_ptr(),
             &mut count,
         );
         if kret == 0 {
             let info = info.assume_init();
-            Some(info.resident_size as f64 / (1024.0 * 1024.0))
+            Some(info.phys_footprint as f64 / (1024.0 * 1024.0))
         } else {
             None
         }
@@ -181,16 +202,19 @@ unsafe fn activate_and_show_window() {
 #[allow(unexpected_cfgs, deprecated)]
 unsafe fn populate_menu(menu: id, target: id) {
     let _: () = msg_send![menu, removeAllItems];
+    let _: () = msg_send![menu, setAutoenablesItems: NO];
 
     let add_item = |title: &str, action: Option<Sel>, enabled: bool| -> id {
         if let Some(item_cls) = Class::get("NSMenuItem") {
             let alloc_item: id = msg_send![item_cls, alloc];
             let t = NSString::alloc(nil).init_str(title);
             let k = NSString::alloc(nil).init_str("");
-            let act = action.unwrap_or_else(|| sel!(description));
+            let act = action.unwrap_or_else(|| Sel::from_ptr(std::ptr::null()));
             let item: id = msg_send![alloc_item, initWithTitle: t action: act keyEquivalent: k];
             if action.is_some() {
                 let _: () = msg_send![item, setTarget: target];
+            } else {
+                let _: () = msg_send![item, setTarget: nil];
             }
             if !enabled {
                 let _: () = msg_send![item, setEnabled: NO];
@@ -261,6 +285,7 @@ unsafe fn populate_menu(menu: id, target: id) {
         let alloc_submenu: id = msg_send![menu_cls, alloc];
         let sub_title = NSString::alloc(nil).init_str("Quick Connect");
         let submenu: id = msg_send![alloc_submenu, initWithTitle: sub_title];
+        let _: () = msg_send![submenu, setAutoenablesItems: NO];
 
         let manager = crate::db::manager::ConnectionManager::new();
         let configs = manager.list_configs();
