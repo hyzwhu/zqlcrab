@@ -183,6 +183,11 @@ pub struct CrabStudioApp {
     // Table confirm dialog state (Drop/Truncate)
     table_confirm_modal: Option<TableConfirmActionState>,
 
+    // Connection Error Dialog state
+    connection_error_modal: Option<crate::ui::components::ConnectionErrorInfo>,
+    connection_error_copied: bool,
+    connection_error_is_retrying: bool,
+
     // Query console state
     query_editor: Entity<EditorState>,
     sql_metadata_cache: Arc<RwLock<crate::db::autocomplete::SqlMetadataCache>>,
@@ -405,6 +410,9 @@ impl CrabStudioApp {
             schema_ddl: None,
             active_tab: WorkspaceTab::QueryConsole,
             table_confirm_modal: None,
+            connection_error_modal: None,
+            connection_error_copied: false,
+            connection_error_is_retrying: false,
             query_editor,
             sql_metadata_cache,
             console_split,
@@ -480,7 +488,7 @@ impl CrabStudioApp {
 
         let config_clone = config.clone();
         cx.spawn(async move |this, cx: &mut AsyncApp| {
-            let conn_res = ActiveConnection::connect_config(config_clone).await;
+            let conn_res = ActiveConnection::connect_config(config_clone.clone()).await;
             match conn_res {
                 Ok(conn) => {
                     let tables_res = conn.list_tables(None, None).await.unwrap_or_default();
@@ -511,6 +519,12 @@ impl CrabStudioApp {
                         let prefetch_conn = conn.clone();
                         let prefetch_cache = app.sql_metadata_cache.clone();
                         let prefetch_tables = tables_res.clone();
+                        if let Some(old_conn) = app.active_connection.take() {
+                            cx.spawn(async move |_, _| {
+                                let _ = old_conn.disconnect().await;
+                            })
+                            .detach();
+                        }
                         app.active_connection = Some(conn);
                         app.settings_manager.settings_mut().last_connection_id = Some(conn_id);
                         let _ = app.settings_manager.save();
@@ -542,6 +556,8 @@ impl CrabStudioApp {
                         app.schema_columns.clear();
                         app.schema_indexes.clear();
                         app.schema_ddl = None;
+                        app.connection_error_modal = None;
+                        app.connection_error_is_retrying = false;
                         app.status_message = Some(format!("Connected to {name}"));
                         if let Some(target) = app.active_tables.first().cloned() {
                             app.select_table(target, cx);
@@ -552,7 +568,20 @@ impl CrabStudioApp {
                 }
                 Err(err) => {
                     this.update(cx, |app, cx| {
-                        app.status_message = Some(format!("Connection error: {err}"));
+                        let err_msg = err.to_string();
+                        app.status_message = Some(format!("Connection error: {err_msg}"));
+                        app.connection_error_is_retrying = false;
+                        app.connection_error_copied = false;
+                        app.connection_error_modal =
+                            Some(crate::ui::components::ConnectionErrorInfo {
+                                connection_id: config_clone.id.clone(),
+                                connection_name: config_clone.name.clone(),
+                                database_type: config_clone.db_type,
+                                host: config_clone.host.clone(),
+                                port: config_clone.port,
+                                database: config_clone.database.clone(),
+                                error_message: err_msg,
+                            });
                         cx.notify();
                     })
                     .ok();
@@ -560,6 +589,21 @@ impl CrabStudioApp {
             }
         })
         .detach();
+    }
+
+    /// Close the connection error modal
+    pub fn close_connection_error_modal(&mut self, cx: &mut Context<Self>) {
+        self.connection_error_modal = None;
+        self.connection_error_copied = false;
+        self.connection_error_is_retrying = false;
+        cx.notify();
+    }
+
+    /// Retry connecting to a profile from the connection error modal
+    pub fn retry_connection_error(&mut self, conn_id: &str, cx: &mut Context<Self>) {
+        self.connection_error_is_retrying = true;
+        cx.notify();
+        self.select_connection(conn_id, cx);
     }
 
     /// Select a table from the sidebar
@@ -3929,6 +3973,59 @@ impl Render for CrabStudioApp {
             None
         };
 
+        // Database Connection Error Dialog modal overlay if active
+        let conn_error_overlay = self.connection_error_modal.clone().map(|info| {
+            let on_close = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.close_connection_error_modal(cx);
+                    });
+                }
+            };
+            let on_retry = {
+                let handle = app_handle.clone();
+                move |conn_id: &str, _: &mut Window, cx: &mut App| {
+                    let cid = conn_id.to_string();
+                    handle.update(cx, |this, cx| {
+                        this.retry_connection_error(&cid, cx);
+                    });
+                }
+            };
+            let on_edit = {
+                let handle = app_handle.clone();
+                move |conn_id: &str, window: &mut Window, cx: &mut App| {
+                    let cid = conn_id.to_string();
+                    handle.update(cx, |this, cx| {
+                        this.close_connection_error_modal(cx);
+                        this.open_edit_connection_dialog(&cid, window, cx);
+                    });
+                }
+            };
+            let on_copy = {
+                let handle = app_handle.clone();
+                move |err: &str, _: &mut Window, cx: &mut App| {
+                    let len = err.len();
+                    cx.write_to_clipboard(ClipboardItem::new_string(err.to_string()));
+                    handle.update(cx, |this, cx| {
+                        this.connection_error_copied = true;
+                        this.status_message =
+                            Some(format!("Copied error details to clipboard ({len} bytes)"));
+                        cx.notify();
+                    });
+                }
+            };
+
+            crate::ui::components::ConnectionErrorDialog::new(info)
+                .language(self.settings_manager.settings().language)
+                .copied(self.connection_error_copied)
+                .retrying(self.connection_error_is_retrying)
+                .on_close(on_close)
+                .on_retry(on_retry)
+                .on_edit(on_edit)
+                .on_copy(on_copy)
+        });
+
         // Left rail Activity Bar
         let activity_bar =
             ActivityBar::new(self.active_nav, self.settings_manager.settings().language)
@@ -4082,7 +4179,9 @@ impl Render for CrabStudioApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &CloseDialog, _, cx| {
-                if this.table_confirm_modal.is_some() {
+                if this.connection_error_modal.is_some() {
+                    this.close_connection_error_modal(cx);
+                } else if this.table_confirm_modal.is_some() {
                     this.table_confirm_modal = None;
                     cx.notify();
                 } else if this.create_table_modal_open {
@@ -4101,7 +4200,9 @@ impl Render for CrabStudioApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
-                if this.table_confirm_modal.is_some() {
+                if this.connection_error_modal.is_some() {
+                    this.close_connection_error_modal(cx);
+                } else if this.table_confirm_modal.is_some() {
                     this.table_confirm_modal = None;
                     cx.notify();
                 } else if this.create_table_modal_open {
@@ -4254,5 +4355,6 @@ impl Render for CrabStudioApp {
             .children(sql_review_overlay)
             .children(create_table_overlay)
             .children(table_confirm_overlay)
+            .children(conn_error_overlay)
     }
 }

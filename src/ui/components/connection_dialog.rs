@@ -11,8 +11,8 @@ use gpui_kit::component::{
     menu::{DropdownMenu as _, PopupMenuItem},
 };
 use gpui_kit::gpui::{
-    Anchor, App, Entity, FontWeight, IntoElement, ParentElement, RenderOnce, Styled, Window, div,
-    px, rgba,
+    Anchor, App, Entity, FontWeight, InteractiveElement as _, IntoElement, ParentElement,
+    RenderOnce, StatefulInteractiveElement as _, Styled, Window, div, px, rgba,
 };
 use std::rc::Rc;
 
@@ -609,31 +609,40 @@ impl RenderOnce for ConnectionDialog {
                         .text_color(ThemeColors::TEXT_PRIMARY)
                         .child(msg),
                 ),
-            Err(err) => h_flex()
-                .w_full()
-                .min_w_0()
-                .p_2p5()
-                .rounded_md()
-                .items_start()
-                .gap_2()
-                .bg(rgba(0xEF444415))
-                .border_1()
-                .border_color(ThemeColors::ERROR)
-                .child(
-                    div().pt(px(1.0)).child(
-                        Icon::new(IconName::TriangleAlert)
-                            .size(px(14.0))
-                            .text_color(ThemeColors::ERROR),
-                    ),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .text_xs()
-                        .text_color(ThemeColors::ERROR)
-                        .child(err),
-                ),
+            Err(err) => {
+                let safe_err = crate::ui::components::connection_error_dialog::wrap_error_text(&err, 56);
+                h_flex()
+                    .w_full()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .p_2p5()
+                    .rounded_md()
+                    .items_start()
+                    .gap_2()
+                    .bg(rgba(0xEF444415))
+                    .border_1()
+                    .border_color(ThemeColors::ERROR)
+                    .child(
+                        div().pt(px(1.0)).child(
+                            Icon::new(IconName::TriangleAlert)
+                                .size(px(14.0))
+                                .text_color(ThemeColors::ERROR),
+                        ),
+                    )
+                    .child(
+                        v_flex()
+                            .id("conn_dialog_error_scroll")
+                            .flex_1()
+                            .min_w_0()
+                            .max_h(px(96.0))
+                            .overflow_y_scroll()
+                            .whitespace_normal()
+                            .text_xs()
+                            .font_family("JetBrains Mono")
+                            .text_color(ThemeColors::ERROR)
+                            .child(safe_err),
+                    )
+            }
         });
 
         let on_toggle_ro = self.on_toggle_read_only.clone();

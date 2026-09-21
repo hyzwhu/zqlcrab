@@ -17,8 +17,8 @@ use gpui_kit::component::{
     tab::{Tab, TabBar},
 };
 use gpui_kit::gpui::{
-    AnyElement, App, Entity, IntoElement, ParentElement, RenderOnce, Styled, Window, div,
-    prelude::FluentBuilder as _, px,
+    AnyElement, App, Entity, InteractiveElement as _, IntoElement, ParentElement, RenderOnce,
+    StatefulInteractiveElement as _, Styled, Window, div, prelude::FluentBuilder as _, px,
 };
 use std::rc::Rc;
 use std::sync::Arc;
@@ -349,20 +349,39 @@ impl RenderOnce for QueryConsole {
             );
 
         let error_banner = self.query_error.clone().map(|err| {
+            let safe_err =
+                crate::ui::components::connection_error_dialog::wrap_error_text(&err, 80);
             h_flex()
+                .w_full()
+                .min_w_0()
+                .overflow_hidden()
                 .p_2()
                 .px_3()
                 .gap_2()
-                .items_center()
+                .items_start()
                 .bg(ThemeColors::BG_SURFACE_ACTIVE)
                 .border_b_1()
                 .border_color(ThemeColors::ERROR)
                 .child(
-                    Icon::new(IconName::TriangleAlert)
-                        .size(px(14.0))
-                        .text_color(ThemeColors::ERROR),
+                    div().flex_shrink_0().pt_0p5().child(
+                        Icon::new(IconName::TriangleAlert)
+                            .size(px(14.0))
+                            .text_color(ThemeColors::ERROR),
+                    ),
                 )
-                .child(div().text_xs().text_color(ThemeColors::ERROR).child(err))
+                .child(
+                    v_flex()
+                        .id("query_console_error_scroll")
+                        .flex_1()
+                        .min_w_0()
+                        .max_h(px(80.0))
+                        .overflow_y_scroll()
+                        .whitespace_normal()
+                        .text_xs()
+                        .font_family("JetBrains Mono")
+                        .text_color(ThemeColors::ERROR)
+                        .child(safe_err),
+                )
         });
 
         let line_count = self.editor_state.read(cx).value().lines().count().max(1);

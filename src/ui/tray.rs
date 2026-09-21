@@ -298,6 +298,9 @@ unsafe fn populate_menu(menu: id, target: id) {
             let no_item: id = msg_send![no_item_alloc, initWithTitle: no_title action: nil keyEquivalent: empty_key];
             let _: () = msg_send![no_item, setEnabled: NO];
             let _: () = msg_send![submenu, addItem: no_item];
+            let _: () = msg_send![no_title, release];
+            let _: () = msg_send![empty_key, release];
+            let _: () = msg_send![no_item, release];
         } else {
             for cfg in configs {
                 let item_alloc: id = msg_send![item_cls, alloc];
@@ -313,11 +316,20 @@ unsafe fn populate_menu(menu: id, target: id) {
                     let _: () = msg_send![item, setState: 0isize]; // NSControlStateValueOff
                 }
                 let _: () = msg_send![submenu, addItem: item];
+                let _: () = msg_send![t, release];
+                let _: () = msg_send![k, release];
+                let _: () = msg_send![rep_id, release];
+                let _: () = msg_send![item, release];
             }
         }
 
         let _: () = msg_send![qc_item, setSubmenu: submenu];
         let _: () = msg_send![menu, addItem: qc_item];
+        let _: () = msg_send![qc_title, release];
+        let _: () = msg_send![qc_key, release];
+        let _: () = msg_send![sub_title, release];
+        let _: () = msg_send![submenu, release];
+        let _: () = msg_send![qc_item, release];
     }
 
     // New Connection...

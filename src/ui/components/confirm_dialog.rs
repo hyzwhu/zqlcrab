@@ -11,8 +11,8 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
 };
 use gpui_kit::gpui::{
-    App, FontWeight, InteractiveElement as _, IntoElement, ParentElement, RenderOnce, Styled,
-    Window, div, px, rgba,
+    App, FontWeight, InteractiveElement as _, IntoElement, ParentElement, RenderOnce,
+    StatefulInteractiveElement as _, Styled, Window, div, px, rgba,
 };
 use std::rc::Rc;
 
@@ -254,8 +254,12 @@ impl RenderOnce for ConfirmDialog {
             );
 
         let error_banner = self.error_message.map(|err| {
+            let safe_err =
+                crate::ui::components::connection_error_dialog::wrap_error_text(&err, 56);
             h_flex()
                 .w_full()
+                .min_w_0()
+                .overflow_hidden()
                 .items_start()
                 .gap_2()
                 .p_2p5()
@@ -283,11 +287,15 @@ impl RenderOnce for ConfirmDialog {
                                 .child("Execution Failed"),
                         )
                         .child(
-                            div()
+                            v_flex()
+                                .id("confirm_dialog_error_scroll")
+                                .max_h(px(96.0))
+                                .overflow_y_scroll()
+                                .whitespace_normal()
                                 .text_xs()
                                 .font_family("JetBrains Mono")
                                 .text_color(ThemeColors::ERROR)
-                                .child(err),
+                                .child(safe_err),
                         ),
                 )
         });

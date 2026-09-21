@@ -833,8 +833,12 @@ impl RenderOnce for CreateTableModal {
             .as_ref()
             .or(self.validation_error.as_ref())
             .map(|err| {
+                let safe_err =
+                    crate::ui::components::connection_error_dialog::wrap_error_text(err, 60);
                 h_flex()
                     .w_full()
+                    .min_w_0()
+                    .overflow_hidden()
                     .items_center()
                     .gap_2()
                     .p_2p5()
@@ -843,16 +847,24 @@ impl RenderOnce for CreateTableModal {
                     .border_1()
                     .border_color(rgba(0xEF444440))
                     .child(
-                        Icon::new(IconName::TriangleAlert)
-                            .size(px(14.0))
-                            .text_color(ThemeColors::ERROR),
+                        div().flex_shrink_0().child(
+                            Icon::new(IconName::TriangleAlert)
+                                .size(px(14.0))
+                                .text_color(ThemeColors::ERROR),
+                        ),
                     )
                     .child(
-                        div()
+                        v_flex()
+                            .id("create_table_error_scroll")
+                            .flex_1()
+                            .min_w_0()
+                            .max_h(px(80.0))
+                            .overflow_y_scroll()
+                            .whitespace_normal()
                             .text_xs()
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(ThemeColors::ERROR)
-                            .child(err.clone()),
+                            .child(safe_err),
                     )
             });
 

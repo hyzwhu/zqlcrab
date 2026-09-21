@@ -153,6 +153,16 @@ fn translate_en(key: &'static str) -> &'static str {
         "dialog.cancel" => "Cancel",
         "dialog.sql_statement" => "SQL Statement",
 
+        // Database connection error dialog
+        "conn_error.title" => "Connection Failed",
+        "conn_error.subtitle" => "Unable to establish connection to the database server.",
+        "conn_error.details" => "Error Details",
+        "conn_error.retry" => "Retry",
+        "conn_error.edit" => "Edit Connection",
+        "conn_error.close" => "Close",
+        "conn_error.copy" => "Copy Error",
+        "conn_error.copied" => "Copied!",
+
         // Other tabs
         "about.desc" => "A modern, high-performance database IDE built with Rust & GPUI",
 
@@ -292,6 +302,16 @@ fn translate_zh(key: &'static str) -> &'static str {
         "dialog.confirm_truncate" => "确认清空",
         "dialog.cancel" => "取消",
         "dialog.sql_statement" => "即将执行的 SQL 语句",
+
+        // Database connection error dialog
+        "conn_error.title" => "数据库连接失败",
+        "conn_error.subtitle" => "无法与指定的数据库服务器建立连接，请检查网络或配置。",
+        "conn_error.details" => "错误详情",
+        "conn_error.retry" => "重试连接",
+        "conn_error.edit" => "编辑配置",
+        "conn_error.close" => "关闭",
+        "conn_error.copy" => "复制错误信息",
+        "conn_error.copied" => "已复制!",
 
         // Other tabs
         "about.desc" => "基于 Rust 与 GPUI 打造的高性能现代化桌面数据库客户端",

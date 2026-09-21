@@ -221,8 +221,12 @@ impl RenderOnce for SqlReviewModal {
 
         // Execution error alert banner if present
         let error_banner = self.error_message.map(|err| {
+            let safe_err =
+                crate::ui::components::connection_error_dialog::wrap_error_text(&err, 60);
             h_flex()
                 .w_full()
+                .min_w_0()
+                .overflow_hidden()
                 .items_start()
                 .gap_2()
                 .p_2p5()
@@ -254,9 +258,11 @@ impl RenderOnce for SqlReviewModal {
                                 .id("sql_review_error_msg")
                                 .max_h(px(96.0))
                                 .overflow_y_scroll()
+                                .whitespace_normal()
                                 .text_xs()
+                                .font_family("JetBrains Mono")
                                 .text_color(ThemeColors::ERROR)
-                                .child(err),
+                                .child(safe_err),
                         ),
                 )
         });

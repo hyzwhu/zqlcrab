@@ -1,6 +1,7 @@
 pub mod activity_bar;
 pub mod confirm_dialog;
 pub mod connection_dialog;
+pub mod connection_error_dialog;
 pub mod create_table_modal;
 pub mod data_grid;
 pub mod explain_panel;
@@ -15,6 +16,7 @@ pub mod status_bar;
 pub use activity_bar::{ActivityBar, ActivityNav};
 pub use confirm_dialog::{ConfirmActionKind, ConfirmDialog};
 pub use connection_dialog::ConnectionDialog;
+pub use connection_error_dialog::{ConnectionErrorDialog, ConnectionErrorInfo};
 pub use create_table_modal::{CreateTableColumnState, CreateTableModal};
 pub use data_grid::DataGrid;
 pub use explain_panel::{ExplainPanel, ExplainViewMode};
