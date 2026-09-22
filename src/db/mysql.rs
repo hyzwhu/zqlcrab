@@ -218,21 +218,18 @@ impl DatabaseAdapter for MysqlAdapter {
             let snippet = crate::db::sql_gen::truncate_sql_snippet(stmt_str, 60);
 
             if is_select {
-                let mut query_result = conn
-                    .query_iter(stmt_str.as_str())
-                    .await
-                    .map_err(|e| {
-                        if total_stmts > 1 {
-                            DbError::query(format!(
-                                "Statement {}/{} query failed [{}]: {e}",
-                                idx + 1,
-                                total_stmts,
-                                snippet
-                            ))
-                        } else {
-                            DbError::query(format!("Query failed: {e}"))
-                        }
-                    })?;
+                let mut query_result = conn.query_iter(stmt_str.as_str()).await.map_err(|e| {
+                    if total_stmts > 1 {
+                        DbError::query(format!(
+                            "Statement {}/{} query failed [{}]: {e}",
+                            idx + 1,
+                            total_stmts,
+                            snippet
+                        ))
+                    } else {
+                        DbError::query(format!("Query failed: {e}"))
+                    }
+                })?;
 
                 let columns: Vec<String> = query_result
                     .columns()
@@ -287,21 +284,32 @@ impl DatabaseAdapter for MysqlAdapter {
                     rows_affected: None,
                     execution_time_ms: None,
                 });
+            } else if crate::db::safety::QuerySafetyValidator::is_transaction_control(stmt_str) {
+                conn.query_drop(stmt_str.as_str()).await.map_err(|e| {
+                    if total_stmts > 1 {
+                        DbError::query(format!(
+                            "Statement {}/{} execution failed [{}]: {e}",
+                            idx + 1,
+                            total_stmts,
+                            snippet
+                        ))
+                    } else {
+                        DbError::query(format!("Statement execution failed: {e}"))
+                    }
+                })?;
             } else {
-                conn.query_drop(stmt_str.as_str())
-                    .await
-                    .map_err(|e| {
-                        if total_stmts > 1 {
-                            DbError::query(format!(
-                                "Statement {}/{} execution failed [{}]: {e}",
-                                idx + 1,
-                                total_stmts,
-                                snippet
-                            ))
-                        } else {
-                            DbError::query(format!("Statement execution failed: {e}"))
-                        }
-                    })?;
+                conn.query_drop(stmt_str.as_str()).await.map_err(|e| {
+                    if total_stmts > 1 {
+                        DbError::query(format!(
+                            "Statement {}/{} execution failed [{}]: {e}",
+                            idx + 1,
+                            total_stmts,
+                            snippet
+                        ))
+                    } else {
+                        DbError::query(format!("Statement execution failed: {e}"))
+                    }
+                })?;
                 total_affected += conn.affected_rows();
             }
         }
@@ -310,6 +318,9 @@ impl DatabaseAdapter for MysqlAdapter {
 
         if let Some(mut res) = last_result {
             res.execution_time_ms = Some(execution_time_ms);
+            if res.rows_affected.is_none() && total_affected > 0 {
+                res.rows_affected = Some(total_affected);
+            }
             Ok(res)
         } else {
             Ok(QueryResult {

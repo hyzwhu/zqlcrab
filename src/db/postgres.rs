@@ -13,7 +13,7 @@ use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::Mutex;
-use tokio_postgres::{Client, Config, NoTls, Row, types::Type};
+use tokio_postgres::{Client, Config, NoTls, Row, SimpleQueryMessage, types::Type};
 use uuid::Uuid;
 
 /// Formats a tokio-postgres error, extracting detailed server diagnostics
@@ -196,7 +196,12 @@ impl DatabaseAdapter for PostgresAdapter {
         let row = client
             .query_one("SELECT version(), current_database();", &[])
             .await
-            .map_err(|e| DbError::query(format!("PostgreSQL health check failed: {}", format_pg_error(&e))))?;
+            .map_err(|e| {
+                DbError::query(format!(
+                    "PostgreSQL health check failed: {}",
+                    format_pg_error(&e)
+                ))
+            })?;
 
         let version: String = row.get(0);
         let curr_db: String = row.get(1);
@@ -232,49 +237,68 @@ impl DatabaseAdapter for PostgresAdapter {
         let mut last_result: Option<QueryResult> = None;
         let mut total_affected: u64 = 0;
         let total_stmts = statements.len();
+        let dml_only = statements
+            .iter()
+            .all(|stmt| !crate::db::safety::QuerySafetyValidator::is_result_set_query(stmt));
+
+        // One simple query for a DML script. Sum every command tag so
+        // BEGIN/COMMIT (0) do not hide the DELETE/UPDATE/INSERT count.
+        if dml_only {
+            let total_affected = simple_rows_affected(&client, sql).await.map_err(|e| {
+                DbError::query(format!("Execution failed: {}", format_pg_error(&e)))
+            })?;
+            return Ok(QueryResult {
+                columns: Vec::new(),
+                column_types: Vec::new(),
+                rows: Vec::new(),
+                rows_affected: Some(total_affected),
+                execution_time_ms: Some(start.elapsed().as_millis() as u64),
+            });
+        }
 
         for (idx, stmt) in statements.iter().enumerate() {
             let is_select = crate::db::safety::QuerySafetyValidator::is_result_set_query(stmt);
             let snippet = crate::db::sql_gen::truncate_sql_snippet(stmt, 60);
 
             if is_select {
-                let rows = client
-                    .query(stmt.as_str(), &[])
-                    .await
-                    .map_err(|e| {
-                        let err_desc = format_pg_error(&e);
-                        if total_stmts > 1 {
-                            DbError::query(format!(
-                                "Statement {}/{} failed [{}]:\n{}",
-                                idx + 1,
-                                total_stmts,
-                                snippet,
-                                err_desc
-                            ))
-                        } else {
-                            DbError::query(format!("Query failed: {err_desc}"))
-                        }
-                    })?;
-
-                let columns: Vec<String> = if let Some(first) = rows.first() {
-                    first
-                        .columns()
-                        .iter()
-                        .map(|c| c.name().to_string())
-                        .collect()
-                } else {
-                    Vec::new()
-                };
-
-                let column_types: Vec<String> = if let Some(first) = rows.first() {
-                    first
-                        .columns()
-                        .iter()
-                        .map(|c| c.type_().name().to_string())
-                        .collect()
-                } else {
-                    Vec::new()
-                };
+                let prepared = client.prepare(stmt.as_str()).await.map_err(|e| {
+                    let err_desc = format_pg_error(&e);
+                    if total_stmts > 1 {
+                        DbError::query(format!(
+                            "Statement {}/{} failed [{}]:\n{}",
+                            idx + 1,
+                            total_stmts,
+                            snippet,
+                            err_desc
+                        ))
+                    } else {
+                        DbError::query(format!("Query failed: {err_desc}"))
+                    }
+                })?;
+                let columns: Vec<String> = prepared
+                    .columns()
+                    .iter()
+                    .map(|c| c.name().to_string())
+                    .collect();
+                let column_types: Vec<String> = prepared
+                    .columns()
+                    .iter()
+                    .map(|c| c.type_().name().to_string())
+                    .collect();
+                let rows = client.query(&prepared, &[]).await.map_err(|e| {
+                    let err_desc = format_pg_error(&e);
+                    if total_stmts > 1 {
+                        DbError::query(format!(
+                            "Statement {}/{} failed [{}]:\n{}",
+                            idx + 1,
+                            total_stmts,
+                            snippet,
+                            err_desc
+                        ))
+                    } else {
+                        DbError::query(format!("Query failed: {err_desc}"))
+                    }
+                })?;
 
                 let mut result_rows = Vec::with_capacity(rows.len());
                 for row in &rows {
@@ -292,24 +316,25 @@ impl DatabaseAdapter for PostgresAdapter {
                     rows_affected: None,
                     execution_time_ms: None,
                 });
+            } else if crate::db::safety::QuerySafetyValidator::is_transaction_control(stmt) {
+                client.batch_execute(stmt.as_str()).await.map_err(|e| {
+                    DbError::query(format!("Execution failed: {}", format_pg_error(&e)))
+                })?;
             } else {
-                let affected = client
-                    .execute(stmt.as_str(), &[])
-                    .await
-                    .map_err(|e| {
-                        let err_desc = format_pg_error(&e);
-                        if total_stmts > 1 {
-                            DbError::query(format!(
-                                "Statement {}/{} failed [{}]:\n{}",
-                                idx + 1,
-                                total_stmts,
-                                snippet,
-                                err_desc
-                            ))
-                        } else {
-                            DbError::query(format!("Execution failed: {err_desc}"))
-                        }
-                    })?;
+                let affected = simple_rows_affected(&client, stmt).await.map_err(|e| {
+                    let err_desc = format_pg_error(&e);
+                    if total_stmts > 1 {
+                        DbError::query(format!(
+                            "Statement {}/{} failed [{}]:\n{}",
+                            idx + 1,
+                            total_stmts,
+                            snippet,
+                            err_desc
+                        ))
+                    } else {
+                        DbError::query(format!("Execution failed: {err_desc}"))
+                    }
+                })?;
                 total_affected += affected;
             }
         }
@@ -318,6 +343,9 @@ impl DatabaseAdapter for PostgresAdapter {
 
         if let Some(mut res) = last_result {
             res.execution_time_ms = Some(execution_time_ms);
+            if res.rows_affected.is_none() && total_affected > 0 {
+                res.rows_affected = Some(total_affected);
+            }
             Ok(res)
         } else {
             Ok(QueryResult {
@@ -404,7 +432,7 @@ impl DatabaseAdapter for PostgresAdapter {
                 continue;
             }
 
-            match client.execute(stmt.as_str(), &[]).await {
+            match simple_rows_affected(&client, stmt).await {
                 Ok(affected) => {
                     // A DELETE/UPDATE that matches nothing used to report success
                     // while leaving the row in place.
@@ -651,6 +679,18 @@ impl DatabaseAdapter for PostgresAdapter {
     }
 }
 
+/// Rows modified by a simple-protocol query, summed across every command.
+async fn simple_rows_affected(client: &Client, sql: &str) -> Result<u64, tokio_postgres::Error> {
+    let messages = client.simple_query(sql).await?;
+    let mut total = 0u64;
+    for message in messages {
+        if let SimpleQueryMessage::CommandComplete(count) = message {
+            total += count;
+        }
+    }
+    Ok(total)
+}
+
 /// First SQL keyword, ignoring leading comments and punctuation.
 fn first_sql_keyword(sql: &str) -> String {
     let cleaned = crate::db::safety::QuerySafetyValidator::clean_sql(sql);
@@ -668,14 +708,18 @@ mod tests {
 
     #[test]
     fn delete_keyword_ignores_leading_comment() {
-        assert_eq!(first_sql_keyword("-- note\nDELETE FROM t WHERE id = 1"), "DELETE");
+        assert_eq!(
+            first_sql_keyword("-- note\nDELETE FROM t WHERE id = 1"),
+            "DELETE"
+        );
         assert_eq!(first_sql_keyword("START TRANSACTION"), "START");
         assert_eq!(first_sql_keyword("commit"), "commit");
     }
 
     #[test]
     fn test_postgres_adapter_initial_state() {
-        let config = ConnectionConfig::postgres("test_pg", "localhost", 5432, "testdb", "postgres", None);
+        let config =
+            ConnectionConfig::postgres("test_pg", "localhost", 5432, "testdb", "postgres", None);
         let adapter = PostgresAdapter::new(config);
         assert!(!adapter.is_connected());
     }

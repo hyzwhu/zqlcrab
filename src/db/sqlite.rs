@@ -209,20 +209,18 @@ impl DatabaseAdapter for SqliteAdapter {
             let snippet = crate::db::sql_gen::truncate_sql_snippet(stmt_str, 60);
 
             if is_select {
-                let mut stmt = conn
-                    .prepare(stmt_str)
-                    .map_err(|e| {
-                        if total_stmts > 1 {
-                            DbError::query(format!(
-                                "Statement {}/{} prepare failed [{}]: {e}",
-                                idx + 1,
-                                total_stmts,
-                                snippet
-                            ))
-                        } else {
-                            DbError::query(format!("Failed to prepare query: {e}"))
-                        }
-                    })?;
+                let mut stmt = conn.prepare(stmt_str).map_err(|e| {
+                    if total_stmts > 1 {
+                        DbError::query(format!(
+                            "Statement {}/{} prepare failed [{}]: {e}",
+                            idx + 1,
+                            total_stmts,
+                            snippet
+                        ))
+                    } else {
+                        DbError::query(format!("Failed to prepare query: {e}"))
+                    }
+                })?;
 
                 let columns: Vec<String> = stmt
                     .column_names()
@@ -232,20 +230,18 @@ impl DatabaseAdapter for SqliteAdapter {
                 let col_count = columns.len();
                 let column_types: Vec<String> = vec!["TEXT".to_string(); col_count];
 
-                let mut rows_iter = stmt
-                    .query([])
-                    .map_err(|e| {
-                        if total_stmts > 1 {
-                            DbError::query(format!(
-                                "Statement {}/{} execution failed [{}]: {e}",
-                                idx + 1,
-                                total_stmts,
-                                snippet
-                            ))
-                        } else {
-                            DbError::query(format!("Failed to execute query: {e}"))
-                        }
-                    })?;
+                let mut rows_iter = stmt.query([]).map_err(|e| {
+                    if total_stmts > 1 {
+                        DbError::query(format!(
+                            "Statement {}/{} execution failed [{}]: {e}",
+                            idx + 1,
+                            total_stmts,
+                            snippet
+                        ))
+                    } else {
+                        DbError::query(format!("Failed to execute query: {e}"))
+                    }
+                })?;
 
                 let mut rows = Vec::new();
                 while let Some(row) = rows_iter
@@ -267,21 +263,33 @@ impl DatabaseAdapter for SqliteAdapter {
                     rows_affected: None,
                     execution_time_ms: None,
                 });
+            } else if crate::db::safety::QuerySafetyValidator::is_transaction_control(stmt_str) {
+                // sqlite3_changes() still reports the previous DELETE after COMMIT.
+                conn.execute_batch(stmt_str).map_err(|e| {
+                    if total_stmts > 1 {
+                        DbError::query(format!(
+                            "Statement {}/{} execution failed [{}]: {e}",
+                            idx + 1,
+                            total_stmts,
+                            snippet
+                        ))
+                    } else {
+                        DbError::query(format!("Statement execution error: {e}"))
+                    }
+                })?;
             } else {
-                let affected = conn
-                    .execute(stmt_str, [])
-                    .map_err(|e| {
-                        if total_stmts > 1 {
-                            DbError::query(format!(
-                                "Statement {}/{} execution failed [{}]: {e}",
-                                idx + 1,
-                                total_stmts,
-                                snippet
-                            ))
-                        } else {
-                            DbError::query(format!("Statement execution error: {e}"))
-                        }
-                    })? as u64;
+                let affected = conn.execute(stmt_str, []).map_err(|e| {
+                    if total_stmts > 1 {
+                        DbError::query(format!(
+                            "Statement {}/{} execution failed [{}]: {e}",
+                            idx + 1,
+                            total_stmts,
+                            snippet
+                        ))
+                    } else {
+                        DbError::query(format!("Statement execution error: {e}"))
+                    }
+                })? as u64;
                 total_affected += affected;
             }
         }
@@ -290,6 +298,9 @@ impl DatabaseAdapter for SqliteAdapter {
 
         if let Some(mut res) = last_result {
             res.execution_time_ms = Some(execution_time_ms);
+            if res.rows_affected.is_none() && total_affected > 0 {
+                res.rows_affected = Some(total_affected);
+            }
             Ok(res)
         } else {
             Ok(QueryResult {
@@ -985,5 +996,47 @@ mod tests {
             .await
             .expect("multi-statement DML should succeed");
         assert_eq!(res_dml.rows_affected, Some(2));
+    }
+
+    #[tokio::test]
+    async fn delete_inside_transaction_reports_affected_rows() {
+        let config = ConnectionConfig::sqlite("test_delete_tx", ":memory:");
+        let mut adapter = SqliteAdapter::new(config);
+        adapter.connect().await.expect("connect should succeed");
+
+        adapter
+            .execute_query(
+                "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT); INSERT INTO items (id, name) VALUES (1, 'a'), (2, 'b');",
+            )
+            .await
+            .expect("seed");
+
+        let deleted = adapter
+            .execute_query("BEGIN;\nDELETE FROM items WHERE id = 1;\nCOMMIT;")
+            .await
+            .expect("delete script");
+        assert_eq!(deleted.rows_affected, Some(1));
+        assert!(deleted.columns.is_empty());
+
+        let left = adapter
+            .execute_query("SELECT id, name FROM items ORDER BY id;")
+            .await
+            .expect("reload");
+        assert_eq!(left.columns, vec!["id".to_string(), "name".to_string()]);
+        assert_eq!(left.rows.len(), 1);
+
+        let gone = adapter
+            .execute_query("DELETE FROM items WHERE id = 2;")
+            .await
+            .expect("plain delete");
+        assert_eq!(gone.rows_affected, Some(1));
+
+        let empty = adapter
+            .execute_query("SELECT id, name FROM items;")
+            .await
+            .expect("empty select");
+        assert_eq!(empty.columns, vec!["id".to_string(), "name".to_string()]);
+        assert!(empty.rows.is_empty());
+        assert!(empty.rows_affected.is_none());
     }
 }

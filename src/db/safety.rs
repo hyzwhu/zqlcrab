@@ -9,16 +9,45 @@ impl QuerySafetyValidator {
     /// True when the statement should be executed as a result-returning query
     /// (SELECT / WITH / PRAGMA / EXPLAIN / SHOW / DESCRIBE), after comments.
     pub fn is_result_set_query(sql: &str) -> bool {
+        matches!(
+            Self::first_keyword(sql).as_str(),
+            "SELECT" | "WITH" | "PRAGMA" | "EXPLAIN" | "SHOW" | "DESCRIBE" | "DESC" | "VALUES"
+        )
+    }
+
+    /// True for BEGIN / COMMIT / ROLLBACK and their dialect spellings.
+    /// These complete successfully without changing table rows, so their
+    /// command tags must not replace a real INSERT / UPDATE / DELETE count.
+    pub fn is_transaction_control(sql: &str) -> bool {
+        let first = Self::first_keyword(sql);
+        matches!(
+            first.as_str(),
+            "BEGIN" | "START" | "COMMIT" | "ROLLBACK" | "END" | "SAVEPOINT" | "RELEASE"
+        )
+    }
+
+    /// True when every statement in a script returns rows (transaction control allowed).
+    /// Used to decide whether re-running the editor after a grid save would just
+    /// repeat a DELETE/UPDATE and report 0 rows affected.
+    pub fn is_row_returning_script(sql: &str) -> bool {
+        let statements = crate::db::sql_gen::split_sql_statements(sql);
+        !statements.is_empty()
+            && statements
+                .iter()
+                .any(|stmt| Self::is_result_set_query(stmt))
+            && statements
+                .iter()
+                .all(|stmt| Self::is_result_set_query(stmt) || Self::is_transaction_control(stmt))
+    }
+
+    fn first_keyword(sql: &str) -> String {
         let cleaned = Self::clean_sql(sql);
-        let first = cleaned
+        cleaned
             .split(|c: char| c.is_whitespace() || c == ';' || c == '(')
             .find(|s| !s.is_empty())
             .unwrap_or("")
-            .to_ascii_uppercase();
-        matches!(
-            first.as_str(),
-            "SELECT" | "WITH" | "PRAGMA" | "EXPLAIN" | "SHOW" | "DESCRIBE" | "DESC" | "VALUES"
-        )
+            .trim_matches(|c: char| !c.is_ascii_alphanumeric())
+            .to_ascii_uppercase()
     }
 
     /// Strips leading/trailing whitespace and comments (-- line comments and /* block comments */).
@@ -152,6 +181,20 @@ mod tests {
         ));
         assert!(!QuerySafetyValidator::is_result_set_query(
             "-- only a comment"
+        ));
+        assert!(QuerySafetyValidator::is_transaction_control("BEGIN"));
+        assert!(QuerySafetyValidator::is_transaction_control(
+            "START TRANSACTION"
+        ));
+        assert!(QuerySafetyValidator::is_transaction_control("commit"));
+        assert!(!QuerySafetyValidator::is_transaction_control(
+            "DELETE FROM t WHERE id = 1"
+        ));
+        assert!(QuerySafetyValidator::is_row_returning_script(
+            "SELECT * FROM users LIMIT 100"
+        ));
+        assert!(!QuerySafetyValidator::is_row_returning_script(
+            "BEGIN;\nDELETE FROM users WHERE id = 1;\nCOMMIT;"
         ));
     }
 

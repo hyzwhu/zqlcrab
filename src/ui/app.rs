@@ -5,6 +5,11 @@ use crate::db::explain::{ExplainPlan, parse_explain_result, wrap_explain_sql};
 use crate::db::export::{ExportFormat, ExportOptions, export_result};
 use crate::db::handle::ActiveConnection;
 use crate::db::history::{QueryHistoryItem, QueryHistoryManager, QueryHistoryStatus};
+use crate::db::import::{
+    ColumnMapping, CsvDelimiter, CsvImportConfig, CsvPreviewData, CsvSniffer, ErrorPolicy,
+    FileEncoding, ImportExecutor, ImportFormat, ImportProgress, ImportResult, SqlPreviewData,
+    auto_map_columns,
+};
 use crate::db::manager::ConnectionManager;
 use crate::db::sql_format::format_sql_with_indent;
 use crate::db::sql_gen::{
@@ -15,11 +20,6 @@ use crate::db::sql_gen::{
 use crate::db::types::{
     ColumnInfo, ConnectionConfig, DatabaseFamily, DatabaseType, IndexInfo, QueryResult, QueryValue,
     SortDirection, TableInfo,
-};
-use crate::db::import::{
-    auto_map_columns, ColumnMapping, CsvDelimiter, CsvImportConfig, CsvPreviewData, CsvSniffer,
-    ErrorPolicy, FileEncoding, ImportExecutor, ImportFormat, ImportProgress, ImportResult,
-    SqlPreviewData,
 };
 use crate::settings::{SettingsManager, ThemePreference};
 use crate::ui::components::{
@@ -1250,14 +1250,19 @@ impl CrabStudioApp {
                                 tray.memory_mb = crate::ui::tray::get_process_memory_mb();
                                 crate::ui::tray::update_tray_status(Some(tray));
                             }
+                            let affected = qr.rows_affected;
                             let qr_arc = Arc::new(qr);
                             tab.result = Some(qr_arc.clone());
                             app.table_data = Some(qr_arc);
                             app.grid_selected_cell = None;
                             app.grid_inspector_open = false;
                             tab.error = None;
-                            app.status_message =
-                                Some(format!("Query completed: {rows} rows returned in {dur}ms"));
+                            app.status_message = Some(match affected {
+                                Some(n) if rows == 0 => {
+                                    format!("Query completed: {n} row(s) affected in {dur}ms")
+                                }
+                                _ => format!("Query completed: {rows} rows returned in {dur}ms"),
+                            });
 
                             // Auto explain slow queries (>500ms) if enabled in settings
                             if auto_explain && dur >= 500 {
@@ -2088,11 +2093,13 @@ impl CrabStudioApp {
             (&empty_cols, &empty_rows)
         };
 
+        let mut review_columns = self.schema_columns.clone();
+        ColumnInfo::apply_primary_key_index(&mut review_columns, &self.schema_indexes);
         let plan = generate_review_plan(
             &table_name,
             schema_name.as_deref(),
             family,
-            &self.schema_columns,
+            &review_columns,
             grid_cols,
             orig_rows,
             &self.grid_changeset,
@@ -2133,10 +2140,16 @@ impl CrabStudioApp {
         let inserts_count = plan.inserts_count;
         let updates_count = plan.updates_count;
         let deletes_count = plan.deletes_count;
+        // Re-running a DELETE/UPDATE from the editor after the batch already
+        // applied it reports 0 rows affected and replaces the grid with that
+        // success panel. Only reload the editor when it is a row-returning query.
         let reload_sql = if self.active_tab == WorkspaceTab::QueryConsole {
             self.active_query_tab()
                 .map(|t| t.editor.read(cx).value().trim().to_string())
-                .filter(|s| !s.is_empty())
+                .filter(|s| {
+                    !s.is_empty()
+                        && crate::db::safety::QuerySafetyValidator::is_row_returning_script(s)
+                })
         } else {
             None
         };
@@ -2800,7 +2813,12 @@ impl CrabStudioApp {
         }
 
         // If file input already has a path, analyze it
-        let raw_path = self.import_file_path_input.read(cx).value().trim().to_string();
+        let raw_path = self
+            .import_file_path_input
+            .read(cx)
+            .value()
+            .trim()
+            .to_string();
         if !raw_path.is_empty() {
             self.inspect_import_file(cx);
         }
@@ -2838,7 +2856,12 @@ impl CrabStudioApp {
 
     /// Inspect and parse the selected import file
     pub fn inspect_import_file(&mut self, cx: &mut Context<Self>) {
-        let raw_path = self.import_file_path_input.read(cx).value().trim().to_string();
+        let raw_path = self
+            .import_file_path_input
+            .read(cx)
+            .value()
+            .trim()
+            .to_string();
         if raw_path.is_empty() {
             self.import_error = Some("Please enter or select a valid data file path".to_string());
             cx.notify();
