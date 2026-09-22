@@ -45,6 +45,7 @@ use std::sync::{Arc, RwLock};
 use uuid::Uuid;
 
 pub const LOGO_PNG_BYTES: &[u8] = include_bytes!("../../assets/logo.png");
+pub const TRAY_ICON_PNG_BYTES: &[u8] = include_bytes!("../../assets/tray-icon.png");
 
 gpui_kit::actions!(
     zqlcrab,

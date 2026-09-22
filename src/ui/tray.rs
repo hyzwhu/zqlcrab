@@ -431,7 +431,7 @@ pub fn setup_macos_status_bar() {
 
         let button: id = msg_send![status_item, button];
         if !button.is_null() {
-            let bytes = crate::ui::app::LOGO_PNG_BYTES;
+            let bytes = crate::ui::app::TRAY_ICON_PNG_BYTES;
             let data = NSData::dataWithBytes_length_(
                 nil,
                 bytes.as_ptr() as *const std::ffi::c_void,
@@ -441,7 +441,10 @@ pub fn setup_macos_status_bar() {
                 let alloc_image: id = msg_send![cls, alloc];
                 let image: id = msg_send![alloc_image, initWithData: data];
                 if !image.is_null() {
-                    let size = NSSize::new(18.0, 18.0);
+                    // Set as template image for native macOS monochrome silhouette rendering
+                    let _: () = msg_send![image, setTemplate: YES];
+                    // Proportionally sized (w: 22.0pt, h: 16.0pt) to match standard status bar icons
+                    let size = NSSize::new(22.0, 16.0);
                     let _: () = msg_send![image, setSize: size];
                     let _: () = msg_send![button, setImage: image];
                     let _: () = msg_send![image, release];

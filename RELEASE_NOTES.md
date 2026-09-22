@@ -52,6 +52,7 @@ Fast, lightweight, GPU-accelerated database desktop client built with Rust & GPU
   - Added comprehensive architectural blueprint in `docs/architecture-web-wasm.md`.
 - 💻 **Zedis-Style System Tray Integration**:
   - Revamped tray menu with live connection indicators, latency metrics, and quick profile switching.
+  - Native macOS status bar icon upgraded to a crisp monochrome silhouette template with tight bounding crop and proportional sizing (`22.0pt × 16.0pt`), matching macOS Human Interface Guidelines.
 
 ---
 
