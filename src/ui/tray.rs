@@ -12,7 +12,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use cocoa::base::{id, nil};
 #[cfg(target_os = "macos")]
 #[allow(unexpected_cfgs, deprecated, unused_imports)]
-use cocoa::foundation::{NSData, NSSize, NSString};
+use cocoa::foundation::{NSData, NSPoint, NSRect, NSSize, NSString};
 #[cfg(target_os = "macos")]
 #[allow(unexpected_cfgs, deprecated, unused_imports)]
 use objc::declare::ClassDecl;
@@ -242,37 +242,98 @@ unsafe fn populate_menu(menu: id, target: id) {
 
     add_separator();
 
-    // Database status metrics block (indented labels matching Zedis layout)
+    // Database status metrics block (aligned at the colon ':' with standard macOS menu typography)
     let current_status = get_tray_status();
-    let (active_label, db_label, ping_label) = match current_status.as_ref() {
+    let (active_val, db_val, ping_val) = match current_status.as_ref() {
         Some(s) if s.active_name.is_some() => {
-            let active = format!("Active: {}", s.active_name.as_deref().unwrap_or("--"));
-            let db = format!("    DB: {}", s.db_name.as_deref().unwrap_or("--"));
+            let active = s.active_name.as_deref().unwrap_or("--").to_string();
+            let db = s.db_name.as_deref().unwrap_or("--").to_string();
             let ping = match s.ping_ms {
-                Some(ms) => format!("  Ping: {ms}ms"),
-                None => "  Ping: --".to_string(),
+                Some(ms) => format!("{ms}ms"),
+                None => "--".to_string(),
             };
             (active, db, ping)
         }
-        _ => (
-            "Active: --".to_string(),
-            "    DB: --".to_string(),
-            "  Ping: --".to_string(),
-        ),
+        _ => ("--".to_string(), "--".to_string(), "--".to_string()),
     };
 
     let mem_mb =
         get_process_memory_mb().or_else(|| current_status.as_ref().and_then(|s| s.memory_mb));
-    let mem_label = match mem_mb {
-        Some(mb) if mb >= 1024.0 => format!("Memory: {:.2} GB", mb / 1024.0),
-        Some(mb) => format!("Memory: {mb:.1} MB"),
-        None => "Memory: --".to_string(),
+    let mem_val = match mem_mb {
+        Some(mb) if mb >= 1024.0 => format!("{:.2} GB", mb / 1024.0),
+        Some(mb) => format!("{mb:.1} MB"),
+        None => "--".to_string(),
     };
 
-    add_item(&active_label, None, false);
-    add_item(&db_label, None, false);
-    add_item(&ping_label, None, false);
-    add_item(&mem_label, None, false);
+    let metrics = [
+        ("Active:", active_val),
+        ("DB:", db_val),
+        ("Ping:", ping_val),
+        ("Memory:", mem_val),
+    ];
+
+    // Render metrics aligned at the colon ':' using custom row views
+    let view_cls = Class::get("NSView");
+    let tf_cls = Class::get("NSTextField");
+    let font_cls = Class::get("NSFont");
+    let color_cls = Class::get("NSColor");
+    let item_cls = Class::get("NSMenuItem");
+
+    if let (Some(v_cls), Some(t_cls), Some(f_cls), Some(c_cls), Some(i_cls)) =
+        (view_cls, tf_cls, font_cls, color_cls, item_cls)
+    {
+        let font: id = msg_send![f_cls, menuFontOfSize: 13.0f64];
+        let sec_color: id = msg_send![c_cls, secondaryLabelColor];
+        let label_color: id = msg_send![c_cls, labelColor];
+
+        for (key, val) in metrics {
+            let alloc_item: id = msg_send![i_cls, alloc];
+            let blank_title = NSString::alloc(nil).init_str("");
+            let blank_key = NSString::alloc(nil).init_str("");
+            let item: id = msg_send![alloc_item, initWithTitle: blank_title action: nil keyEquivalent: blank_key];
+            let _: () = msg_send![item, setEnabled: NO];
+
+            let row_frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(200.0, 19.0));
+            let alloc_row: id = msg_send![v_cls, alloc];
+            let row_view: id = msg_send![alloc_row, initWithFrame: row_frame];
+
+            // Key label (right-aligned, ending at x = 72.0)
+            let key_ns = NSString::alloc(nil).init_str(key);
+            let key_tf: id = msg_send![t_cls, labelWithString: key_ns];
+            let key_frame = NSRect::new(NSPoint::new(14.0, 2.0), NSSize::new(58.0, 15.0));
+            let _: () = msg_send![key_tf, setFrame: key_frame];
+            let _: () = msg_send![key_tf, setAlignment: 2isize]; // NSTextAlignmentRight = 2
+            let _: () = msg_send![key_tf, setFont: font];
+            let _: () = msg_send![key_tf, setTextColor: sec_color];
+            let _: () = msg_send![row_view, addSubview: key_tf];
+
+            // Value label (left-aligned, starting at x = 78.0)
+            let val_ns = NSString::alloc(nil).init_str(&val);
+            let val_tf: id = msg_send![t_cls, labelWithString: val_ns];
+            let val_frame = NSRect::new(NSPoint::new(78.0, 2.0), NSSize::new(115.0, 15.0));
+            let _: () = msg_send![val_tf, setFrame: val_frame];
+            let _: () = msg_send![val_tf, setAlignment: 0isize]; // NSTextAlignmentLeft = 0
+            let _: () = msg_send![val_tf, setFont: font];
+            let _: () = msg_send![val_tf, setTextColor: label_color];
+            let _: () = msg_send![row_view, addSubview: val_tf];
+
+            let _: () = msg_send![item, setView: row_view];
+            let _: () = msg_send![menu, addItem: item];
+
+            // Release allocated objects according to MRC rules
+            let _: () = msg_send![key_ns, release];
+            let _: () = msg_send![val_ns, release];
+            let _: () = msg_send![blank_title, release];
+            let _: () = msg_send![blank_key, release];
+            let _: () = msg_send![row_view, release];
+            let _: () = msg_send![item, release];
+        }
+    } else {
+        // Fallback for non-macOS or missing AppKit classes
+        for (key, val) in metrics {
+            add_item(&format!("{key} {val}"), None, false);
+        }
+    }
 
     add_separator();
 

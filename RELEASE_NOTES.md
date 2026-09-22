@@ -56,6 +56,7 @@ Fast, lightweight, GPU-accelerated database desktop client built with Rust & GPU
 - 💻 **Zedis-Style System Tray Integration**:
   - Revamped tray menu with live connection indicators, latency metrics, and quick profile switching.
   - Native macOS status bar icon upgraded to a crisp monochrome silhouette template with tight bounding crop and proportional sizing (`22.0pt × 16.0pt`), matching macOS Human Interface Guidelines.
+  - Aligned database status metrics (`Active:`, `DB:`, `Ping:`, `Memory:`) cleanly along the colon `:` using native dual-column label layouts with secondary/primary typography.
 
 ---
 
