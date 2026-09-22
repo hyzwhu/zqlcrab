@@ -12,8 +12,8 @@ use gpui_kit::component::{
     menu::{DropdownMenu as _, PopupMenuItem},
 };
 use gpui_kit::gpui::{
-    Anchor, App, ElementId, Entity, FontWeight, IntoElement, ParentElement as _, RenderOnce,
-    Styled, Window, div, prelude::*, px, rgba,
+    Anchor, App, ElementId, Entity, FontWeight, InteractiveElement as _, IntoElement,
+    ParentElement as _, RenderOnce, Styled, Window, div, prelude::*, px, rgba,
 };
 use std::rc::Rc;
 
@@ -1269,6 +1269,8 @@ impl RenderOnce for CreateTableModal {
 
         // Backdrop overlay
         div()
+            .id("create_table_modal_backdrop")
+            .occlude()
             .absolute()
             .inset_0()
             .bg(rgba(0x000000B0))

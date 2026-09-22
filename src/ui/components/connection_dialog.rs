@@ -795,6 +795,8 @@ impl RenderOnce for ConnectionDialog {
 
         // Backdrop overlay
         div()
+            .id("connection_dialog_backdrop")
+            .occlude()
             .absolute()
             .inset_0()
             .bg(rgba(0x000000AA))

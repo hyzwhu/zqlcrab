@@ -441,6 +441,7 @@ impl RenderOnce for ConfirmDialog {
 
         div()
             .id("confirm_dialog_backdrop")
+            .occlude()
             .absolute()
             .inset_0()
             .bg(rgba(0x000000B0))

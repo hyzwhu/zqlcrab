@@ -2907,6 +2907,8 @@ impl RenderOnce for DataGrid {
                         .child(grid_content)
                         .child(
                             div()
+                                .id("data_grid_modal_backdrop")
+                                .occlude()
                                 .absolute()
                                 .inset_0()
                                 .bg(rgba(0x000000AA))

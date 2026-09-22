@@ -9,8 +9,8 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
 };
 use gpui_kit::gpui::{
-    App, FontWeight, IntoElement, ParentElement, RenderOnce, Styled, Window, div, prelude::*, px,
-    rgba,
+    App, FontWeight, InteractiveElement as _, IntoElement, ParentElement, RenderOnce, Styled,
+    Window, div, prelude::*, px, rgba,
 };
 use std::rc::Rc;
 
@@ -506,6 +506,8 @@ impl RenderOnce for SqlReviewModal {
 
         // Backdrop overlay
         div()
+            .id("sql_review_modal_backdrop")
+            .occlude()
             .absolute()
             .inset_0()
             .bg(rgba(0x000000B0))

@@ -471,6 +471,7 @@ impl RenderOnce for ConnectionErrorDialog {
         // Modal Backdrop
         div()
             .id("connection_error_modal_backdrop")
+            .occlude()
             .absolute()
             .inset_0()
             .bg(rgba(0x000000B0))

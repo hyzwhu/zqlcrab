@@ -50,6 +50,9 @@ Fast, lightweight, GPU-accelerated database desktop client built with Rust & GPU
   - Clean separation between core database models, UI presentation, and network transport adapters.
   - Introduced `RemoteHttpAdapter` and gateway protocol specifications, enabling deployment as a Web/WASM frontend connected to a remote database gateway alongside native desktop direct socket connections.
   - Added comprehensive architectural blueprint in `docs/architecture-web-wasm.md`.
+- 🛡️ **Modal Overlay Event Occlusion & Click Penetration Prevention (遮罩层防穿透)**:
+  - Added `.occlude()` to all backdrop overlays across the application, preventing mouse clicks and hover interactions on upper-layer modal dialogs from penetrating down to the underlying DataGrid cells, buttons, tabs, or editor buffers.
+  - Covers all modal workflows: `ConnectionDialog`, `ConnectionErrorDialog`, `CreateTableModal`, `ConfirmDialog`, `SqlReviewModal`, and `DataGrid` full-cell inspector modal.
 - 💻 **Zedis-Style System Tray Integration**:
   - Revamped tray menu with live connection indicators, latency metrics, and quick profile switching.
   - Native macOS status bar icon upgraded to a crisp monochrome silhouette template with tight bounding crop and proportional sizing (`22.0pt × 16.0pt`), matching macOS Human Interface Guidelines.
