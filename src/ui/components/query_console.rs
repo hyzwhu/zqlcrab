@@ -17,11 +17,21 @@ use gpui_kit::component::{
     tab::{Tab, TabBar},
 };
 use gpui_kit::gpui::{
-    AnyElement, App, Entity, InteractiveElement as _, IntoElement, ParentElement, RenderOnce,
-    StatefulInteractiveElement as _, Styled, Window, div, prelude::FluentBuilder as _, px,
+    AnyElement, App, Entity, FontWeight, InteractiveElement as _, IntoElement, ParentElement,
+    RenderOnce, StatefulInteractiveElement as _, Styled, Window, div, prelude::FluentBuilder as _,
+    px,
 };
 use std::rc::Rc;
 use std::sync::Arc;
+use uuid::Uuid;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QueryTabHeader {
+    pub id: Uuid,
+    pub title: String,
+    pub is_executing: bool,
+    pub has_error: bool,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ConsoleBottomTab {
@@ -34,6 +44,8 @@ pub enum ConsoleBottomTab {
 pub struct QueryConsole {
     editor_state: Entity<EditorState>,
     split_state: Entity<ResizableState>,
+    tabs: Vec<QueryTabHeader>,
+    active_tab_id: Option<Uuid>,
     query_result: Option<Arc<QueryResult>>,
     query_error: Option<String>,
     explain_plan: Option<ExplainPlan>,
@@ -52,6 +64,9 @@ pub struct QueryConsole {
     on_explain: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_bottom_tab: Option<Rc<dyn Fn(ConsoleBottomTab, &mut Window, &mut App) + 'static>>,
     on_explain_view: Option<Rc<dyn Fn(ExplainViewMode, &mut Window, &mut App) + 'static>>,
+    on_select_tab: Option<Rc<dyn Fn(Uuid, &mut Window, &mut App) + 'static>>,
+    on_close_tab: Option<Rc<dyn Fn(Uuid, &mut Window, &mut App) + 'static>>,
+    on_new_tab: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
 }
 
 impl QueryConsole {
@@ -59,6 +74,8 @@ impl QueryConsole {
         Self {
             editor_state: editor_state.clone(),
             split_state: split_state.clone(),
+            tabs: Vec::new(),
+            active_tab_id: None,
             query_result: None,
             query_error: None,
             explain_plan: None,
@@ -77,7 +94,20 @@ impl QueryConsole {
             on_explain: None,
             on_bottom_tab: None,
             on_explain_view: None,
+            on_select_tab: None,
+            on_close_tab: None,
+            on_new_tab: None,
         }
+    }
+
+    pub fn tabs(mut self, tabs: Vec<QueryTabHeader>) -> Self {
+        self.tabs = tabs;
+        self
+    }
+
+    pub fn active_tab_id(mut self, id: Option<Uuid>) -> Self {
+        self.active_tab_id = id;
+        self
     }
 
     pub fn result(mut self, result: Option<Arc<QueryResult>>) -> Self {
@@ -185,6 +215,30 @@ impl QueryConsole {
         F: Fn(ExplainViewMode, &mut Window, &mut App) + 'static,
     {
         self.on_explain_view = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_select_tab<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(Uuid, &mut Window, &mut App) + 'static,
+    {
+        self.on_select_tab = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_close_tab<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(Uuid, &mut Window, &mut App) + 'static,
+    {
+        self.on_close_tab = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_new_tab<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&mut Window, &mut App) + 'static,
+    {
+        self.on_new_tab = Some(Rc::new(handler));
         self
     }
 }
@@ -480,10 +534,133 @@ impl RenderOnce for QueryConsole {
             .child(bottom_header)
             .child(div().size_full().flex_1().min_h_0().child(bottom_body));
 
+        let tab_bar = if !self.tabs.is_empty() {
+            let mut tabs_row = h_flex()
+                .h(px(34.0))
+                .w_full()
+                .px_2()
+                .items_center()
+                .bg(ThemeColors::BG_SURFACE)
+                .border_b_1()
+                .border_color(ThemeColors::BORDER)
+                .gap_1()
+                .overflow_x_hidden();
+
+            for tab in &self.tabs {
+                let is_active = self.active_tab_id == Some(tab.id);
+                let tab_id = tab.id;
+                let title = tab.title.clone();
+
+                let mut tab_item = h_flex()
+                    .id(format!("query_tab_item_{}", tab_id))
+                    .h(px(26.0))
+                    .items_center()
+                    .gap_1()
+                    .pl_2()
+                    .pr_1()
+                    .rounded_md()
+                    .cursor_pointer();
+
+                if is_active {
+                    tab_item = tab_item
+                        .bg(ThemeColors::BG_APP)
+                        .border_1()
+                        .border_color(ThemeColors::BORDER);
+                } else {
+                    tab_item = tab_item
+                        .bg(ThemeColors::TRANSPARENT)
+                        .border_1()
+                        .border_color(ThemeColors::TRANSPARENT)
+                        .hover(|s| s.bg(ThemeColors::BG_SURFACE_HOVER));
+                }
+
+                // Tab Icon
+                let icon_name = if tab.is_executing {
+                    IconName::RotateCw
+                } else if tab.has_error {
+                    IconName::CircleAlert
+                } else {
+                    IconName::Code
+                };
+                let icon_color = if tab.is_executing {
+                    ThemeColors::WARNING
+                } else if tab.has_error {
+                    ThemeColors::ERROR
+                } else if is_active {
+                    ThemeColors::PRIMARY_LIGHT
+                } else {
+                    ThemeColors::TEXT_FAINT
+                };
+                tab_item =
+                    tab_item.child(Icon::new(icon_name).size(px(13.0)).text_color(icon_color));
+
+                // Tab Title
+                let title_color = if is_active {
+                    ThemeColors::TEXT_PRIMARY
+                } else {
+                    ThemeColors::TEXT_MUTED
+                };
+                let mut title_elem = div()
+                    .text_xs()
+                    .text_color(title_color)
+                    .max_w(px(120.0))
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .child(title);
+                if is_active {
+                    title_elem = title_elem.font_weight(FontWeight::SEMIBOLD);
+                }
+                tab_item = tab_item.child(title_elem);
+
+                // Tab click to select
+                if let Some(ref on_select) = self.on_select_tab {
+                    let on_select = on_select.clone();
+                    tab_item = tab_item.on_click(move |_, window, cx| {
+                        on_select(tab_id, window, cx);
+                    });
+                }
+
+                // Close button [×]
+                if let Some(ref on_close) = self.on_close_tab {
+                    let on_close = on_close.clone();
+                    let close_btn = Button::new(format!("close_query_tab_{}", tab_id))
+                        .ghost()
+                        .xsmall()
+                        .icon(IconName::X)
+                        .tooltip("Close Tab (⌘W / Ctrl+W)")
+                        .on_click(move |_, window, cx| {
+                            on_close(tab_id, window, cx);
+                        });
+                    tab_item = tab_item.child(close_btn);
+                }
+
+                tabs_row = tabs_row.child(tab_item);
+            }
+
+            // New Tab button [+]
+            if let Some(ref on_new) = self.on_new_tab {
+                let on_new = on_new.clone();
+                let new_btn = Button::new("new_query_tab_btn")
+                    .ghost()
+                    .xsmall()
+                    .icon(IconName::Plus)
+                    .tooltip("New Query Tab (⌘T / Ctrl+T)")
+                    .on_click(move |_, window, cx| {
+                        on_new(window, cx);
+                    });
+                tabs_row = tabs_row.child(new_btn);
+            }
+
+            Some(tabs_row)
+        } else {
+            None
+        };
+
         v_flex()
             .size_full()
             .min_h_0()
             .bg(ThemeColors::BG_APP)
+            .children(tab_bar)
             .child(toolbar)
             .children(error_banner)
             .child(
@@ -500,5 +677,26 @@ impl RenderOnce for QueryConsole {
                         ),
                 ),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_query_tab_header_properties() {
+        let id = Uuid::new_v4();
+        let header = QueryTabHeader {
+            id,
+            title: "users.sql".to_string(),
+            is_executing: true,
+            has_error: false,
+        };
+
+        assert_eq!(header.id, id);
+        assert_eq!(header.title, "users.sql");
+        assert!(header.is_executing);
+        assert!(!header.has_error);
     }
 }

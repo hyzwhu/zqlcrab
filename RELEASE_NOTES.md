@@ -5,6 +5,13 @@ Fast, lightweight, GPU-accelerated database desktop client built with Rust & GPU
 ### 📋 Changelog
 
 #### v0.1.1 Release Highlights:
+- 📑 **Multi-Tab Query Sessions (多 SQL 查询会话标签页)**:
+  - Complete multi-tab SQL workspace architecture: each query tab encapsulates an independent SQL buffer, execution results, error diagnostic banner, execution metrics, and visual EXPLAIN query plan.
+  - Asynchronous background query execution isolation: running long or intensive queries tracks execution by session UUID, routing results safely to the originating tab even if the user switches active tabs during query execution.
+  - Native tab management: interactive Tab Strip with execution spinner indicators, error alerts, close `[×]` buttons, and quick new tab `[+]` button.
+  - Keyboard shortcuts: `⌘T` / `Ctrl+T` to instantly create new query tabs, and `⌘W` / `Ctrl+W` to close active tabs with adjacent tab auto-focusing and safe reset protection.
+  - Seamless sidebar integration: right-clicking any table and selecting **Query in Console** opens a dedicated `{table}.sql` tab without overwriting active work in other query tabs.
+  - Live editor settings synchronization across all open tabs simultaneously.
 - 🔄 **Real-Time GitHub Releases Update Checker**:
   - Connected the **Check for Updates** button under **Settings -> Appearance** to live GitHub Releases REST API (`/repos/hyzwhu/zqlcrab/releases/latest`).
   - Added robust semantic version comparison logic with prerelease handling.

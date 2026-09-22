@@ -20,7 +20,7 @@ pub use connection_error_dialog::{ConnectionErrorDialog, ConnectionErrorInfo};
 pub use create_table_modal::{CreateTableColumnState, CreateTableModal};
 pub use data_grid::DataGrid;
 pub use explain_panel::{ExplainPanel, ExplainViewMode};
-pub use query_console::{ConsoleBottomTab, QueryConsole};
+pub use query_console::{ConsoleBottomTab, QueryConsole, QueryTabHeader};
 pub use query_history::QueryHistoryView;
 pub use schema_viewer::SchemaViewer;
 pub use settings_view::{SettingsTab, SettingsView};

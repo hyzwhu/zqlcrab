@@ -19,8 +19,8 @@ use crate::db::types::{
 use crate::settings::{SettingsManager, ThemePreference};
 use crate::ui::components::{
     ActivityBar, ActivityNav, AppStatusBar, ConfirmActionKind, ConfirmDialog, ConnectionDialog,
-    ConsoleBottomTab, DataGrid, ExplainViewMode, QueryConsole, QueryHistoryView, SchemaViewer,
-    SettingsTab, SettingsView, Sidebar, SqlReviewModal,
+    ConsoleBottomTab, DataGrid, ExplainViewMode, QueryConsole, QueryHistoryView, QueryTabHeader,
+    SchemaViewer, SettingsTab, SettingsView, Sidebar, SqlReviewModal,
     create_table_modal::{CreateTableColumnState, CreateTableIndexState, CreateTableModal},
     data_grid::GridCellCoord,
 };
@@ -168,6 +168,23 @@ pub struct TableConfirmActionState {
     pub error: Option<String>,
 }
 
+#[derive(Clone)]
+pub struct QueryTab {
+    pub id: Uuid,
+    pub title: String,
+    pub editor: Entity<EditorState>,
+    pub split_state: Entity<ResizableState>,
+    pub result: Option<Arc<QueryResult>>,
+    pub error: Option<String>,
+    pub explain_plan: Option<ExplainPlan>,
+    pub explain_error: Option<String>,
+    pub is_executing: bool,
+    pub is_explaining: bool,
+    pub execution_time_ms: Option<u64>,
+    pub bottom_tab: ConsoleBottomTab,
+    pub explain_view: ExplainViewMode,
+}
+
 pub struct CrabStudioApp {
     manager: ConnectionManager,
     saved_connections: Vec<ConnectionConfig>,
@@ -188,18 +205,11 @@ pub struct CrabStudioApp {
     connection_error_copied: bool,
     connection_error_is_retrying: bool,
 
-    // Query console state
-    query_editor: Entity<EditorState>,
+    // Multi-tab query console state
+    query_tabs: Vec<QueryTab>,
+    active_query_tab_id: Uuid,
+    query_tab_counter: usize,
     sql_metadata_cache: Arc<RwLock<crate::db::autocomplete::SqlMetadataCache>>,
-    console_split: Entity<ResizableState>,
-    console_result: Option<Arc<QueryResult>>,
-    console_error: Option<String>,
-    explain_plan: Option<ExplainPlan>,
-    explain_error: Option<String>,
-    is_executing_query: bool,
-    is_explaining: bool,
-    console_bottom_tab: ConsoleBottomTab,
-    explain_view: ExplainViewMode,
     status_message: Option<String>,
 
     // History & DataGrid state
@@ -315,10 +325,11 @@ impl CrabStudioApp {
             crate::db::autocomplete::SqlMetadataCache::default(),
         ));
 
-        let query_editor = {
+        let initial_tab_id = Uuid::new_v4();
+        let initial_tab = {
             let cache_ref = sql_metadata_cache.clone();
             let ed_cfg = settings_manager.settings().editor.clone();
-            cx.new(|cx| {
+            let editor = cx.new(|cx| {
                 let mut ed = EditorState::new(window, cx)
                     .language("sql")
                     .soft_wrap(ed_cfg.word_wrap)
@@ -336,9 +347,27 @@ impl CrabStudioApp {
                 let provider = crate::db::autocomplete::SqlCompletionProvider::new(cache_ref);
                 ed.lsp_mut().completion_provider = Some(Rc::new(provider));
                 ed
-            })
+            });
+            let split_state = cx.new(|_cx| ResizableState::default());
+            QueryTab {
+                id: initial_tab_id,
+                title: "Query 1".to_string(),
+                editor,
+                split_state,
+                result: None,
+                error: None,
+                explain_plan: None,
+                explain_error: None,
+                is_executing: false,
+                is_explaining: false,
+                execution_time_ms: None,
+                bottom_tab: ConsoleBottomTab::Results,
+                explain_view: ExplainViewMode::Tree,
+            }
         };
-        let console_split = cx.new(|_cx| ResizableState::default());
+        let query_tabs = vec![initial_tab];
+        let active_query_tab_id = initial_tab_id;
+        let query_tab_counter = 2;
         let sidebar_split = cx.new(|_cx| ResizableState::default());
         let grid_inspector_split = cx.new(|_cx| ResizableState::default());
         let sidebar_conn_filter =
@@ -423,17 +452,10 @@ impl CrabStudioApp {
             connection_error_modal: None,
             connection_error_copied: false,
             connection_error_is_retrying: false,
-            query_editor,
+            query_tabs,
+            active_query_tab_id,
+            query_tab_counter,
             sql_metadata_cache,
-            console_split,
-            console_result: None,
-            console_error: None,
-            explain_plan: None,
-            explain_error: None,
-            is_executing_query: false,
-            is_explaining: false,
-            console_bottom_tab: ConsoleBottomTab::Results,
-            explain_view: ExplainViewMode::Tree,
             status_message: Some("Ready".to_string()),
             history_manager,
             history_filter: String::new(),
@@ -486,6 +508,144 @@ impl CrabStudioApp {
             update_status_msg: None,
             update_check_result: None,
         }
+    }
+
+    /// Get a reference to the active query tab (falling back to first tab if present)
+    pub fn active_query_tab(&self) -> Option<&QueryTab> {
+        self.query_tabs
+            .iter()
+            .find(|t| t.id == self.active_query_tab_id)
+            .or_else(|| self.query_tabs.first())
+    }
+
+    /// Get a mutable reference to the active query tab
+    pub fn active_query_tab_mut(&mut self) -> Option<&mut QueryTab> {
+        let id = self.active_query_tab_id;
+        if let Some(pos) = self.query_tabs.iter().position(|t| t.id == id) {
+            return Some(&mut self.query_tabs[pos]);
+        }
+        self.query_tabs.first_mut()
+    }
+
+    /// Factory method to build a new SQL EditorState entity
+    pub fn create_query_editor(
+        &self,
+        initial_sql: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<EditorState> {
+        let cache_ref = self.sql_metadata_cache.clone();
+        let ed_cfg = self.settings_manager.settings().editor.clone();
+        cx.new(|cx| {
+            let mut ed = EditorState::new(window, cx)
+                .language("sql")
+                .soft_wrap(ed_cfg.word_wrap)
+                .line_number(ed_cfg.line_numbers)
+                .tab_size(TabSize {
+                    tab_size: ed_cfg.tab_size,
+                    hard_tabs: false,
+                })
+                .auto_close(ed_cfg.bracket_matching);
+            if !initial_sql.is_empty() {
+                ed.set_value(initial_sql, window, cx);
+            }
+            let provider = crate::db::autocomplete::SqlCompletionProvider::new(cache_ref);
+            ed.lsp_mut().completion_provider = Some(Rc::new(provider));
+            ed
+        })
+    }
+
+    /// Create a new query tab, activate it, and switch to QueryConsole workspace tab
+    pub fn create_query_tab(
+        &mut self,
+        title: Option<String>,
+        initial_sql: Option<&str>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Uuid {
+        let tab_id = Uuid::new_v4();
+        let title = title.unwrap_or_else(|| {
+            let name = format!("Query {}", self.query_tab_counter);
+            self.query_tab_counter += 1;
+            name
+        });
+        let sql = initial_sql.unwrap_or("");
+        let editor = self.create_query_editor(sql, window, cx);
+        let split_state = cx.new(|_cx| ResizableState::default());
+
+        let tab = QueryTab {
+            id: tab_id,
+            title,
+            editor,
+            split_state,
+            result: None,
+            error: None,
+            explain_plan: None,
+            explain_error: None,
+            is_executing: false,
+            is_explaining: false,
+            execution_time_ms: None,
+            bottom_tab: ConsoleBottomTab::Results,
+            explain_view: ExplainViewMode::Tree,
+        };
+        self.query_tabs.push(tab);
+        self.active_query_tab_id = tab_id;
+        self.active_tab = WorkspaceTab::QueryConsole;
+        self.active_nav = ActivityNav::Console;
+        cx.notify();
+        tab_id
+    }
+
+    /// Switch active query tab by UUID
+    pub fn switch_query_tab(&mut self, tab_id: Uuid, cx: &mut Context<Self>) {
+        if self.query_tabs.iter().any(|t| t.id == tab_id) {
+            self.active_query_tab_id = tab_id;
+            self.active_tab = WorkspaceTab::QueryConsole;
+            cx.notify();
+        }
+    }
+
+    /// Close a query tab. If it is the last tab, reset it to a clean empty state.
+    pub fn close_query_tab(&mut self, tab_id: Uuid, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(idx) = self.query_tabs.iter().position(|t| t.id == tab_id) else {
+            return;
+        };
+
+        if self.query_tabs.len() <= 1 {
+            let tab = &mut self.query_tabs[0];
+            tab.title = "Query 1".to_string();
+            tab.editor.update(cx, |ed, cx| {
+                ed.set_value("", window, cx);
+            });
+            tab.result = None;
+            tab.error = None;
+            tab.explain_plan = None;
+            tab.explain_error = None;
+            tab.execution_time_ms = None;
+            tab.is_executing = false;
+            tab.is_explaining = false;
+            self.status_message = Some("Reset query session".to_string());
+            cx.notify();
+            return;
+        }
+
+        self.query_tabs.remove(idx);
+
+        if self.active_query_tab_id == tab_id {
+            let new_idx = if idx >= self.query_tabs.len() {
+                self.query_tabs.len() - 1
+            } else {
+                idx
+            };
+            self.active_query_tab_id = self.query_tabs[new_idx].id;
+        }
+        cx.notify();
+    }
+
+    /// Close currently active query tab
+    pub fn close_active_query_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let active_id = self.active_query_tab_id;
+        self.close_query_tab(active_id, window, cx);
     }
 
     /// Select and connect to a saved profile
@@ -789,24 +949,30 @@ impl CrabStudioApp {
     /// Synchronize settings into the live SQL query editor instance
     pub fn sync_editor_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let s = self.settings_manager.settings().editor.clone();
-        self.query_editor.update(cx, |ed, cx| {
-            ed.set_soft_wrap(s.word_wrap, window, cx);
-            ed.set_line_number(s.line_numbers, window, cx);
-            ed.set_tab_size(
-                TabSize {
-                    tab_size: s.tab_size,
-                    hard_tabs: false,
-                },
-                cx,
-            );
-            ed.set_auto_close(s.bracket_matching, window, cx);
-        });
+        for tab in &self.query_tabs {
+            tab.editor.update(cx, |ed, cx| {
+                ed.set_soft_wrap(s.word_wrap, window, cx);
+                ed.set_line_number(s.line_numbers, window, cx);
+                ed.set_tab_size(
+                    TabSize {
+                        tab_size: s.tab_size,
+                        hard_tabs: false,
+                    },
+                    cx,
+                );
+                ed.set_auto_close(s.bracket_matching, window, cx);
+            });
+        }
         cx.notify();
     }
 
     /// Execute the query written in the query editor (or currently selected text range if active)
     pub fn run_query(&mut self, window: Option<&mut Window>, cx: &mut Context<Self>) {
-        let editor_read = self.query_editor.read(cx);
+        let Some(active_tab) = self.active_query_tab() else {
+            return;
+        };
+        let tab_id = active_tab.id;
+        let editor_read = active_tab.editor.read(cx);
         let selected_text = editor_read.selected_text().to_string();
         let is_selected_exec = !selected_text.trim().is_empty();
         let mut sql = if is_selected_exec {
@@ -825,9 +991,11 @@ impl CrabStudioApp {
             let formatted = format_sql_with_indent(&sql, settings.editor.tab_size);
             if formatted != sql {
                 if let Some(win) = window {
-                    self.query_editor.update(cx, |editor, cx| {
-                        editor.replace_all(&formatted, win, cx);
-                    });
+                    if let Some(tab) = self.query_tabs.iter_mut().find(|t| t.id == tab_id) {
+                        tab.editor.update(cx, |editor, cx| {
+                            editor.replace_all(&formatted, win, cx);
+                        });
+                    }
                 }
                 sql = formatted;
             }
@@ -842,11 +1010,13 @@ impl CrabStudioApp {
             let is_truncate = upper.starts_with("TRUNCATE");
 
             if is_unbounded_del || is_unbounded_upd || is_drop || is_truncate {
-                self.console_error = Some(
-                    "Safe Mode Protection: Detected destructive or unbounded mutation query without WHERE clause. Execution halted. (Disable Safe Mode in Settings to bypass)."
-                        .to_string(),
-                );
-                self.console_bottom_tab = ConsoleBottomTab::Results;
+                if let Some(tab) = self.query_tabs.iter_mut().find(|t| t.id == tab_id) {
+                    tab.error = Some(
+                        "Safe Mode Protection: Detected destructive or unbounded mutation query without WHERE clause. Execution halted. (Disable Safe Mode in Settings to bypass)."
+                            .to_string(),
+                    );
+                    tab.bottom_tab = ConsoleBottomTab::Results;
+                }
                 self.status_message = Some("Blocked by Safe Mode".to_string());
                 cx.notify();
                 return;
@@ -854,10 +1024,12 @@ impl CrabStudioApp {
         }
 
         let Some(conn) = self.active_connection.clone() else {
-            self.console_error = Some(
-                "No active database connection. Please select or create a connection first."
-                    .to_string(),
-            );
+            if let Some(tab) = self.query_tabs.iter_mut().find(|t| t.id == tab_id) {
+                tab.error = Some(
+                    "No active database connection. Please select or create a connection first."
+                        .to_string(),
+                );
+            }
             cx.notify();
             return;
         };
@@ -909,9 +1081,11 @@ impl CrabStudioApp {
         let conn_name = Some(conn.config.name.clone());
         let db_type = conn.config.db_type;
 
-        self.is_executing_query = true;
-        self.console_error = None;
-        self.console_bottom_tab = ConsoleBottomTab::Results;
+        if let Some(tab) = self.query_tabs.iter_mut().find(|t| t.id == tab_id) {
+            tab.is_executing = true;
+            tab.error = None;
+            tab.bottom_tab = ConsoleBottomTab::Results;
+        }
         self.status_message = Some(if is_selected_exec {
             "Executing selected query...".to_string()
         } else {
@@ -938,8 +1112,6 @@ impl CrabStudioApp {
             };
 
             this.update(cx, |app, cx| {
-                app.is_executing_query = false;
-
                 let hist_item = QueryHistoryItem {
                     id: Uuid::new_v4().to_string(),
                     query_text: sql_for_exec.clone(),
@@ -960,32 +1132,37 @@ impl CrabStudioApp {
                 app.history_manager.record(hist_item);
                 let _ = app.history_manager.save();
 
-                match res {
-                    Ok(qr) => {
-                        let rows = qr.rows.len();
-                        let dur = qr.execution_time_ms.unwrap_or(duration);
-                        if let Some(mut tray) = crate::ui::tray::get_tray_status() {
-                            tray.ping_ms = Some(dur);
-                            tray.memory_mb = crate::ui::tray::get_process_memory_mb();
-                            crate::ui::tray::update_tray_status(Some(tray));
-                        }
-                        let qr_arc = Arc::new(qr);
-                        app.console_result = Some(qr_arc.clone());
-                        app.table_data = Some(qr_arc);
-                        app.grid_selected_cell = None;
-                        app.grid_inspector_open = false;
-                        app.console_error = None;
-                        app.status_message =
-                            Some(format!("Query completed: {rows} rows returned in {dur}ms"));
+                if let Some(tab) = app.query_tabs.iter_mut().find(|t| t.id == tab_id) {
+                    tab.is_executing = false;
+                    tab.execution_time_ms = Some(duration);
 
-                        // Auto explain slow queries (>500ms) if enabled in settings
-                        if auto_explain && dur >= 500 {
-                            app.run_explain(cx);
+                    match res {
+                        Ok(qr) => {
+                            let rows = qr.rows.len();
+                            let dur = qr.execution_time_ms.unwrap_or(duration);
+                            if let Some(mut tray) = crate::ui::tray::get_tray_status() {
+                                tray.ping_ms = Some(dur);
+                                tray.memory_mb = crate::ui::tray::get_process_memory_mb();
+                                crate::ui::tray::update_tray_status(Some(tray));
+                            }
+                            let qr_arc = Arc::new(qr);
+                            tab.result = Some(qr_arc.clone());
+                            app.table_data = Some(qr_arc);
+                            app.grid_selected_cell = None;
+                            app.grid_inspector_open = false;
+                            tab.error = None;
+                            app.status_message =
+                                Some(format!("Query completed: {rows} rows returned in {dur}ms"));
+
+                            // Auto explain slow queries (>500ms) if enabled in settings
+                            if auto_explain && dur >= 500 {
+                                app.run_explain_for_tab(tab_id, cx);
+                            }
                         }
-                    }
-                    Err(err) => {
-                        app.console_error = Some(err.to_string());
-                        app.status_message = Some("Query execution failed".to_string());
+                        Err(err) => {
+                            tab.error = Some(err.to_string());
+                            app.status_message = Some("Query execution failed".to_string());
+                        }
                     }
                 }
                 cx.notify();
@@ -997,22 +1174,39 @@ impl CrabStudioApp {
 
     /// Format the SQL currently in the editor.
     pub fn format_editor_sql(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let sql = self.query_editor.read(cx).value().to_string();
+        let Some(active_tab) = self.active_query_tab() else {
+            return;
+        };
+        let sql = active_tab.editor.read(cx).value().to_string();
         if sql.trim().is_empty() {
             return;
         }
         let tab_size = self.settings_manager.settings().editor.tab_size;
         let formatted = format_sql_with_indent(&sql, tab_size);
-        self.query_editor.update(cx, |editor, cx| {
-            editor.set_value(&formatted, window, cx);
-        });
+        let tab_id = active_tab.id;
+        if let Some(tab) = self.query_tabs.iter_mut().find(|t| t.id == tab_id) {
+            tab.editor.update(cx, |editor, cx| {
+                editor.set_value(&formatted, window, cx);
+            });
+        }
         self.status_message = Some("Formatted SQL".to_string());
         cx.notify();
     }
 
-    /// Run EXPLAIN on the editor SQL (or currently selected SQL) and show the plan panel.
+    /// Run EXPLAIN on the active tab editor SQL (or currently selected SQL) and show the plan panel.
     pub fn run_explain(&mut self, cx: &mut Context<Self>) {
-        let editor_read = self.query_editor.read(cx);
+        if let Some(active_tab) = self.active_query_tab() {
+            let tab_id = active_tab.id;
+            self.run_explain_for_tab(tab_id, cx);
+        }
+    }
+
+    /// Run EXPLAIN on a specific tab's SQL
+    pub fn run_explain_for_tab(&mut self, tab_id: Uuid, cx: &mut Context<Self>) {
+        let Some(target_tab) = self.query_tabs.iter().find(|t| t.id == tab_id) else {
+            return;
+        };
+        let editor_read = target_tab.editor.read(cx);
         let selected_text = editor_read.selected_text().to_string();
         let sql = if !selected_text.trim().is_empty() {
             selected_text
@@ -1024,11 +1218,13 @@ impl CrabStudioApp {
         }
 
         let Some(conn) = self.active_connection.clone() else {
-            self.explain_error = Some(
-                "No active database connection. Please select or create a connection first."
-                    .to_string(),
-            );
-            self.console_bottom_tab = ConsoleBottomTab::Explain;
+            if let Some(tab) = self.query_tabs.iter_mut().find(|t| t.id == tab_id) {
+                tab.explain_error = Some(
+                    "No active database connection. Please select or create a connection first."
+                        .to_string(),
+                );
+                tab.bottom_tab = ConsoleBottomTab::Explain;
+            }
             cx.notify();
             return;
         };
@@ -1039,28 +1235,32 @@ impl CrabStudioApp {
             return;
         }
 
-        self.is_explaining = true;
-        self.explain_error = None;
-        self.console_bottom_tab = ConsoleBottomTab::Explain;
+        if let Some(tab) = self.query_tabs.iter_mut().find(|t| t.id == tab_id) {
+            tab.is_explaining = true;
+            tab.explain_error = None;
+            tab.bottom_tab = ConsoleBottomTab::Explain;
+        }
         self.status_message = Some("Running EXPLAIN…".to_string());
         cx.notify();
 
         cx.spawn(async move |this, cx: &mut AsyncApp| {
             let res = conn.execute_query(&explain_sql).await;
             this.update(cx, |app, cx| {
-                app.is_explaining = false;
-                match res {
-                    Ok(qr) => {
-                        let plan = parse_explain_result(family, &qr);
-                        let nodes = plan.node_count();
-                        app.explain_plan = Some(plan);
-                        app.explain_error = None;
-                        app.status_message = Some(format!("Explain completed: {nodes} nodes"));
-                    }
-                    Err(err) => {
-                        app.explain_plan = None;
-                        app.explain_error = Some(err.to_string());
-                        app.status_message = Some("Explain failed".to_string());
+                if let Some(tab) = app.query_tabs.iter_mut().find(|t| t.id == tab_id) {
+                    tab.is_explaining = false;
+                    match res {
+                        Ok(qr) => {
+                            let plan = parse_explain_result(family, &qr);
+                            let nodes = plan.node_count();
+                            tab.explain_plan = Some(plan);
+                            tab.explain_error = None;
+                            app.status_message = Some(format!("Explain completed: {nodes} nodes"));
+                        }
+                        Err(err) => {
+                            tab.explain_plan = None;
+                            tab.explain_error = Some(err.to_string());
+                            app.status_message = Some("Explain failed".to_string());
+                        }
                     }
                 }
                 cx.notify();
@@ -1073,9 +1273,11 @@ impl CrabStudioApp {
     /// Execute a custom query from quick actions, history replay, or schema inspector
     pub fn execute_custom_sql(&mut self, sql: &str, window: &mut Window, cx: &mut Context<Self>) {
         let sql_str = sql.to_string();
-        self.query_editor.update(cx, |editor, cx| {
-            editor.set_value(&sql_str, window, cx);
-        });
+        if let Some(active_tab) = self.active_query_tab_mut() {
+            active_tab.editor.update(cx, |editor, cx| {
+                editor.set_value(&sql_str, window, cx);
+            });
+        }
         self.active_tab = WorkspaceTab::QueryConsole;
         self.run_query(Some(window), cx);
     }
@@ -1083,18 +1285,27 @@ impl CrabStudioApp {
     /// Load a SQL string into the editor without executing
     pub fn load_sql_into_editor(&mut self, sql: &str, window: &mut Window, cx: &mut Context<Self>) {
         let sql_str = sql.to_string();
-        self.query_editor.update(cx, |editor, cx| {
-            editor.set_value(&sql_str, window, cx);
-        });
+        if let Some(active_tab) = self.active_query_tab_mut() {
+            active_tab.editor.update(cx, |editor, cx| {
+                editor.set_value(&sql_str, window, cx);
+            });
+        }
         self.active_tab = WorkspaceTab::QueryConsole;
         self.status_message = Some("Loaded query into editor".to_string());
         cx.notify();
     }
 
+    /// Get current active QueryResult (either from inspected table or active query tab)
+    pub fn current_data_result(&self) -> Option<Arc<QueryResult>> {
+        self.table_data
+            .clone()
+            .or_else(|| self.active_query_tab().and_then(|t| t.result.clone()))
+    }
+
     /// Export DataGrid results to system clipboard
     pub fn export_grid_data(&mut self, format: ExportFormat, cx: &mut Context<Self>) {
-        let res = self.table_data.as_ref().or(self.console_result.as_ref());
-        let Some(data) = res else {
+        let res_arc = self.current_data_result();
+        let Some(data) = res_arc.as_ref() else {
             self.status_message = Some("No data available to export".to_string());
             cx.notify();
             return;
@@ -1142,8 +1353,8 @@ impl CrabStudioApp {
                 });
             }
         } else {
-            let res = self.table_data.as_ref().or(self.console_result.as_ref());
-            if let Some(res) = res {
+            let res_arc = self.current_data_result();
+            if let Some(res) = res_arc.as_ref() {
                 if let Some(row) = res.rows.get(coord.row_idx) {
                     if let Some(orig_val) = row.get(coord.col_idx) {
                         let eff_val = self.grid_changeset.get_effective_cell_value(
@@ -1179,7 +1390,8 @@ impl CrabStudioApp {
             return;
         }
 
-        let res = self.table_data.as_ref().or(self.console_result.as_ref());
+        let res_arc = self.current_data_result();
+        let res = res_arc.as_ref();
         let col_count = if let Some(r) = res {
             r.columns.len()
         } else if !self.schema_columns.is_empty() {
@@ -1313,7 +1525,8 @@ impl CrabStudioApp {
             return;
         }
 
-        let res = self.table_data.as_ref().or(self.console_result.as_ref());
+        let res_arc = self.current_data_result();
+        let res = res_arc.as_ref();
         let Some(res) = res else {
             return;
         };
@@ -1461,7 +1674,8 @@ impl CrabStudioApp {
         };
         let new_text = self.grid_cell_edit_input.read(cx).value().to_string();
 
-        let res = self.table_data.as_ref().or(self.console_result.as_ref());
+        let res_arc = self.current_data_result();
+        let res = res_arc.as_ref();
         let col_type = res
             .and_then(|r| r.column_types.get(coord.col_idx))
             .map(|s| s.as_str())
@@ -1557,7 +1771,8 @@ impl CrabStudioApp {
             return;
         }
 
-        let res = self.table_data.as_ref().or(self.console_result.as_ref());
+        let res_arc = self.current_data_result();
+        let res = res_arc.as_ref();
         let Some(res) = res else {
             return;
         };
@@ -1599,7 +1814,8 @@ impl CrabStudioApp {
         cx: &mut Context<Self>,
     ) {
         self.grid_changeset.revert_cell(row_idx, col_idx);
-        let res = self.table_data.as_ref().or(self.console_result.as_ref());
+        let res_arc = self.current_data_result();
+        let res = res_arc.as_ref();
         if let Some(res) = res {
             if let Some(row) = res.rows.get(row_idx) {
                 if let Some(orig_val) = row.get(col_idx) {
@@ -1633,7 +1849,8 @@ impl CrabStudioApp {
             cx.notify();
             return;
         }
-        let res = self.table_data.as_ref().or(self.console_result.as_ref());
+        let res_arc = self.current_data_result();
+        let res = res_arc.as_ref();
         let Some(res) = res else {
             return;
         };
@@ -1669,7 +1886,8 @@ impl CrabStudioApp {
                     inp.set_value("", window, cx);
                 });
             } else {
-                let res = self.table_data.as_ref().or(self.console_result.as_ref());
+                let res_arc = self.current_data_result();
+                let res = res_arc.as_ref();
                 if let Some(res) = res {
                     if let Some(row) = res.rows.get(coord.row_idx) {
                         if let Some(orig_val) = row.get(coord.col_idx) {
@@ -1715,7 +1933,10 @@ impl CrabStudioApp {
         let mut schema_name = None;
 
         if table_name.is_none() {
-            let sql = self.query_editor.read(cx).value().to_string();
+            let sql = self
+                .active_query_tab()
+                .map(|t| t.editor.read(cx).value().to_string())
+                .unwrap_or_default();
             if let Some((sch, tbl)) = extract_table_from_sql(&sql) {
                 schema_name = sch;
                 table_name = Some(tbl);
@@ -1740,12 +1961,12 @@ impl CrabStudioApp {
 
         let empty_cols = Vec::new();
         let empty_rows = Vec::new();
-        let (grid_cols, orig_rows) =
-            if let Some(ref res) = self.table_data.as_ref().or(self.console_result.as_ref()) {
-                (&res.columns, &res.rows)
-            } else {
-                (&empty_cols, &empty_rows)
-            };
+        let current_res = self.current_data_result();
+        let (grid_cols, orig_rows) = if let Some(ref res) = current_res.as_ref() {
+            (&res.columns, &res.rows)
+        } else {
+            (&empty_cols, &empty_rows)
+        };
 
         let plan = generate_review_plan(
             &table_name,
@@ -1793,8 +2014,9 @@ impl CrabStudioApp {
         let updates_count = plan.updates_count;
         let deletes_count = plan.deletes_count;
         let reload_sql = if self.active_tab == WorkspaceTab::QueryConsole {
-            let s = self.query_editor.read(cx).value().trim().to_string();
-            if !s.is_empty() { Some(s) } else { None }
+            self.active_query_tab()
+                .map(|t| t.editor.read(cx).value().trim().to_string())
+                .filter(|s| !s.is_empty())
         } else {
             None
         };
@@ -1828,7 +2050,9 @@ impl CrabStudioApp {
                         if let Some(qr) = reloaded {
                             let qr_arc = Arc::new(qr);
                             app.table_data = Some(qr_arc.clone());
-                            app.console_result = Some(qr_arc);
+                            if let Some(tab) = app.active_query_tab_mut() {
+                                tab.result = Some(qr_arc);
+                            }
                         }
                         app.status_message = Some(format!(
                             "Successfully applied {inserts_count} insertion(s), {updates_count} update(s), and {deletes_count} deletion(s)"
@@ -2263,11 +2487,8 @@ impl CrabStudioApp {
         cx: &mut Context<Self>,
     ) {
         self.create_table_modal_open = false;
-        self.query_editor.update(cx, |editor, cx| {
-            editor.set_value(&sql, window, cx);
-        });
-        self.active_tab = WorkspaceTab::QueryConsole;
-        self.status_message = Some("Loaded Create Table DDL into Query Console".to_string());
+        self.create_query_tab(Some("create_table.sql".to_string()), Some(&sql), window, cx);
+        self.status_message = Some("Loaded Create Table DDL into new Query Tab".to_string());
         cx.notify();
     }
 
@@ -2410,13 +2631,16 @@ impl CrabStudioApp {
 
     /// Clear console editor & results
     pub fn clear_console(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.query_editor.update(cx, |editor, cx| {
-            editor.set_value("", window, cx);
-        });
-        self.console_result = None;
-        self.console_error = None;
-        self.explain_plan = None;
-        self.explain_error = None;
+        if let Some(tab) = self.active_query_tab_mut() {
+            tab.editor.update(cx, |editor, cx| {
+                editor.set_value("", window, cx);
+            });
+            tab.result = None;
+            tab.error = None;
+            tab.explain_plan = None;
+            tab.explain_error = None;
+            tab.execution_time_ms = None;
+        }
         cx.notify();
     }
 
@@ -3115,12 +3339,8 @@ impl Render for CrabStudioApp {
                         .unwrap_or(DatabaseFamily::Sqlite);
                     let qualified = table.qualified_name(family);
                     let sql = format!("SELECT * FROM {qualified} LIMIT 100;\n");
-                    this.query_editor.update(cx, |ed, cx| {
-                        ed.set_value(sql, window, cx);
-                    });
-                    this.active_tab = WorkspaceTab::QueryConsole;
-                    this.active_nav = ActivityNav::Console;
-                    cx.notify();
+                    let tab_title = format!("{}.sql", table.name);
+                    this.create_query_tab(Some(tab_title), Some(&sql), window, cx);
                 });
             }
         })
@@ -3416,6 +3636,43 @@ impl Render for CrabStudioApp {
         } else {
             match self.active_tab {
                 WorkspaceTab::QueryConsole => {
+                    let active_query_tab = self.active_query_tab().cloned();
+                    let tab_headers: Vec<QueryTabHeader> = self
+                        .query_tabs
+                        .iter()
+                        .map(|t| QueryTabHeader {
+                            id: t.id,
+                            title: t.title.clone(),
+                            is_executing: t.is_executing,
+                            has_error: t.error.is_some() || t.explain_error.is_some(),
+                        })
+                        .collect();
+                    let active_tab_id = self.active_query_tab_id;
+
+                    let on_select_tab = {
+                        let handle = app_handle.clone();
+                        move |tab_id: Uuid, _: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                this.switch_query_tab(tab_id, cx);
+                            });
+                        }
+                    };
+                    let on_close_tab = {
+                        let handle = app_handle.clone();
+                        move |tab_id: Uuid, window: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                this.close_query_tab(tab_id, window, cx);
+                            });
+                        }
+                    };
+                    let on_new_tab = {
+                        let handle = app_handle.clone();
+                        move |window: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                this.create_query_tab(None, None, window, cx);
+                            });
+                        }
+                    };
                     let on_run = {
                         let handle = app_handle.clone();
                         move |window: &mut Window, cx: &mut App| {
@@ -3452,8 +3709,10 @@ impl Render for CrabStudioApp {
                         let handle = app_handle.clone();
                         move |tab: ConsoleBottomTab, _: &mut Window, cx: &mut App| {
                             handle.update(cx, |this, cx| {
-                                this.console_bottom_tab = tab;
-                                cx.notify();
+                                if let Some(active) = this.active_query_tab_mut() {
+                                    active.bottom_tab = tab;
+                                    cx.notify();
+                                }
                             });
                         }
                     };
@@ -3461,8 +3720,10 @@ impl Render for CrabStudioApp {
                         let handle = app_handle.clone();
                         move |view: ExplainViewMode, _: &mut Window, cx: &mut App| {
                             handle.update(cx, |this, cx| {
-                                this.explain_view = view;
-                                cx.notify();
+                                if let Some(active) = this.active_query_tab_mut() {
+                                    active.explain_view = view;
+                                    cx.notify();
+                                }
                             });
                         }
                     };
@@ -3480,32 +3741,47 @@ impl Render for CrabStudioApp {
                         _ => None,
                     };
 
+                    let active_tab_result =
+                        active_query_tab.as_ref().and_then(|t| t.result.clone());
                     let console_grid = self.build_data_grid(
                         &app_handle,
-                        self.console_result.clone(),
+                        active_tab_result,
                         self.selected_table.clone(),
                         is_read_only,
                     );
 
-                    let console = QueryConsole::new(&self.query_editor, &self.console_split)
-                        .result(self.console_result.clone())
-                        .error(self.console_error.clone())
-                        .explain_plan(self.explain_plan.clone())
-                        .explain_error(self.explain_error.clone())
-                        .executing(self.is_executing_query)
-                        .explaining(self.is_explaining)
-                        .bottom_tab(self.console_bottom_tab)
-                        .explain_view(self.explain_view)
-                        .connection_label(connection_label)
-                        .results_view(console_grid)
-                        .editor_settings(self.settings_manager.settings().editor.clone())
-                        .language(self.settings_manager.settings().language)
-                        .on_run(on_run)
-                        .on_clear(on_clear)
-                        .on_format(on_format)
-                        .on_explain(on_explain)
-                        .on_bottom_tab(on_bottom_tab)
-                        .on_explain_view(on_explain_view);
+                    let active_tab_ref = self
+                        .query_tabs
+                        .iter()
+                        .find(|t| t.id == self.active_query_tab_id)
+                        .or_else(|| self.query_tabs.first())
+                        .expect("at least one query tab must exist");
+
+                    let console =
+                        QueryConsole::new(&active_tab_ref.editor, &active_tab_ref.split_state)
+                            .tabs(tab_headers)
+                            .active_tab_id(Some(active_tab_id))
+                            .result(active_tab_ref.result.clone())
+                            .error(active_tab_ref.error.clone())
+                            .explain_plan(active_tab_ref.explain_plan.clone())
+                            .explain_error(active_tab_ref.explain_error.clone())
+                            .executing(active_tab_ref.is_executing)
+                            .explaining(active_tab_ref.is_explaining)
+                            .bottom_tab(active_tab_ref.bottom_tab)
+                            .explain_view(active_tab_ref.explain_view)
+                            .connection_label(connection_label)
+                            .results_view(console_grid)
+                            .editor_settings(self.settings_manager.settings().editor.clone())
+                            .language(self.settings_manager.settings().language)
+                            .on_select_tab(on_select_tab)
+                            .on_close_tab(on_close_tab)
+                            .on_new_tab(on_new_tab)
+                            .on_run(on_run)
+                            .on_clear(on_clear)
+                            .on_format(on_format)
+                            .on_explain(on_explain)
+                            .on_bottom_tab(on_bottom_tab)
+                            .on_explain_view(on_explain_view);
 
                     let quick_connect_banner = if !is_connected {
                         let mut conn_chips = h_flex().gap_2().items_center().flex_wrap().min_w_0();
@@ -3590,10 +3866,7 @@ impl Render for CrabStudioApp {
                         .into_any_element()
                 }
                 WorkspaceTab::DataGrid => {
-                    let grid_data = self
-                        .table_data
-                        .clone()
-                        .or_else(|| self.console_result.clone());
+                    let grid_data = self.current_data_result();
                     self.build_data_grid(
                         &app_handle,
                         grid_data,
@@ -3686,19 +3959,22 @@ impl Render for CrabStudioApp {
 
         // Footer status bar
         let query_row_count = match self.active_tab {
-            WorkspaceTab::QueryConsole => self.console_result.as_ref().map(|r| r.rows.len()),
-            WorkspaceTab::DataGrid => self
-                .table_data
-                .as_ref()
-                .or(self.console_result.as_ref())
+            WorkspaceTab::QueryConsole => self
+                .active_query_tab()
+                .and_then(|t| t.result.as_ref())
                 .map(|r| r.rows.len()),
+            WorkspaceTab::DataGrid => self.current_data_result().as_ref().map(|r| r.rows.len()),
             WorkspaceTab::Schema => Some(self.schema_columns.len()),
             WorkspaceTab::History => Some(self.history_manager.items().len()),
         };
         let query_duration = self
-            .console_result
-            .as_ref()
-            .and_then(|r| r.execution_time_ms);
+            .active_query_tab()
+            .and_then(|t| t.execution_time_ms)
+            .or_else(|| {
+                self.active_query_tab()
+                    .and_then(|t| t.result.as_ref())
+                    .and_then(|r| r.execution_time_ms)
+            });
 
         let mut status_bar = AppStatusBar::new()
             .connected(is_connected)
@@ -4288,6 +4564,9 @@ impl Render for CrabStudioApp {
                 } else if this.active_nav == ActivityNav::Settings {
                     this.active_nav = ActivityNav::Databases;
                     cx.notify();
+                } else if this.active_tab == WorkspaceTab::QueryConsole && this.query_tabs.len() > 1
+                {
+                    this.close_active_query_tab(window, cx);
                 } else {
                     window.remove_window();
                     #[cfg(not(target_os = "macos"))]
@@ -4305,10 +4584,8 @@ impl Render for CrabStudioApp {
             .on_action(cx.listener(|this, _: &NewConnection, window, cx| {
                 this.open_connection_dialog(window, cx);
             }))
-            .on_action(cx.listener(|this, _: &NewQueryTab, _, cx| {
-                this.active_nav = ActivityNav::Databases;
-                this.active_tab = WorkspaceTab::QueryConsole;
-                cx.notify();
+            .on_action(cx.listener(|this, _: &NewQueryTab, window, cx| {
+                this.create_query_tab(None, None, window, cx);
             }))
             .on_action(cx.listener(|this, _: &RefreshTables, _, cx| {
                 this.refresh_schema(cx);
