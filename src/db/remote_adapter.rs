@@ -93,7 +93,7 @@ impl DatabaseAdapter for RemoteHttpAdapter {
         }
         Ok(ConnectionStatus {
             connected: true,
-            server_version: Some("zqlcrab-gateway/0.1.1".to_string()),
+            server_version: Some("zqlcrab-gateway/0.1.2".to_string()),
             current_database: Some(self.config.database.clone()),
             ping_ms: Some(12),
         })

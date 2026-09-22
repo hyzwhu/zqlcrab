@@ -1552,8 +1552,8 @@ mod tests {
     fn test_settings_view_builder() {
         let settings = AppSettings::default();
         let res = crate::update::UpdateCheckResult::UpToDate {
-            current_version: "0.1.1".to_string(),
-            latest_version: "0.1.1".to_string(),
+            current_version: "0.1.2".to_string(),
+            latest_version: "0.1.2".to_string(),
             checked_time: "12:00:00".to_string(),
         };
         let view = SettingsView::new(settings, SettingsTab::Editor)
