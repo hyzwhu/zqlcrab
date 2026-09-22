@@ -5,6 +5,10 @@ Fast, lightweight, GPU-accelerated database desktop client built with Rust & GPU
 ### 📋 Changelog
 
 #### v0.1.2 Release Highlights:
+- 🗑️ **DataGrid Row Delete Commits by Primary Key (数据浏览按主键删除行)**:
+  - Clicking Delete Row opens the SQL review immediately instead of only marking the row in memory.
+  - PostgreSQL column metadata now includes primary keys, so the generated `DELETE` targets the key instead of every column.
+  - A `DELETE` or `UPDATE` that matches zero rows rolls the transaction back instead of reporting success.
 - 📥 **Comprehensive Data Import Wizard for CSV, TSV & SQL (全面支持 CSV/TSV/SQL 数据导入向导)**:
   - Added native file picker (`rfd`) and file path input supporting `.csv`, `.tsv`, and `.sql` data formats.
   - Automatic CSV format sniffer with delimiter detection (comma, tab, semicolon, pipe), charset encoding detection (UTF-8, GBK/GB18030, UTF-16, Latin-1), and header row recognition.
