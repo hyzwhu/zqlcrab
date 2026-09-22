@@ -980,9 +980,8 @@ impl RenderOnce for DataGrid {
                 Button::new("grid_add_new_row_btn")
                     .outline()
                     .xsmall()
-                    .flex_shrink(1.0)
+                    .flex_shrink_0()
                     .min_w(px(28.0))
-                    .overflow_hidden()
                     .icon(IconName::Plus)
                     .label("New Row")
                     .tooltip("Add a new uncommitted row (⌘N)")
@@ -1004,9 +1003,8 @@ impl RenderOnce for DataGrid {
                     Button::new("grid_duplicate_row_btn")
                         .outline()
                         .xsmall()
-                        .flex_shrink(1.0)
+                        .flex_shrink_0()
                         .min_w(px(28.0))
-                        .overflow_hidden()
                         .icon(IconName::Copy)
                         .label("Duplicate")
                         .tooltip("Duplicate selected row as new row template (⌘D)")
@@ -1033,9 +1031,8 @@ impl RenderOnce for DataGrid {
                         Button::new("tb_discard_row_btn")
                             .outline()
                             .xsmall()
-                            .flex_shrink(1.0)
+                            .flex_shrink_0()
                             .min_w(px(28.0))
-                            .overflow_hidden()
                             .icon(IconName::Trash)
                             .label("Discard Row")
                             .tooltip("Discard this uncommitted new row")
@@ -1053,9 +1050,8 @@ impl RenderOnce for DataGrid {
                         Button::new("tb_del_restore_btn")
                             .ghost()
                             .xsmall()
-                            .flex_shrink(1.0)
+                            .flex_shrink_0()
                             .min_w(px(28.0))
-                            .overflow_hidden()
                             .icon(if is_del {
                                 IconName::Undo
                             } else {
@@ -1237,6 +1233,7 @@ impl RenderOnce for DataGrid {
                     })
                     .children(add_new_row_btn)
                     .children(duplicate_row_btn)
+                    .children(delete_restore_btn)
                     .when_some(selected_info_pill, |this, pill| {
                         this.child(
                             div()
@@ -1245,8 +1242,7 @@ impl RenderOnce for DataGrid {
                                 .overflow_hidden()
                                 .child(pill),
                         )
-                    })
-                    .children(delete_restore_btn),
+                    }),
             )
             .child(
                 h_flex()

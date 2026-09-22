@@ -9,10 +9,12 @@ use crate::db::{
     },
 };
 use async_trait::async_trait;
+use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::Mutex;
 use tokio_postgres::{Client, Config, NoTls, Row, types::Type};
+use uuid::Uuid;
 
 /// Formats a tokio-postgres error, extracting detailed server diagnostics
 /// (severity, message, detail, hint, where, table, column) from `as_db_error()`.
@@ -103,6 +105,26 @@ impl PostgresAdapter {
             }
             if let Ok(val) = row.try_get::<_, String>(idx) {
                 return QueryValue::String(val);
+            }
+        } else if *col_type == Type::TIMESTAMP {
+            if let Ok(val) = row.try_get::<_, NaiveDateTime>(idx) {
+                return QueryValue::DateTime(val.format("%Y-%m-%d %H:%M:%S%.f").to_string());
+            }
+        } else if *col_type == Type::TIMESTAMPTZ {
+            if let Ok(val) = row.try_get::<_, DateTime<FixedOffset>>(idx) {
+                return QueryValue::DateTime(val.format("%Y-%m-%d %H:%M:%S%.f%:z").to_string());
+            }
+        } else if *col_type == Type::DATE {
+            if let Ok(val) = row.try_get::<_, NaiveDate>(idx) {
+                return QueryValue::DateTime(val.format("%Y-%m-%d").to_string());
+            }
+        } else if *col_type == Type::TIME {
+            if let Ok(val) = row.try_get::<_, NaiveTime>(idx) {
+                return QueryValue::DateTime(val.format("%H:%M:%S%.f").to_string());
+            }
+        } else if *col_type == Type::UUID {
+            if let Ok(val) = row.try_get::<_, Uuid>(idx) {
+                return QueryValue::String(val.to_string());
             }
         }
 
@@ -314,10 +336,106 @@ impl DatabaseAdapter for PostgresAdapter {
             .as_ref()
             .ok_or_else(|| DbError::connection("Not connected"))?;
         let client = client_arc.lock().await;
-        client
-            .batch_execute(sql)
-            .await
-            .map_err(|e| DbError::query(format!("PostgreSQL batch execution failed: {}", format_pg_error(&e))))?;
+
+        let statements = crate::db::sql_gen::split_sql_statements(sql);
+        if statements.is_empty() {
+            return Ok(());
+        }
+
+        let mut opened_tx = false;
+        for stmt in &statements {
+            let keyword = first_sql_keyword(stmt);
+            if keyword.eq_ignore_ascii_case("BEGIN") || keyword.eq_ignore_ascii_case("START") {
+                if !opened_tx {
+                    client.batch_execute(stmt).await.map_err(|e| {
+                        DbError::query(format!(
+                            "PostgreSQL batch execution failed: {}",
+                            format_pg_error(&e)
+                        ))
+                    })?;
+                    opened_tx = true;
+                }
+                continue;
+            }
+            if keyword.eq_ignore_ascii_case("COMMIT") {
+                if opened_tx {
+                    client.batch_execute(stmt).await.map_err(|e| {
+                        DbError::query(format!(
+                            "PostgreSQL batch execution failed: {}",
+                            format_pg_error(&e)
+                        ))
+                    })?;
+                    opened_tx = false;
+                }
+                continue;
+            }
+            if keyword.eq_ignore_ascii_case("ROLLBACK") {
+                if opened_tx {
+                    client.batch_execute(stmt).await.map_err(|e| {
+                        DbError::query(format!(
+                            "PostgreSQL batch execution failed: {}",
+                            format_pg_error(&e)
+                        ))
+                    })?;
+                    opened_tx = false;
+                }
+                continue;
+            }
+
+            if !opened_tx {
+                client.batch_execute("BEGIN").await.map_err(|e| {
+                    DbError::query(format!(
+                        "PostgreSQL batch execution failed: {}",
+                        format_pg_error(&e)
+                    ))
+                })?;
+                opened_tx = true;
+            }
+
+            let snippet = crate::db::sql_gen::truncate_sql_snippet(stmt, 180);
+            if crate::db::safety::QuerySafetyValidator::is_result_set_query(stmt) {
+                if let Err(e) = client.query(stmt.as_str(), &[]).await {
+                    let _ = client.batch_execute("ROLLBACK").await;
+                    return Err(DbError::query(format!(
+                        "PostgreSQL batch execution failed [{snippet}]: {}",
+                        format_pg_error(&e)
+                    )));
+                }
+                continue;
+            }
+
+            match client.execute(stmt.as_str(), &[]).await {
+                Ok(affected) => {
+                    // A DELETE/UPDATE that matches nothing used to report success
+                    // while leaving the row in place.
+                    if affected == 0
+                        && (keyword.eq_ignore_ascii_case("DELETE")
+                            || keyword.eq_ignore_ascii_case("UPDATE"))
+                    {
+                        let _ = client.batch_execute("ROLLBACK").await;
+                        return Err(DbError::query(format!(
+                            "Statement matched 0 rows, so the row was not changed. Transaction rolled back.\n{snippet}"
+                        )));
+                    }
+                }
+                Err(e) => {
+                    let _ = client.batch_execute("ROLLBACK").await;
+                    return Err(DbError::query(format!(
+                        "PostgreSQL batch execution failed [{snippet}]: {}",
+                        format_pg_error(&e)
+                    )));
+                }
+            }
+        }
+
+        if opened_tx {
+            client.batch_execute("COMMIT").await.map_err(|e| {
+                DbError::query(format!(
+                    "PostgreSQL batch execution failed: {}",
+                    format_pg_error(&e)
+                ))
+            })?;
+        }
         Ok(())
     }
 
@@ -431,7 +549,26 @@ impl DatabaseAdapter for PostgresAdapter {
         let client = client_arc.lock().await;
 
         let schema_name = schema.unwrap_or("public");
-        let sql = "SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 ORDER BY ordinal_position;";
+        let sql = "SELECT \
+                   c.column_name, \
+                   c.data_type, \
+                   c.is_nullable, \
+                   c.column_default, \
+                   CASE WHEN pk.column_name IS NOT NULL THEN 'YES' ELSE 'NO' END AS is_pk \
+                   FROM information_schema.columns c \
+                   LEFT JOIN ( \
+                       SELECT ku.column_name \
+                       FROM information_schema.table_constraints tc \
+                       JOIN information_schema.key_column_usage ku \
+                         ON tc.constraint_name = ku.constraint_name \
+                        AND tc.table_schema = ku.table_schema \
+                        AND tc.table_name = ku.table_name \
+                       WHERE tc.constraint_type = 'PRIMARY KEY' \
+                         AND tc.table_schema = $1 \
+                         AND tc.table_name = $2 \
+                   ) pk ON c.column_name = pk.column_name \
+                   WHERE c.table_schema = $1 AND c.table_name = $2 \
+                   ORDER BY c.ordinal_position;";
         let rows = client
             .query(sql, &[&schema_name, &table])
             .await
@@ -443,12 +580,13 @@ impl DatabaseAdapter for PostgresAdapter {
             let data_type: String = row.get(1);
             let nullable_str: String = row.get(2);
             let default_val: Option<String> = row.get(3);
+            let is_pk: String = row.get(4);
 
             columns.push(ColumnInfo {
                 name,
                 data_type,
                 is_nullable: nullable_str.eq_ignore_ascii_case("YES"),
-                is_primary_key: false,
+                is_primary_key: is_pk.eq_ignore_ascii_case("YES"),
                 is_auto_increment: default_val
                     .as_deref()
                     .map(|d| d.contains("nextval"))
@@ -473,30 +611,67 @@ impl DatabaseAdapter for PostgresAdapter {
         let client = client_arc.lock().await;
 
         let schema_name = schema.unwrap_or("public");
-        let sql = "SELECT indexname FROM pg_indexes WHERE schemaname = $1 AND tablename = $2;";
+        let sql = "SELECT \
+                   i.relname AS index_name, \
+                   ix.indisunique AS is_unique, \
+                   ix.indisprimary AS is_primary, \
+                   a.attname AS column_name \
+                   FROM pg_class t \
+                   JOIN pg_namespace n ON n.oid = t.relnamespace \
+                   JOIN pg_index ix ON t.oid = ix.indrelid \
+                   JOIN pg_class i ON i.oid = ix.indexrelid \
+                   JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(ix.indkey) \
+                   WHERE n.nspname = $1 AND t.relname = $2 \
+                   ORDER BY i.relname, a.attnum;";
         let rows = client
             .query(sql, &[&schema_name, &table])
             .await
             .map_err(|e| DbError::query(format_pg_error(&e)))?;
 
-        let mut indexes = Vec::new();
+        let mut indexes: Vec<IndexInfo> = Vec::new();
         for row in rows {
             let name: String = row.get(0);
-            indexes.push(IndexInfo {
-                name,
-                table_name: table.to_string(),
-                columns: Vec::new(),
-                is_unique: false,
-                is_primary: false,
-            });
+            let is_unique: bool = row.get(1);
+            let is_primary: bool = row.get(2);
+            let column_name: String = row.get(3);
+
+            if let Some(existing) = indexes.iter_mut().find(|idx| idx.name == name) {
+                existing.columns.push(column_name);
+            } else {
+                indexes.push(IndexInfo {
+                    name,
+                    table_name: table.to_string(),
+                    columns: vec![column_name],
+                    is_unique,
+                    is_primary,
+                });
+            }
         }
         Ok(indexes)
     }
 }
 
+/// First SQL keyword, ignoring leading comments and punctuation.
+fn first_sql_keyword(sql: &str) -> String {
+    let cleaned = crate::db::safety::QuerySafetyValidator::clean_sql(sql);
+    cleaned
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .trim_matches(|c: char| !c.is_ascii_alphanumeric())
+        .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn delete_keyword_ignores_leading_comment() {
+        assert_eq!(first_sql_keyword("-- note\nDELETE FROM t WHERE id = 1"), "DELETE");
+        assert_eq!(first_sql_keyword("START TRANSACTION"), "START");
+        assert_eq!(first_sql_keyword("commit"), "commit");
+    }
 
     #[test]
     fn test_postgres_adapter_initial_state() {

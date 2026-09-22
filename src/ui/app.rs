@@ -921,6 +921,8 @@ impl CrabStudioApp {
             this.update(cx, |app, cx| {
                 app.table_data = data_res.ok().map(Arc::new);
                 // Cache columns for autocomplete
+                let mut cols = cols;
+                ColumnInfo::apply_primary_key_index(&mut cols, &idxs);
                 if let Ok(mut cache) = app.sql_metadata_cache.write() {
                     cache.set_columns_for_table(&tbl, cols.clone());
                 }
@@ -1163,6 +1165,8 @@ impl CrabStudioApp {
                     .flatten();
 
                 this.update(cx, |app, cx| {
+                    let mut cols = cols;
+                    ColumnInfo::apply_primary_key_index(&mut cols, &idxs);
                     if let Ok(mut cache) = app.sql_metadata_cache.write() {
                         cache.set_columns_for_table(&tbl_for_cols, cols.clone());
                     }
@@ -1968,16 +1972,26 @@ impl CrabStudioApp {
         let (updates, deletes, inserts) = self.grid_changeset.change_summary();
         if now_deleted {
             self.status_message = Some(format!(
-                "Marked row #{} for deletion. Total: {updates} update(s), {deletes} deletion(s), {inserts} new row(s)",
+                "Row #{} staged for deletion. Review the DELETE statement to remove it. Total: {updates} update(s), {deletes} deletion(s), {inserts} new row(s)",
                 row_idx + 1
             ));
+            // Staging alone left the row in the database, so open the review
+            // modal immediately and let the user commit the DELETE.
+            self.open_sql_review_modal(cx);
         } else {
             self.status_message = Some(format!(
                 "Restored row #{}. Total: {updates} update(s), {deletes} deletion(s), {inserts} new row(s)",
                 row_idx + 1
             ));
+            if !self.grid_changeset.is_dirty() {
+                self.sql_review_modal_open = false;
+                self.sql_review_plan = None;
+            } else if self.sql_review_modal_open {
+                self.open_sql_review_modal(cx);
+                return;
+            }
+            cx.notify();
         }
-        cx.notify();
     }
 
     /// Discard all staged edits and deletions

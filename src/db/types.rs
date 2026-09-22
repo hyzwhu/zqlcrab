@@ -753,6 +753,30 @@ pub struct ColumnInfo {
     pub description: Option<String>,
 }
 
+impl ColumnInfo {
+    /// If column metadata did not flag a primary key, copy one from a primary index.
+    ///
+    /// Row deletes and updates identify a row by these flags. Without them the
+    /// generated WHERE clause compares every column and can match nothing.
+    pub fn apply_primary_key_index(columns: &mut [ColumnInfo], indexes: &[IndexInfo]) {
+        if columns.iter().any(|c| c.is_primary_key) {
+            return;
+        }
+        let Some(pk) = indexes.iter().find(|idx| idx.is_primary) else {
+            return;
+        };
+        for col in columns.iter_mut() {
+            if pk
+                .columns
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(&col.name))
+            {
+                col.is_primary_key = true;
+            }
+        }
+    }
+}
+
 /// Metadata describing a table or view.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TableInfo {
@@ -813,6 +837,38 @@ pub struct IndexInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn col(name: &str, pk: bool) -> ColumnInfo {
+        ColumnInfo {
+            name: name.into(),
+            data_type: "int".into(),
+            is_nullable: false,
+            is_primary_key: pk,
+            is_auto_increment: false,
+            default_value: None,
+            description: None,
+        }
+    }
+
+    #[test]
+    fn primary_key_flag_falls_back_to_primary_index() {
+        let mut columns = vec![col("id", false), col("name", false)];
+        let indexes = vec![IndexInfo {
+            name: "ecrm_yb_pkey".into(),
+            table_name: "ecrm_yb".into(),
+            columns: vec!["id".into()],
+            is_unique: true,
+            is_primary: true,
+        }];
+        ColumnInfo::apply_primary_key_index(&mut columns, &indexes);
+        assert!(columns[0].is_primary_key);
+        assert!(!columns[1].is_primary_key);
+
+        columns[0].is_primary_key = true;
+        columns[1].is_primary_key = true;
+        ColumnInfo::apply_primary_key_index(&mut columns, &indexes);
+        assert!(columns[1].is_primary_key);
+    }
 
     #[test]
     fn test_database_type_properties_and_family() {
