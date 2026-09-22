@@ -16,11 +16,17 @@ use crate::db::types::{
     ColumnInfo, ConnectionConfig, DatabaseFamily, DatabaseType, IndexInfo, QueryResult, QueryValue,
     SortDirection, TableInfo,
 };
+use crate::db::import::{
+    auto_map_columns, ColumnMapping, CsvDelimiter, CsvImportConfig, CsvPreviewData, CsvSniffer,
+    ErrorPolicy, FileEncoding, ImportExecutor, ImportFormat, ImportProgress, ImportResult,
+    SqlPreviewData,
+};
 use crate::settings::{SettingsManager, ThemePreference};
 use crate::ui::components::{
     ActivityBar, ActivityNav, AppStatusBar, ConfirmActionKind, ConfirmDialog, ConnectionDialog,
-    ConsoleBottomTab, DataGrid, ExplainViewMode, QueryConsole, QueryHistoryView, QueryTabHeader,
-    SchemaViewer, SettingsTab, SettingsView, Sidebar, SqlReviewModal,
+    ConsoleBottomTab, DataGrid, ExplainViewMode, ImportModal, ImportWizardStep, QueryConsole,
+    QueryHistoryView, QueryTabHeader, SchemaViewer, SettingsTab, SettingsView, Sidebar,
+    SqlReviewModal,
     create_table_modal::{CreateTableColumnState, CreateTableIndexState, CreateTableModal},
     data_grid::GridCellCoord,
 };
@@ -77,7 +83,8 @@ gpui_kit::actions!(
         SaveGridChanges,
         DeleteGridRow,
         AddNewRow,
-        DuplicateGridRow
+        DuplicateGridRow,
+        OpenImportModal
     ]
 );
 
@@ -264,6 +271,28 @@ pub struct CrabStudioApp {
     create_table_error: Option<String>,
     create_table_copied: bool,
 
+    // Data Import Wizard state
+    import_modal_open: bool,
+    import_step: ImportWizardStep,
+    import_file_path_input: Entity<InputState>,
+    import_file_path: Option<std::path::PathBuf>,
+    import_format: ImportFormat,
+    import_encoding: FileEncoding,
+    import_delimiter: CsvDelimiter,
+    import_has_headers: bool,
+    import_target_table: Option<String>,
+    import_available_tables: Vec<String>,
+    import_table_columns: Vec<ColumnInfo>,
+    import_csv_preview: Option<CsvPreviewData>,
+    import_sql_preview: Option<SqlPreviewData>,
+    import_mappings: Vec<ColumnMapping>,
+    import_batch_size: usize,
+    import_error_policy: ErrorPolicy,
+    import_is_executing: bool,
+    import_progress: Option<ImportProgress>,
+    import_result: Option<ImportResult>,
+    import_error: Option<String>,
+
     // Settings state
     settings_manager: SettingsManager,
     active_nav: ActivityNav,
@@ -437,6 +466,8 @@ impl CrabStudioApp {
             },
         ];
 
+        let import_file_path_input = cx.new(|cx| InputState::new(window, cx));
+
         let mut history_manager = QueryHistoryManager::new();
         history_manager.set_max_entries(settings_manager.settings().query.history_limit);
 
@@ -504,6 +535,26 @@ impl CrabStudioApp {
             create_table_is_executing: false,
             create_table_error: None,
             create_table_copied: false,
+            import_modal_open: false,
+            import_step: ImportWizardStep::Step1Source,
+            import_file_path_input,
+            import_file_path: None,
+            import_format: ImportFormat::Csv,
+            import_encoding: FileEncoding::Utf8,
+            import_delimiter: CsvDelimiter::Comma,
+            import_has_headers: true,
+            import_target_table: None,
+            import_available_tables: Vec::new(),
+            import_table_columns: Vec::new(),
+            import_csv_preview: None,
+            import_sql_preview: None,
+            import_mappings: Vec::new(),
+            import_batch_size: 500,
+            import_error_policy: ErrorPolicy::Skip,
+            import_is_executing: false,
+            import_progress: None,
+            import_result: None,
+            import_error: None,
             settings_manager,
             active_nav: ActivityNav::Databases,
             active_settings_tab: SettingsTab::Appearance,
@@ -2710,6 +2761,419 @@ impl CrabStudioApp {
         cx.notify();
     }
 
+    /// Open Data Import Wizard Modal
+    pub fn open_import_modal(&mut self, target_table: Option<String>, cx: &mut Context<Self>) {
+        self.import_modal_open = true;
+        self.import_step = ImportWizardStep::Step1Source;
+        self.import_error = None;
+        self.import_result = None;
+        self.import_progress = None;
+        self.import_is_executing = false;
+
+        self.import_available_tables = self
+            .active_tables
+            .iter()
+            .filter(|t| !t.is_view())
+            .map(|t| t.name.clone())
+            .collect();
+
+        let target = target_table
+            .or_else(|| self.selected_table.clone())
+            .or_else(|| self.import_available_tables.first().cloned());
+
+        if let Some(tbl) = target {
+            self.select_import_table(tbl, cx);
+        }
+
+        // If file input already has a path, analyze it
+        let raw_path = self.import_file_path_input.read(cx).value().trim().to_string();
+        if !raw_path.is_empty() {
+            self.inspect_import_file(cx);
+        }
+
+        cx.notify();
+    }
+
+    /// Close Data Import Wizard Modal
+    pub fn close_import_modal(&mut self, cx: &mut Context<Self>) {
+        self.import_modal_open = false;
+        self.import_is_executing = false;
+        self.import_error = None;
+        cx.notify();
+    }
+
+    /// Open native file dialog to browse for import data files
+    pub fn browse_import_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let picked = rfd::FileDialog::new()
+            .add_filter("Data Files (*.csv, *.tsv, *.sql)", &["csv", "tsv", "sql"])
+            .add_filter("CSV Files (*.csv)", &["csv"])
+            .add_filter("TSV Files (*.tsv)", &["tsv"])
+            .add_filter("SQL Scripts (*.sql)", &["sql"])
+            .add_filter("All Files (*.*)", &["*"])
+            .pick_file();
+
+        if let Some(path) = picked {
+            let path_str = path.display().to_string();
+            self.import_file_path_input.update(cx, |inp, cx| {
+                inp.set_value(&path_str, window, cx);
+            });
+            self.import_file_path = Some(path);
+            self.inspect_import_file(cx);
+        }
+    }
+
+    /// Inspect and parse the selected import file
+    pub fn inspect_import_file(&mut self, cx: &mut Context<Self>) {
+        let raw_path = self.import_file_path_input.read(cx).value().trim().to_string();
+        if raw_path.is_empty() {
+            self.import_error = Some("Please enter or select a valid data file path".to_string());
+            cx.notify();
+            return;
+        }
+
+        let path = std::path::PathBuf::from(raw_path);
+        if !path.exists() {
+            self.import_error = Some(format!("File does not exist: {}", path.display()));
+            cx.notify();
+            return;
+        }
+
+        self.import_file_path = Some(path.clone());
+        let ext = path
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        if ext == "sql" {
+            self.import_format = ImportFormat::Sql;
+            match CsvSniffer::inspect_sql_file(&path) {
+                Ok(sql_preview) => {
+                    self.import_sql_preview = Some(sql_preview);
+                    self.import_csv_preview = None;
+                    self.import_error = None;
+                }
+                Err(err) => {
+                    self.import_error = Some(format!("Failed to parse SQL file: {err}"));
+                }
+            }
+        } else {
+            self.import_format = if ext == "tsv" {
+                ImportFormat::Tsv
+            } else {
+                ImportFormat::Csv
+            };
+            match CsvSniffer::inspect_csv_file(
+                &path,
+                Some(self.import_delimiter),
+                Some(self.import_encoding),
+                Some(self.import_has_headers),
+            ) {
+                Ok(csv_preview) => {
+                    self.import_delimiter = csv_preview.delimiter;
+                    self.import_encoding = csv_preview.encoding;
+                    self.import_has_headers = csv_preview.has_headers;
+                    self.import_mappings =
+                        auto_map_columns(&csv_preview.headers, &self.import_table_columns);
+                    self.import_csv_preview = Some(csv_preview);
+                    self.import_sql_preview = None;
+                    self.import_error = None;
+                }
+                Err(err) => {
+                    self.import_error = Some(format!("Failed to parse CSV file: {err}"));
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    /// Select target database table for CSV/TSV import
+    pub fn select_import_table(&mut self, table_name: String, cx: &mut Context<Self>) {
+        self.import_target_table = Some(table_name.clone());
+        let table_info = self
+            .active_tables
+            .iter()
+            .find(|t| t.name == table_name)
+            .cloned();
+        let schema = table_info.as_ref().and_then(|t| t.schema.clone());
+
+        if let Ok(cache) = self.sql_metadata_cache.read() {
+            if let Some(cols) = cache.get_columns_for_table(&table_name) {
+                self.import_table_columns = cols.clone();
+                if let Some(ref preview) = self.import_csv_preview {
+                    self.import_mappings =
+                        auto_map_columns(&preview.headers, &self.import_table_columns);
+                }
+            }
+        }
+
+        if let Some(conn) = self.active_connection.clone() {
+            let tbl = table_name.clone();
+            cx.spawn(async move |this, cx: &mut AsyncApp| {
+                let cols = conn
+                    .list_columns(None, schema.as_deref(), &tbl)
+                    .await
+                    .unwrap_or_default();
+                this.update(cx, |app, cx| {
+                    if app.import_target_table.as_deref() == Some(&tbl) {
+                        app.import_table_columns = cols;
+                        if let Some(ref preview) = app.import_csv_preview {
+                            app.import_mappings =
+                                auto_map_columns(&preview.headers, &app.import_table_columns);
+                        }
+                        cx.notify();
+                    }
+                })
+                .ok();
+            })
+            .detach();
+        }
+        cx.notify();
+    }
+
+    /// Update import delimiter setting
+    pub fn update_import_delimiter(&mut self, delimiter: CsvDelimiter, cx: &mut Context<Self>) {
+        self.import_delimiter = delimiter;
+        if let Some(ref path) = self.import_file_path {
+            if self.import_format != ImportFormat::Sql {
+                if let Ok(csv_preview) = CsvSniffer::inspect_csv_file(
+                    path,
+                    Some(self.import_delimiter),
+                    Some(self.import_encoding),
+                    Some(self.import_has_headers),
+                ) {
+                    self.import_mappings =
+                        auto_map_columns(&csv_preview.headers, &self.import_table_columns);
+                    self.import_csv_preview = Some(csv_preview);
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    /// Update import character encoding setting
+    pub fn update_import_encoding(&mut self, encoding: FileEncoding, cx: &mut Context<Self>) {
+        self.import_encoding = encoding;
+        if let Some(ref path) = self.import_file_path {
+            if self.import_format != ImportFormat::Sql {
+                if let Ok(csv_preview) = CsvSniffer::inspect_csv_file(
+                    path,
+                    Some(self.import_delimiter),
+                    Some(self.import_encoding),
+                    Some(self.import_has_headers),
+                ) {
+                    self.import_mappings =
+                        auto_map_columns(&csv_preview.headers, &self.import_table_columns);
+                    self.import_csv_preview = Some(csv_preview);
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    /// Toggle first line as header row
+    pub fn toggle_import_headers(&mut self, has_headers: bool, cx: &mut Context<Self>) {
+        self.import_has_headers = has_headers;
+        if let Some(ref path) = self.import_file_path {
+            if self.import_format != ImportFormat::Sql {
+                if let Ok(csv_preview) = CsvSniffer::inspect_csv_file(
+                    path,
+                    Some(self.import_delimiter),
+                    Some(self.import_encoding),
+                    Some(self.import_has_headers),
+                ) {
+                    self.import_mappings =
+                        auto_map_columns(&csv_preview.headers, &self.import_table_columns);
+                    self.import_csv_preview = Some(csv_preview);
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    /// Update column-to-field mapping
+    pub fn update_import_mapping(
+        &mut self,
+        source_idx: usize,
+        target_col: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(mapping) = self
+            .import_mappings
+            .iter_mut()
+            .find(|m| m.source_index == source_idx)
+        {
+            mapping.target_column = target_col;
+            cx.notify();
+        }
+    }
+
+    /// Execute the configured import operation in the background with progress streaming
+    pub fn start_import_execution(&mut self, cx: &mut Context<Self>) {
+        let Some(conn) = self.active_connection.clone() else {
+            self.import_error = Some("No active database connection".to_string());
+            cx.notify();
+            return;
+        };
+
+        let Some(path) = self.import_file_path.clone() else {
+            self.import_error = Some("No input file specified".to_string());
+            cx.notify();
+            return;
+        };
+
+        self.import_is_executing = true;
+        self.import_error = None;
+        self.import_result = None;
+        self.import_progress = None;
+        cx.notify();
+
+        let format = self.import_format;
+        let error_policy = self.import_error_policy;
+
+        let (progress_tx, mut progress_rx) =
+            tokio::sync::mpsc::unbounded_channel::<ImportProgress>();
+        let progress_cb = Arc::new(move |prog: ImportProgress| {
+            let _ = progress_tx.send(prog);
+        });
+
+        if format == ImportFormat::Sql {
+            cx.spawn(async move |this, cx: &mut AsyncApp| {
+                let this_prog = this.clone();
+                cx.spawn(async move |cx: &mut AsyncApp| {
+                    while let Some(prog) = progress_rx.recv().await {
+                        let res = this_prog.update(cx, |app, cx| {
+                            app.import_progress = Some(prog);
+                            cx.notify();
+                        });
+                        if res.is_err() {
+                            break;
+                        }
+                    }
+                })
+                .detach();
+
+                let res = ImportExecutor::execute_sql_import(
+                    &conn,
+                    &path,
+                    error_policy,
+                    Some(progress_cb),
+                )
+                .await;
+
+                this.update(cx, |app, cx| {
+                    app.import_is_executing = false;
+                    match res {
+                        Ok(result) => {
+                            let succ = result.total_succeeded;
+                            let fail = result.total_failed;
+                            app.import_result = Some(result);
+                            app.import_step = ImportWizardStep::Step4Done;
+                            app.status_message = Some(format!(
+                                "SQL script import finished: {succ} statements succeeded, {fail} failed"
+                            ));
+                            app.refresh_schema(cx);
+                            cx.notify();
+                        }
+                        Err(err) => {
+                            app.import_error = Some(err.to_string());
+                            app.status_message = Some(format!("Import error: {err}"));
+                            cx.notify();
+                        }
+                    }
+                })
+                .ok();
+            })
+            .detach();
+        } else {
+            let target_table = match self.import_target_table.clone() {
+                Some(tbl) if !tbl.is_empty() => tbl,
+                _ => {
+                    self.import_is_executing = false;
+                    self.import_error = Some("Target database table must be selected".to_string());
+                    cx.notify();
+                    return;
+                }
+            };
+
+            let config = CsvImportConfig {
+                target_table: target_table.clone(),
+                mappings: self.import_mappings.clone(),
+                delimiter: self.import_delimiter,
+                encoding: self.import_encoding,
+                has_headers: self.import_has_headers,
+                batch_size: self.import_batch_size,
+                error_policy,
+            };
+
+            let cols = self.import_table_columns.clone();
+
+            cx.spawn(async move |this, cx: &mut AsyncApp| {
+                let this_prog = this.clone();
+                cx.spawn(async move |cx: &mut AsyncApp| {
+                    while let Some(prog) = progress_rx.recv().await {
+                        let res = this_prog.update(cx, |app, cx| {
+                            app.import_progress = Some(prog);
+                            cx.notify();
+                        });
+                        if res.is_err() {
+                            break;
+                        }
+                    }
+                })
+                .detach();
+
+                let res = ImportExecutor::execute_csv_import(
+                    &conn,
+                    &path,
+                    &config,
+                    &cols,
+                    Some(progress_cb),
+                )
+                .await;
+
+                this.update(cx, |app, cx| {
+                    app.import_is_executing = false;
+                    match res {
+                        Ok(result) => {
+                            let succ = result.total_succeeded;
+                            let fail = result.total_failed;
+                            app.import_result = Some(result);
+                            app.import_step = ImportWizardStep::Step4Done;
+                            app.status_message = Some(format!(
+                                "CSV import complete: {succ} rows inserted, {fail} failed"
+                            ));
+                            app.refresh_schema(cx);
+                            cx.notify();
+                        }
+                        Err(err) => {
+                            app.import_error = Some(err.to_string());
+                            app.status_message = Some(format!("Import error: {err}"));
+                            cx.notify();
+                        }
+                    }
+                })
+                .ok();
+            })
+            .detach();
+        }
+    }
+
+    /// View imported table data in DataGrid
+    pub fn view_imported_table(&mut self, table_name: String, cx: &mut Context<Self>) {
+        self.close_import_modal(cx);
+        if let Some(table) = self
+            .active_tables
+            .iter()
+            .find(|t| t.name == table_name)
+            .cloned()
+        {
+            self.select_table(table, cx);
+            self.active_tab = WorkspaceTab::DataGrid;
+        }
+        cx.notify();
+    }
+
     /// Open new connection dialog
     pub fn open_connection_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.dialog_open = true;
@@ -3204,6 +3668,17 @@ impl CrabStudioApp {
             }
         };
 
+        let on_import = {
+            let handle = app_handle.clone();
+            let cur_tbl = self.selected_table.clone();
+            move |_: &mut Window, cx: &mut App| {
+                let target = cur_tbl.clone();
+                handle.update(cx, |this, cx| {
+                    this.open_import_modal(target, cx);
+                });
+            }
+        };
+
         DataGrid::new(grid_data)
             .table_name(table_name)
             .scroll_handle(self.grid_scroll_handle.clone())
@@ -3222,6 +3697,7 @@ impl CrabStudioApp {
             .on_sort(on_sort)
             .on_page_change(on_page)
             .on_export(on_export)
+            .on_import(on_import)
             .on_select_cell(on_select_cell)
             .on_toggle_inspector(on_toggle_inspector)
             .on_toggle_modal(on_toggle_modal)
@@ -3422,6 +3898,14 @@ impl Render for CrabStudioApp {
             move |table, _, cx| {
                 handle.update(cx, |this, cx| {
                     this.open_drop_table_confirm(table, cx);
+                });
+            }
+        })
+        .on_import_table({
+            let handle = app_handle.clone();
+            move |table, _, cx| {
+                handle.update(cx, |this, cx| {
+                    this.open_import_modal(Some(table.name), cx);
                 });
             }
         })
@@ -4434,6 +4918,157 @@ impl Render for CrabStudioApp {
                 .on_copy(on_copy)
         });
 
+        // Data Import Wizard Modal overlay if open
+        let import_overlay = if self.import_modal_open {
+            let on_close = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.close_import_modal(cx);
+                    });
+                }
+            };
+            let on_browse = {
+                let handle = app_handle.clone();
+                move |window: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.browse_import_file(window, cx);
+                    });
+                }
+            };
+            let on_inspect = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.inspect_import_file(cx);
+                    });
+                }
+            };
+            let on_step = {
+                let handle = app_handle.clone();
+                move |step, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.import_step = step;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_sel_table = {
+                let handle = app_handle.clone();
+                move |tbl: String, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.select_import_table(tbl, cx);
+                    });
+                }
+            };
+            let on_sel_delim = {
+                let handle = app_handle.clone();
+                move |delim, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.update_import_delimiter(delim, cx);
+                    });
+                }
+            };
+            let on_sel_enc = {
+                let handle = app_handle.clone();
+                move |enc, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.update_import_encoding(enc, cx);
+                    });
+                }
+            };
+            let on_tog_hdr = {
+                let handle = app_handle.clone();
+                move |has_hdr, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.toggle_import_headers(has_hdr, cx);
+                    });
+                }
+            };
+            let on_upd_map = {
+                let handle = app_handle.clone();
+                move |src_idx, target_col, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.update_import_mapping(src_idx, target_col, cx);
+                    });
+                }
+            };
+            let on_sel_batch = {
+                let handle = app_handle.clone();
+                move |size, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.import_batch_size = size;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_sel_policy = {
+                let handle = app_handle.clone();
+                move |policy, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.import_error_policy = policy;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_start = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.start_import_execution(cx);
+                    });
+                }
+            };
+            let on_view_tbl = {
+                let handle = app_handle.clone();
+                move |tbl: String, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.view_imported_table(tbl, cx);
+                    });
+                }
+            };
+
+            Some(
+                ImportModal::new(
+                    &self.import_file_path_input,
+                    self.import_step,
+                    self.import_format,
+                    self.import_encoding,
+                    self.import_delimiter,
+                    self.import_has_headers,
+                    self.import_target_table.clone(),
+                    self.import_available_tables.clone(),
+                    self.import_table_columns.clone(),
+                    self.import_mappings.clone(),
+                    self.import_batch_size,
+                    self.import_error_policy,
+                    self.import_is_executing,
+                )
+                .file_path(self.import_file_path.clone())
+                .csv_preview(self.import_csv_preview.clone())
+                .sql_preview(self.import_sql_preview.clone())
+                .progress(self.import_progress.clone())
+                .result(self.import_result.clone())
+                .error(self.import_error.clone())
+                .language(self.settings_manager.settings().language)
+                .on_close(on_close)
+                .on_browse_file(on_browse)
+                .on_inspect_file(on_inspect)
+                .on_change_step(on_step)
+                .on_select_table(on_sel_table)
+                .on_select_delimiter(on_sel_delim)
+                .on_select_encoding(on_sel_enc)
+                .on_toggle_headers(on_tog_hdr)
+                .on_update_mapping(on_upd_map)
+                .on_select_batch_size(on_sel_batch)
+                .on_select_error_policy(on_sel_policy)
+                .on_start_import(on_start)
+                .on_view_table(on_view_tbl),
+            )
+        } else {
+            None
+        };
+
         // Left rail Activity Bar
         let activity_bar =
             ActivityBar::new(self.active_nav, self.settings_manager.settings().language)
@@ -4598,7 +5233,9 @@ impl Render for CrabStudioApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &CloseDialog, _, cx| {
-                if this.connection_error_modal.is_some() {
+                if this.import_modal_open {
+                    this.close_import_modal(cx);
+                } else if this.connection_error_modal.is_some() {
                     this.close_connection_error_modal(cx);
                 } else if this.table_confirm_modal.is_some() {
                     this.table_confirm_modal = None;
@@ -4619,7 +5256,9 @@ impl Render for CrabStudioApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
-                if this.connection_error_modal.is_some() {
+                if this.import_modal_open {
+                    this.close_import_modal(cx);
+                } else if this.connection_error_modal.is_some() {
                     this.close_connection_error_modal(cx);
                 } else if this.table_confirm_modal.is_some() {
                     this.table_confirm_modal = None;
@@ -4651,6 +5290,9 @@ impl Render for CrabStudioApp {
             }))
             .on_action(cx.listener(|_this, _: &Quit, _, cx| {
                 cx.quit();
+            }))
+            .on_action(cx.listener(|this, _: &OpenImportModal, _, cx| {
+                this.open_import_modal(None, cx);
             }))
             .on_action(cx.listener(|this, _: &OpenSettings, _, cx| {
                 this.active_nav = ActivityNav::Settings;
@@ -4776,5 +5418,6 @@ impl Render for CrabStudioApp {
             .children(create_table_overlay)
             .children(table_confirm_overlay)
             .children(conn_error_overlay)
+            .children(import_overlay)
     }
 }

@@ -8,6 +8,7 @@ pub mod explain;
 pub mod export;
 pub mod handle;
 pub mod history;
+pub mod import;
 pub mod manager;
 pub mod mysql;
 pub mod postgres;

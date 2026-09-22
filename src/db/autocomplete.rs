@@ -52,6 +52,10 @@ impl SqlMetadataCache {
             .insert(table_name.to_lowercase(), columns);
     }
 
+    pub fn get_columns_for_table(&self, table_name: &str) -> Option<&Vec<ColumnInfo>> {
+        self.columns_by_table.get(&table_name.to_lowercase())
+    }
+
     pub fn clear(&mut self) {
         self.family = None;
         self.tables.clear();

@@ -233,6 +233,7 @@ pub struct DataGrid {
     on_sort: Option<Rc<dyn Fn(usize, &mut Window, &mut App)>>,
     on_page_change: Option<Rc<dyn Fn(usize, &mut Window, &mut App)>>,
     on_export: Option<Rc<dyn Fn(ExportFormat, &mut Window, &mut App)>>,
+    on_import: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
     on_select_cell: Option<Rc<dyn Fn(GridCellCoord, &mut Window, &mut App)>>,
     on_toggle_inspector: Option<Rc<dyn Fn(bool, &mut Window, &mut App)>>,
     on_toggle_modal: Option<Rc<dyn Fn(bool, &mut Window, &mut App)>>,
@@ -273,6 +274,7 @@ impl DataGrid {
             on_sort: None,
             on_page_change: None,
             on_export: None,
+            on_import: None,
             on_select_cell: None,
             on_toggle_inspector: None,
             on_toggle_modal: None,
@@ -365,6 +367,14 @@ impl DataGrid {
         F: Fn(ExportFormat, &mut Window, &mut App) + 'static,
     {
         self.on_export = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_import<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&mut Window, &mut App) + 'static,
+    {
+        self.on_import = Some(Rc::new(handler));
         self
     }
 
@@ -707,6 +717,22 @@ impl RenderOnce for DataGrid {
                 .child("SQL")
                 .when_some(on_exp, |btn, handler| {
                     btn.on_click(move |_, window, cx| handler(ExportFormat::SqlInsert, window, cx))
+                })
+        };
+
+        let import_btn = {
+            let on_imp = self.on_import.clone();
+            Button::new("grid_import_btn")
+                .ghost()
+                .xsmall()
+                .flex_shrink(1.0)
+                .min_w(px(26.0))
+                .overflow_hidden()
+                .tooltip("Import Data (CSV / SQL)")
+                .icon(IconName::Upload)
+                .child("Import")
+                .when_some(on_imp, |btn, handler| {
+                    btn.on_click(move |_, window, cx| handler(window, cx))
                 })
         };
 
@@ -1240,7 +1266,8 @@ impl RenderOnce for DataGrid {
                             .child(export_csv_btn)
                             .child(export_json_btn)
                             .child(export_md_btn)
-                            .child(export_sql_btn),
+                            .child(export_sql_btn)
+                            .child(import_btn),
                     )
                     .child(
                         div()

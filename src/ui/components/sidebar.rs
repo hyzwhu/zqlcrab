@@ -29,6 +29,7 @@ struct TableActionCallbacks {
     on_query_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_quick_query: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
     on_copy_name: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
+    on_import: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_truncate: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_drop: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
 }
@@ -55,6 +56,7 @@ pub struct Sidebar {
     on_edit_connection: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
     on_duplicate_connection: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
     on_delete_connection: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
+    on_import_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_truncate_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_drop_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_create_table: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
@@ -90,6 +92,7 @@ impl Sidebar {
             on_edit_connection: None,
             on_duplicate_connection: None,
             on_delete_connection: None,
+            on_import_table: None,
             on_truncate_table: None,
             on_drop_table: None,
             on_create_table: None,
@@ -127,6 +130,14 @@ impl Sidebar {
         F: Fn(String, &mut Window, &mut App) + 'static,
     {
         self.on_copy_table_name = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_import_table<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(TableInfo, &mut Window, &mut App) + 'static,
+    {
+        self.on_import_table = Some(Rc::new(handler));
         self
     }
 
@@ -370,6 +381,21 @@ impl Sidebar {
                     }
                 }),
         );
+
+        // Import Data... / 导入数据...
+        let import_handler = actions.on_import.clone();
+        let tbl_import = info.clone();
+        if !is_view {
+            menu = menu.item(
+                PopupMenuItem::new(t("table_menu.import_data", lang))
+                    .icon(IconName::Upload)
+                    .on_click(move |_, window, cx| {
+                        if let Some(ref handler) = import_handler {
+                            handler(tbl_import.clone(), window, cx);
+                        }
+                    }),
+            );
+        }
 
         menu = menu.separator();
 
@@ -933,6 +959,7 @@ impl RenderOnce for Sidebar {
                         on_query_table: self.on_query_table.clone(),
                         on_quick_query: on_quick.clone(),
                         on_copy_name: self.on_copy_table_name.clone(),
+                        on_import: self.on_import_table.clone(),
                         on_truncate: self.on_truncate_table.clone(),
                         on_drop: self.on_drop_table.clone(),
                     };
