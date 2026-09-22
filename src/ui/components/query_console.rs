@@ -29,6 +29,7 @@ use uuid::Uuid;
 pub struct QueryTabHeader {
     pub id: Uuid,
     pub title: String,
+    pub connection_name: Option<String>,
     pub is_executing: bool,
     pub has_error: bool,
 }
@@ -612,6 +613,26 @@ impl RenderOnce for QueryConsole {
                 }
                 tab_item = tab_item.child(title_elem);
 
+                // Optional connection badge if bound
+                if let Some(ref conn_name) = tab.connection_name {
+                    tab_item = tab_item.child(
+                        div()
+                            .text_size(px(10.0))
+                            .px_1()
+                            .rounded_xs()
+                            .bg(ThemeColors::BG_SURFACE_ACTIVE)
+                            .text_color(if is_active {
+                                ThemeColors::PRIMARY_LIGHT
+                            } else {
+                                ThemeColors::TEXT_FAINT
+                            })
+                            .max_w(px(70.0))
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .child(conn_name.clone()),
+                    );
+                }
+
                 // Tab click to select
                 if let Some(ref on_select) = self.on_select_tab {
                     let on_select = on_select.clone();
@@ -690,12 +711,14 @@ mod tests {
         let header = QueryTabHeader {
             id,
             title: "users.sql".to_string(),
+            connection_name: Some("Local MySQL".to_string()),
             is_executing: true,
             has_error: false,
         };
 
         assert_eq!(header.id, id);
         assert_eq!(header.title, "users.sql");
+        assert_eq!(header.connection_name.as_deref(), Some("Local MySQL"));
         assert!(header.is_executing);
         assert!(!header.has_error);
     }

@@ -5,6 +5,11 @@ Fast, lightweight, GPU-accelerated database desktop client built with Rust & GPU
 ### 📋 Changelog
 
 #### v0.1.1 Release Highlights:
+- 🔌 **Per-Tab Connection Binding & Multi-Active Connection Architecture (每个 Query Tab 独立绑定数据库连接 & 连接池隔离)**:
+  - DataGrip/DBeaver style connection decoupling: Query tabs can now independently bind to different database connection profiles (`connection_profile_id`).
+  - Active tab connection badges: Interactive visual badge in each query tab header showing the target database profile name with dynamic styling.
+  - Safe connection routing: `run_query` and `run_explain` automatically route executions through the tab's specifically bound database handle.
+  - Leak-free lifecycle management: Tab closures cleanly release SQL buffers and UI states without abruptly dropping physical pooled connections; graceful app teardown safely drains all active pools via `disconnect_all()`.
 - 📑 **Multi-Tab Query Sessions (多 SQL 查询会话标签页)**:
   - Complete multi-tab SQL workspace architecture: each query tab encapsulates an independent SQL buffer, execution results, error diagnostic banner, execution metrics, and visual EXPLAIN query plan.
   - Asynchronous background query execution isolation: running long or intensive queries tracks execution by session UUID, routing results safely to the originating tab even if the user switches active tabs during query execution.

@@ -172,6 +172,7 @@ pub struct TableConfirmActionState {
 pub struct QueryTab {
     pub id: Uuid,
     pub title: String,
+    pub connection_profile_id: Option<String>,
     pub editor: Entity<EditorState>,
     pub split_state: Entity<ResizableState>,
     pub result: Option<Arc<QueryResult>>,
@@ -352,6 +353,7 @@ impl CrabStudioApp {
             QueryTab {
                 id: initial_tab_id,
                 title: "Query 1".to_string(),
+                connection_profile_id: None,
                 editor,
                 split_state,
                 result: None,
@@ -573,9 +575,12 @@ impl CrabStudioApp {
         let editor = self.create_query_editor(sql, window, cx);
         let split_state = cx.new(|_cx| ResizableState::default());
 
+        let conn_id = self.active_connection.as_ref().map(|c| c.config.id.clone());
+
         let tab = QueryTab {
             id: tab_id,
             title,
+            connection_profile_id: conn_id,
             editor,
             split_state,
             result: None,
@@ -601,6 +606,33 @@ impl CrabStudioApp {
         if self.query_tabs.iter().any(|t| t.id == tab_id) {
             self.active_query_tab_id = tab_id;
             self.active_tab = WorkspaceTab::QueryConsole;
+            cx.notify();
+        }
+    }
+
+    /// Retrieve the effective database connection for a specific tab.
+    /// If the tab has a bound `connection_profile_id` and it matches `self.active_connection`, returns that.
+    /// Otherwise falls back to `self.active_connection`.
+    pub fn connection_for_tab(&self, tab: &QueryTab) -> Option<ActiveConnection> {
+        if let Some(ref bound_id) = tab.connection_profile_id {
+            if let Some(ref conn) = self.active_connection {
+                if &conn.config.id == bound_id {
+                    return Some(conn.clone());
+                }
+            }
+        }
+        self.active_connection.clone()
+    }
+
+    /// Set or change the bound database connection profile for a query tab
+    pub fn set_query_tab_connection(
+        &mut self,
+        tab_id: Uuid,
+        conn_id: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(tab) = self.query_tabs.iter_mut().find(|t| t.id == tab_id) {
+            tab.connection_profile_id = conn_id;
             cx.notify();
         }
     }
@@ -697,9 +729,21 @@ impl CrabStudioApp {
                             .detach();
                         }
                         app.active_connection = Some(conn);
-                        app.settings_manager.settings_mut().last_connection_id = Some(conn_id);
+                        app.settings_manager.settings_mut().last_connection_id =
+                            Some(conn_id.clone());
                         let _ = app.settings_manager.save();
                         app.active_tables = tables_res.clone();
+
+                        // Automatically bind connection to active query tab if it does not have one
+                        if let Some(active_tab) = app
+                            .query_tabs
+                            .iter_mut()
+                            .find(|t| t.id == app.active_query_tab_id)
+                        {
+                            if active_tab.connection_profile_id.is_none() {
+                                active_tab.connection_profile_id = Some(conn_id);
+                            }
+                        }
 
                         // Sync autocomplete metadata cache
                         if let Ok(mut cache) = app.sql_metadata_cache.write() {
@@ -1023,7 +1067,12 @@ impl CrabStudioApp {
             }
         }
 
-        let Some(conn) = self.active_connection.clone() else {
+        let Some(conn) = self
+            .query_tabs
+            .iter()
+            .find(|t| t.id == tab_id)
+            .and_then(|t| self.connection_for_tab(t))
+        else {
             if let Some(tab) = self.query_tabs.iter_mut().find(|t| t.id == tab_id) {
                 tab.error = Some(
                     "No active database connection. Please select or create a connection first."
@@ -1217,7 +1266,12 @@ impl CrabStudioApp {
             return;
         }
 
-        let Some(conn) = self.active_connection.clone() else {
+        let Some(conn) = self
+            .query_tabs
+            .iter()
+            .find(|t| t.id == tab_id)
+            .and_then(|t| self.connection_for_tab(t))
+        else {
             if let Some(tab) = self.query_tabs.iter_mut().find(|t| t.id == tab_id) {
                 tab.explain_error = Some(
                     "No active database connection. Please select or create a connection first."
@@ -3640,11 +3694,20 @@ impl Render for CrabStudioApp {
                     let tab_headers: Vec<QueryTabHeader> = self
                         .query_tabs
                         .iter()
-                        .map(|t| QueryTabHeader {
-                            id: t.id,
-                            title: t.title.clone(),
-                            is_executing: t.is_executing,
-                            has_error: t.error.is_some() || t.explain_error.is_some(),
+                        .map(|t| {
+                            let conn_name = t.connection_profile_id.as_ref().and_then(|id| {
+                                self.saved_connections
+                                    .iter()
+                                    .find(|c| &c.id == id)
+                                    .map(|c| c.name.clone())
+                            });
+                            QueryTabHeader {
+                                id: t.id,
+                                title: t.title.clone(),
+                                connection_name: conn_name,
+                                is_executing: t.is_executing,
+                                has_error: t.error.is_some() || t.explain_error.is_some(),
+                            }
                         })
                         .collect();
                     let active_tab_id = self.active_query_tab_id;
@@ -3728,17 +3791,36 @@ impl Render for CrabStudioApp {
                         }
                     };
 
-                    let connection_label = match (
-                        self.active_connection
-                            .as_ref()
-                            .map(|c| c.config.name.clone()),
-                        self.active_connection
-                            .as_ref()
-                            .map(|c| c.config.database.clone()),
-                    ) {
-                        (Some(name), Some(db)) if !db.is_empty() => Some(format!("{name} / {db}")),
-                        (Some(name), _) => Some(name),
-                        _ => None,
+                    let active_tab_ref = self
+                        .query_tabs
+                        .iter()
+                        .find(|t| t.id == self.active_query_tab_id)
+                        .or_else(|| self.query_tabs.first())
+                        .expect("at least one query tab must exist");
+
+                    let connection_label = match active_tab_ref
+                        .connection_profile_id
+                        .as_ref()
+                        .and_then(|id| self.saved_connections.iter().find(|c| &c.id == id))
+                    {
+                        Some(cfg) if !cfg.database.is_empty() => {
+                            Some(format!("{} / {}", cfg.name, cfg.database))
+                        }
+                        Some(cfg) => Some(cfg.name.clone()),
+                        None => match (
+                            self.active_connection
+                                .as_ref()
+                                .map(|c| c.config.name.clone()),
+                            self.active_connection
+                                .as_ref()
+                                .map(|c| c.config.database.clone()),
+                        ) {
+                            (Some(name), Some(db)) if !db.is_empty() => {
+                                Some(format!("{name} / {db}"))
+                            }
+                            (Some(name), _) => Some(name),
+                            _ => None,
+                        },
                     };
 
                     let active_tab_result =
@@ -3749,13 +3831,6 @@ impl Render for CrabStudioApp {
                         self.selected_table.clone(),
                         is_read_only,
                     );
-
-                    let active_tab_ref = self
-                        .query_tabs
-                        .iter()
-                        .find(|t| t.id == self.active_query_tab_id)
-                        .or_else(|| self.query_tabs.first())
-                        .expect("at least one query tab must exist");
 
                     let console =
                         QueryConsole::new(&active_tab_ref.editor, &active_tab_ref.split_state)

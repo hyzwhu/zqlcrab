@@ -143,17 +143,37 @@ impl ConnectionManager {
 
     /// Disconnect an active connection by its ID.
     pub async fn disconnect(&self, id: &str) -> DbResult<()> {
-        let mut active = self.active_connections.write().await;
-        if let Some(conn) = active.remove(id) {
+        let conn_to_disconnect = {
+            let mut active = self.active_connections.write().await;
+            active.remove(id)
+        };
+        if let Some(conn) = conn_to_disconnect {
             conn.disconnect().await?;
         }
         Ok(())
+    }
+
+    /// Disconnect all active connections gracefully (e.g. on application exit).
+    pub async fn disconnect_all(&self) {
+        let conns = {
+            let mut active = self.active_connections.write().await;
+            active.drain().map(|(_, c)| c).collect::<Vec<_>>()
+        };
+        for conn in conns {
+            let _ = conn.disconnect().await;
+        }
     }
 
     /// Retrieve an active connection handle if connected.
     pub async fn get_active(&self, id: &str) -> Option<Arc<ActiveConnection>> {
         let active = self.active_connections.read().await;
         active.get(id).cloned()
+    }
+
+    /// Retrieve all currently active connection IDs and their handles.
+    pub async fn list_active(&self) -> Vec<(String, Arc<ActiveConnection>)> {
+        let active = self.active_connections.read().await;
+        active.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
     }
 
     /// Check if a connection profile is currently active.
@@ -208,5 +228,23 @@ mod tests {
             .await
             .expect("disconnect should succeed");
         assert!(!manager.is_active(&id).await);
+    }
+
+    #[tokio::test]
+    async fn test_manager_disconnect_all() {
+        let manager = ConnectionManager::new();
+        let cfg1 = ConnectionConfig::sqlite("Test 1", ":memory:");
+        let cfg2 = ConnectionConfig::sqlite("Test 2", ":memory:");
+        let id1 = cfg1.id.clone();
+        let id2 = cfg2.id.clone();
+
+        manager.connect(cfg1).await.expect("connect 1");
+        manager.connect(cfg2).await.expect("connect 2");
+        assert_eq!(manager.list_active().await.len(), 2);
+
+        manager.disconnect_all().await;
+        assert_eq!(manager.list_active().await.len(), 0);
+        assert!(!manager.is_active(&id1).await);
+        assert!(!manager.is_active(&id2).await);
     }
 }
