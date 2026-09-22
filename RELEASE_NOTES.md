@@ -5,10 +5,18 @@ Fast, lightweight, GPU-accelerated database desktop client built with Rust & GPU
 ### 📋 Changelog
 
 #### v0.1.2 Release Highlights:
+- 📥 **Comprehensive Data Import Wizard for CSV, TSV & SQL (全面支持 CSV/TSV/SQL 数据导入向导)**:
+  - Added native file picker (`rfd`) and file path input supporting `.csv`, `.tsv`, and `.sql` data formats.
+  - Automatic CSV format sniffer with delimiter detection (comma, tab, semicolon, pipe), charset encoding detection (UTF-8, GBK/GB18030, UTF-16, Latin-1), and header row recognition.
+  - Live data preview table with intelligent column-to-target field auto-mapping (exact, snake_case, camelCase, case-insensitive).
+  - High-performance chunked batch insertion with real-time throughput metrics (rows/sec, progress percentage, elapsed time).
+  - Configurable error policies: skip row, abort on error, or isolated row-by-row fallback insertion with downloadable error logs.
+  - Accessible via Sidebar table context menu ("Import Data...") and DataGrid toolbar.
 - 🚀 **Multi-Statement Batch Script Execution & Rich PG Diagnostics (多语句批量执行与PostgreSQL诊断信息)**:
   - Added robust SQL tokenizer `split_sql_statements` properly handling single quotes, double quotes, MySQL backticks, PostgreSQL dollar quotes (`$$...$$`), and nested comments.
   - Enabled sequential multi-statement execution across PostgreSQL, MySQL, and SQLite adapters without failing on semicolons or prepared statement limitations.
   - Implemented detailed PostgreSQL diagnostic error formatting (`format_pg_error`), unpacking server severity, error message, detail, hint, table, and column rather than obscure `db error`.
+  - Added UTF-8 character boundary safe truncation (`truncate_sql_snippet`) across all adapters, completely resolving panics when executing SQL scripts containing Chinese comments and multi-byte characters.
 - 🏷️ **Dialect-Aware Column Data Type Selection & Presets (新建表方言数据类型下拉选择与预设)**:
   - Added dialect-aware data type selectors in `CreateTableModal` with dedicated dropdown menus populated with standard types for PostgreSQL, MySQL, and SQLite while retaining direct text editability for custom types and length parameters.
   - Enhanced column header quick presets tailored to the active database family.
