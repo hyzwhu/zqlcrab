@@ -206,11 +206,7 @@ impl DatabaseAdapter for SqliteAdapter {
 
         for (idx, stmt_str) in statements.iter().enumerate() {
             let is_select = crate::db::safety::QuerySafetyValidator::is_result_set_query(stmt_str);
-            let snippet = if stmt_str.len() > 60 {
-                format!("{}...", &stmt_str[..60].replace('\n', " "))
-            } else {
-                stmt_str.replace('\n', " ")
-            };
+            let snippet = crate::db::sql_gen::truncate_sql_snippet(stmt_str, 60);
 
             if is_select {
                 let mut stmt = conn

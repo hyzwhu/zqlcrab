@@ -213,11 +213,7 @@ impl DatabaseAdapter for PostgresAdapter {
 
         for (idx, stmt) in statements.iter().enumerate() {
             let is_select = crate::db::safety::QuerySafetyValidator::is_result_set_query(stmt);
-            let snippet = if stmt.len() > 60 {
-                format!("{}...", &stmt[..60].replace('\n', " "))
-            } else {
-                stmt.replace('\n', " ")
-            };
+            let snippet = crate::db::sql_gen::truncate_sql_snippet(stmt, 60);
 
             if is_select {
                 let rows = client

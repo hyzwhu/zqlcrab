@@ -720,6 +720,19 @@ pub fn split_sql_statements(sql: &str) -> Vec<String> {
     statements
 }
 
+/// Safely truncates a SQL statement into a single-line preview snippet of at most `max_chars` characters,
+/// respecting UTF-8 character boundaries.
+pub fn truncate_sql_snippet(stmt: &str, max_chars: usize) -> String {
+    let single_line = stmt.trim().replace('\n', " ").replace('\r', " ");
+    let mut chars = single_line.chars();
+    let prefix: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        format!("{prefix}...")
+    } else {
+        prefix
+    }
+}
+
 /// Returns standard data types for each database dialect
 pub fn dialect_data_types(family: DatabaseFamily) -> &'static [&'static str] {
     match family {
@@ -2077,5 +2090,50 @@ mod tests {
 
         let pg_presets = dialect_presets(DatabaseFamily::Postgres);
         assert!(pg_presets.contains(&"TIMESTAMPTZ"));
+    }
+
+    #[test]
+    fn test_truncate_sql_snippet_utf8_char_boundary() {
+        let sql = r#"COMMENT ON COLUMN "public"."lato_report"."created_at" IS '创建时间';"#;
+        // Byte 58 is where '创' begins; byte 60 falls inside '创' (bytes 58..61).
+        // Ensure truncate_sql_snippet does not panic and truncates cleanly at char boundary.
+        let snippet = truncate_sql_snippet(sql, 60);
+        assert!(snippet.ends_with("..."));
+        assert!(snippet.starts_with("COMMENT ON COLUMN"));
+        assert!(snippet.contains("创建"));
+
+        // When max_chars is larger than character length, it should not truncate
+        let short = "SELECT 1;";
+        assert_eq!(truncate_sql_snippet(short, 60), "SELECT 1;");
+    }
+
+    #[test]
+    fn test_split_sql_statements_with_chinese_comments() {
+        let sql = r#"CREATE TABLE "public"."lato_report" (
+ "id" SERIAL PRIMARY KEY,
+ "name" VARCHAR(20) NOT NULL,
+ "title" VARCHAR(30) NOT NULL,
+ "url" VARCHAR(64) NOT NULL,
+ "created_at" TIMESTAMP NOT NULL,
+ "updated_at" TIMESTAMP NOT NULL,
+ "pub_time" TIMESTAMP NOT NULL
+);
+
+COMMENT ON COLUMN "public"."lato_report"."id" IS '自增id';
+COMMENT ON COLUMN "public"."lato_report"."name" IS '名字';
+COMMENT ON COLUMN "public"."lato_report"."title" IS '标题';
+COMMENT ON COLUMN "public"."lato_report"."url" IS '链接';
+COMMENT ON COLUMN "public"."lato_report"."created_at" IS '创建时间';
+COMMENT ON COLUMN "public"."lato_report"."updated_at" IS '修改时间';
+COMMENT ON COLUMN "public"."lato_report"."pub_time" IS '发表时间';
+
+CREATE UNIQUE INDEX "uk_name_title" ON "public"."lato_report" ("name", "title");"#;
+
+        let stmts = split_sql_statements(sql);
+        assert_eq!(stmts.len(), 9);
+        for stmt in &stmts {
+            let snippet = truncate_sql_snippet(stmt, 60);
+            assert!(!snippet.is_empty());
+        }
     }
 }
