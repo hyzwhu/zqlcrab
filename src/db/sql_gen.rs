@@ -543,6 +543,264 @@ pub fn column_matches_index_spec(item: &str, col_name: &str) -> bool {
     }
 }
 
+/// Splits a SQL script into individual executable statements, properly handling:
+/// - Single quotes `'...'` and escaped single quotes `''`
+/// - Double quotes `"..."` and escaped double quotes `""`
+/// - MySQL backticks `` `...` ``
+/// - PostgreSQL dollar quotes `$$...$$` or `$tag$...$tag$`
+/// - Line comments `-- ...\n`
+/// - Block comments `/* ... */` (including nested block comments)
+pub fn split_sql_statements(sql: &str) -> Vec<String> {
+    let mut statements = Vec::new();
+    let mut current = String::new();
+    let chars: Vec<char> = sql.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+
+    enum State {
+        Normal,
+        SingleQuote,
+        DoubleQuote,
+        Backtick,
+        DollarQuote(String),
+        LineComment,
+        BlockComment(usize),
+    }
+
+    let mut state = State::Normal;
+
+    while i < len {
+        let ch = chars[i];
+        let next_ch = if i + 1 < len { Some(chars[i + 1]) } else { None };
+
+        match &mut state {
+            State::Normal => {
+                if ch == '-' && next_ch == Some('-') {
+                    state = State::LineComment;
+                    current.push(ch);
+                    current.push('-');
+                    i += 2;
+                } else if ch == '/' && next_ch == Some('*') {
+                    state = State::BlockComment(1);
+                    current.push(ch);
+                    current.push('*');
+                    i += 2;
+                } else if ch == '\'' {
+                    state = State::SingleQuote;
+                    current.push(ch);
+                    i += 1;
+                } else if ch == '"' {
+                    state = State::DoubleQuote;
+                    current.push(ch);
+                    i += 1;
+                } else if ch == '`' {
+                    state = State::Backtick;
+                    current.push(ch);
+                    i += 1;
+                } else if ch == '$' {
+                    // Check for dollar-quoted tag in PostgreSQL: $[a-zA-Z0-9_]*$
+                    let mut tag_end = None;
+                    for j in (i + 1)..len {
+                        let c = chars[j];
+                        if c == '$' {
+                            tag_end = Some(j);
+                            break;
+                        } else if !c.is_alphanumeric() && c != '_' {
+                            break;
+                        }
+                    }
+                    if let Some(end_idx) = tag_end {
+                        let tag: String = chars[i..=end_idx].iter().collect();
+                        current.push_str(&tag);
+                        i = end_idx + 1;
+                        state = State::DollarQuote(tag);
+                    } else {
+                        current.push(ch);
+                        i += 1;
+                    }
+                } else if ch == ';' {
+                    let trimmed = current.trim();
+                    if !trimmed.is_empty() {
+                        statements.push(trimmed.to_string());
+                    }
+                    current.clear();
+                    i += 1;
+                } else {
+                    current.push(ch);
+                    i += 1;
+                }
+            }
+            State::LineComment => {
+                current.push(ch);
+                i += 1;
+                if ch == '\n' {
+                    state = State::Normal;
+                }
+            }
+            State::BlockComment(depth) => {
+                if ch == '/' && next_ch == Some('*') {
+                    *depth += 1;
+                    current.push('/');
+                    current.push('*');
+                    i += 2;
+                } else if ch == '*' && next_ch == Some('/') {
+                    *depth -= 1;
+                    current.push('*');
+                    current.push('/');
+                    i += 2;
+                    if *depth == 0 {
+                        state = State::Normal;
+                    }
+                } else {
+                    current.push(ch);
+                    i += 1;
+                }
+            }
+            State::SingleQuote => {
+                current.push(ch);
+                i += 1;
+                if ch == '\'' {
+                    if i < len && chars[i] == '\'' {
+                        // Escaped ''
+                        current.push('\'');
+                        i += 1;
+                    } else {
+                        state = State::Normal;
+                    }
+                }
+            }
+            State::DoubleQuote => {
+                current.push(ch);
+                i += 1;
+                if ch == '"' {
+                    if i < len && chars[i] == '"' {
+                        // Escaped ""
+                        current.push('"');
+                        i += 1;
+                    } else {
+                        state = State::Normal;
+                    }
+                }
+            }
+            State::Backtick => {
+                current.push(ch);
+                i += 1;
+                if ch == '`' {
+                    if i < len && chars[i] == '`' {
+                        // Escaped ``
+                        current.push('`');
+                        i += 1;
+                    } else {
+                        state = State::Normal;
+                    }
+                }
+            }
+            State::DollarQuote(tag) => {
+                let tag_len = tag.chars().count();
+                if i + tag_len <= len {
+                    let slice: String = chars[i..i + tag_len].iter().collect();
+                    if slice == *tag {
+                        current.push_str(&slice);
+                        i += tag_len;
+                        state = State::Normal;
+                        continue;
+                    }
+                }
+                current.push(ch);
+                i += 1;
+            }
+        }
+    }
+
+    let trimmed = current.trim();
+    if !trimmed.is_empty() {
+        statements.push(trimmed.to_string());
+    }
+
+    statements
+}
+
+/// Returns standard data types for each database dialect
+pub fn dialect_data_types(family: DatabaseFamily) -> &'static [&'static str] {
+    match family {
+        DatabaseFamily::Postgres => &[
+            "SERIAL",
+            "BIGSERIAL",
+            "INTEGER",
+            "BIGINT",
+            "SMALLINT",
+            "VARCHAR(255)",
+            "TEXT",
+            "BOOLEAN",
+            "TIMESTAMPTZ",
+            "TIMESTAMP",
+            "DATE",
+            "TIME",
+            "NUMERIC(10,2)",
+            "DOUBLE PRECISION",
+            "REAL",
+            "JSONB",
+            "UUID",
+            "BYTEA",
+        ],
+        DatabaseFamily::MySql => &[
+            "INT",
+            "BIGINT",
+            "TINYINT",
+            "SMALLINT",
+            "VARCHAR(255)",
+            "TEXT",
+            "LONGTEXT",
+            "DATETIME",
+            "TIMESTAMP",
+            "DATE",
+            "TIME",
+            "DECIMAL(10,2)",
+            "DOUBLE",
+            "FLOAT",
+            "JSON",
+            "BOOLEAN",
+            "BLOB",
+        ],
+        DatabaseFamily::Sqlite => &[
+            "INTEGER",
+            "TEXT",
+            "REAL",
+            "BLOB",
+            "NUMERIC",
+            "BOOLEAN",
+        ],
+    }
+}
+
+/// Returns quick presets for the Create Table modal header
+pub fn dialect_presets(family: DatabaseFamily) -> &'static [&'static str] {
+    match family {
+        DatabaseFamily::Postgres => &[
+            "SERIAL",
+            "BIGINT",
+            "VARCHAR(255)",
+            "TIMESTAMPTZ",
+            "TEXT",
+            "JSONB",
+        ],
+        DatabaseFamily::MySql => &[
+            "INT",
+            "BIGINT",
+            "VARCHAR(255)",
+            "DATETIME",
+            "TEXT",
+            "JSON",
+        ],
+        DatabaseFamily::Sqlite => &[
+            "INTEGER",
+            "TEXT",
+            "REAL",
+            "BLOB",
+        ],
+    }
+}
+
 /// Formats an individual index column expression for DDL generation.
 /// If the expression includes order qualifiers (e.g. `col DESC`), the identifier part is quoted while preserving order.
 /// If already quoted, it is preserved. Otherwise, it is safely quoted with `quote_ident`.
@@ -1756,5 +2014,68 @@ mod tests {
                 .full_script
                 .contains("INSERT INTO `posts` (`title`) VALUES ('New Post');")
         );
+    }
+
+    #[test]
+    fn test_split_sql_statements() {
+        let sql = r#"
+        -- First comment with a semicolon;
+        CREATE TABLE "users" (
+            id SERIAL PRIMARY KEY,
+            name VARCHAR(50) NOT NULL,
+            bio TEXT DEFAULT 'Hello; world!'
+        );
+
+        /* Multi-line comment
+           containing semicolon; inside */
+        COMMENT ON COLUMN "users"."bio" IS 'User''s bio; info';
+
+        CREATE UNIQUE INDEX "uk_name" ON "users" ("name");
+        "#;
+
+        let stmts = split_sql_statements(sql);
+        assert_eq!(stmts.len(), 3);
+        assert!(stmts[0].starts_with("-- First comment with a semicolon;\n        CREATE TABLE \"users\""));
+        assert!(stmts[0].ends_with("DEFAULT 'Hello; world!'\n        )"));
+        assert!(stmts[1].contains("COMMENT ON COLUMN \"users\".\"bio\" IS 'User''s bio; info'"));
+        assert_eq!(stmts[2], "CREATE UNIQUE INDEX \"uk_name\" ON \"users\" (\"name\")");
+    }
+
+    #[test]
+    fn test_split_sql_statements_pg_dollar_quotes() {
+        let sql = r#"
+        CREATE OR REPLACE FUNCTION test_func() RETURNS void AS $$
+        BEGIN
+            SELECT 1;
+            INSERT INTO t VALUES (2);
+        END;
+        $$ LANGUAGE plpgsql;
+
+        SELECT 42;
+        "#;
+
+        let stmts = split_sql_statements(sql);
+        assert_eq!(stmts.len(), 2);
+        assert!(stmts[0].contains("INSERT INTO t VALUES (2);"));
+        assert_eq!(stmts[1], "SELECT 42");
+    }
+
+    #[test]
+    fn test_dialect_data_types_and_presets() {
+        let pg_types = dialect_data_types(DatabaseFamily::Postgres);
+        assert!(pg_types.contains(&"TIMESTAMPTZ"));
+        assert!(pg_types.contains(&"SERIAL"));
+        assert!(!pg_types.contains(&"DATETIME")); // Postgres has no DATETIME
+
+        let mysql_types = dialect_data_types(DatabaseFamily::MySql);
+        assert!(mysql_types.contains(&"DATETIME"));
+        assert!(mysql_types.contains(&"INT"));
+
+        let sqlite_types = dialect_data_types(DatabaseFamily::Sqlite);
+        assert!(sqlite_types.contains(&"INTEGER"));
+        assert!(sqlite_types.contains(&"TEXT"));
+
+        let pg_presets = dialect_presets(DatabaseFamily::Postgres);
+        assert!(pg_presets.contains(&"TIMESTAMPTZ"));
     }
 }

@@ -1,6 +1,9 @@
 //! Create Table modal dialog for visual schema design and DDL execution.
 
-use crate::db::sql_gen::{TableIndexType, column_matches_index_spec, parse_sql_column_list};
+use crate::db::sql_gen::{
+    TableIndexType, column_matches_index_spec, dialect_data_types, dialect_presets,
+    parse_sql_column_list,
+};
 use crate::db::types::DatabaseFamily;
 use crate::ui::theme::ThemeColors;
 use gpui_kit::assets::IconName;
@@ -367,30 +370,9 @@ impl RenderOnce for CreateTableModal {
             });
         }
 
-        // Recommended data type presets for this database family
-        let type_presets: &'static [&'static str] = match self.database_family {
-            DatabaseFamily::Sqlite => &["INTEGER", "TEXT", "REAL", "BOOLEAN", "DATETIME", "BLOB"],
-            DatabaseFamily::Postgres => &[
-                "SERIAL",
-                "INTEGER",
-                "BIGINT",
-                "VARCHAR(255)",
-                "TEXT",
-                "BOOLEAN",
-                "TIMESTAMP",
-                "JSONB",
-            ],
-            DatabaseFamily::MySql => &[
-                "INT",
-                "BIGINT",
-                "VARCHAR(255)",
-                "TEXT",
-                "TINYINT(1)",
-                "DATETIME",
-                "DECIMAL(10,2)",
-                "JSON",
-            ],
-        };
+        // Recommended data type presets and all dialect selectable types for this database family
+        let type_presets = dialect_presets(self.database_family);
+        let all_dialect_types = dialect_data_types(self.database_family);
 
         // Render column rows
         let col_count = self.columns.len();
@@ -476,6 +458,45 @@ impl RenderOnce for CreateTableModal {
                 del_btn = del_btn.disabled(true);
             }
 
+            // Type dropdown selector button for selectable column types
+            let type_menu_id = ElementId::Name(format!("col_type_menu_{idx}").into());
+            let on_quick_type = quick_type_handler.clone();
+            let type_entity = col.data_type.clone();
+
+            let type_dropdown = Button::new(type_menu_id)
+                .ghost()
+                .xsmall()
+                .icon(IconName::ChevronDown)
+                .tooltip("Select data type")
+                .dropdown_menu_with_anchor(Anchor::BottomRight, move |mut menu, _window, cx| {
+                    menu = menu
+                        .max_h(px(260.0))
+                        .min_w(px(160.0))
+                        .scrollable(true)
+                        .label("Data Types");
+
+                    let curr_val = type_entity.read(cx).value().to_string();
+                    for dtype in all_dialect_types {
+                        let is_selected = curr_val.trim().eq_ignore_ascii_case(dtype)
+                            || curr_val
+                                .trim()
+                                .to_uppercase()
+                                .starts_with(&format!("{dtype}("));
+                        let on_qt = on_quick_type.clone();
+                        let dtype_str = dtype.to_string();
+                        menu = menu.item(
+                            PopupMenuItem::new(*dtype)
+                                .checked(is_selected)
+                                .on_click(move |_, window, cx| {
+                                    if let Some(ref handler) = on_qt {
+                                        handler(row_idx, dtype_str.clone(), window, cx);
+                                    }
+                                }),
+                        );
+                    }
+                    menu
+                });
+
             let row = h_flex()
                 .w_full()
                 .items_center()
@@ -503,9 +524,17 @@ impl RenderOnce for CreateTableModal {
                 )
                 // Data Type
                 .child(
-                    div()
-                        .w(px(130.0))
-                        .child(Input::new(&col.data_type).small().w_full()),
+                    h_flex()
+                        .w(px(150.0))
+                        .items_center()
+                        .gap_1()
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .child(Input::new(&col.data_type).small().w_full()),
+                        )
+                        .child(type_dropdown),
                 )
                 // PK Toggle
                 .child(
@@ -1079,7 +1108,7 @@ impl RenderOnce for CreateTableModal {
                                                             .text_color(ThemeColors::TEXT_FAINT)
                                                             .child("Presets:"),
                                                     )
-                                                    .children(type_presets.iter().take(4).enumerate().map(|(p_idx, t)| {
+                                                    .children(type_presets.iter().take(6).enumerate().map(|(p_idx, t)| {
                                                         let mut p_btn = Button::new(("preset_btn", p_idx))
                                                             .ghost()
                                                             .xsmall()
@@ -1112,7 +1141,7 @@ impl RenderOnce for CreateTableModal {
                                     .rounded_t_md()
                                     .child(div().w(px(20.0)).text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("#"))
                                     .child(div().w(px(150.0)).text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("NAME"))
-                                    .child(div().w(px(130.0)).text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("TYPE"))
+                                    .child(div().w(px(150.0)).text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("TYPE"))
                                     .child(div().w(px(42.0)).items_center().justify_center().child(div().text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("PK")))
                                     .child(div().w(px(48.0)).items_center().justify_center().child(div().text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("NULL")))
                                     .child(div().w(px(42.0)).items_center().justify_center().child(div().text_xs().font_weight(FontWeight::BOLD).text_color(ThemeColors::TEXT_MUTED).child("AUTO")))

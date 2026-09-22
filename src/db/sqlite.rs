@@ -189,58 +189,118 @@ impl DatabaseAdapter for SqliteAdapter {
             .lock()
             .map_err(|e| DbError::PoolError(e.to_string()))?;
 
-        let is_select = crate::db::safety::QuerySafetyValidator::is_result_set_query(sql);
+        let statements = crate::db::sql_gen::split_sql_statements(sql);
+        if statements.is_empty() {
+            return Ok(QueryResult {
+                columns: Vec::new(),
+                column_types: Vec::new(),
+                rows: Vec::new(),
+                rows_affected: Some(0),
+                execution_time_ms: Some(start.elapsed().as_millis() as u64),
+            });
+        }
 
-        if is_select {
-            let mut stmt = conn
-                .prepare(sql)
-                .map_err(|e| DbError::query(format!("Failed to prepare query: {e}")))?;
+        let mut last_result: Option<QueryResult> = None;
+        let mut total_affected: u64 = 0;
+        let total_stmts = statements.len();
 
-            let columns: Vec<String> = stmt
-                .column_names()
-                .into_iter()
-                .map(|s| s.to_string())
-                .collect();
-            let col_count = columns.len();
-            let column_types: Vec<String> = vec!["TEXT".to_string(); col_count];
+        for (idx, stmt_str) in statements.iter().enumerate() {
+            let is_select = crate::db::safety::QuerySafetyValidator::is_result_set_query(stmt_str);
+            let snippet = if stmt_str.len() > 60 {
+                format!("{}...", &stmt_str[..60].replace('\n', " "))
+            } else {
+                stmt_str.replace('\n', " ")
+            };
 
-            let mut rows_iter = stmt
-                .query([])
-                .map_err(|e| DbError::query(format!("Failed to execute query: {e}")))?;
+            if is_select {
+                let mut stmt = conn
+                    .prepare(stmt_str)
+                    .map_err(|e| {
+                        if total_stmts > 1 {
+                            DbError::query(format!(
+                                "Statement {}/{} prepare failed [{}]: {e}",
+                                idx + 1,
+                                total_stmts,
+                                snippet
+                            ))
+                        } else {
+                            DbError::query(format!("Failed to prepare query: {e}"))
+                        }
+                    })?;
 
-            let mut rows = Vec::new();
-            while let Some(row) = rows_iter
-                .next()
-                .map_err(|e| DbError::query(e.to_string()))?
-            {
-                let mut row_vals = Vec::with_capacity(col_count);
-                for i in 0..col_count {
-                    let val = row.get_ref(i).map_err(|e| DbError::query(e.to_string()))?;
-                    row_vals.push(Self::convert_value(val));
+                let columns: Vec<String> = stmt
+                    .column_names()
+                    .into_iter()
+                    .map(|s| s.to_string())
+                    .collect();
+                let col_count = columns.len();
+                let column_types: Vec<String> = vec!["TEXT".to_string(); col_count];
+
+                let mut rows_iter = stmt
+                    .query([])
+                    .map_err(|e| {
+                        if total_stmts > 1 {
+                            DbError::query(format!(
+                                "Statement {}/{} execution failed [{}]: {e}",
+                                idx + 1,
+                                total_stmts,
+                                snippet
+                            ))
+                        } else {
+                            DbError::query(format!("Failed to execute query: {e}"))
+                        }
+                    })?;
+
+                let mut rows = Vec::new();
+                while let Some(row) = rows_iter
+                    .next()
+                    .map_err(|e| DbError::query(e.to_string()))?
+                {
+                    let mut row_vals = Vec::with_capacity(col_count);
+                    for i in 0..col_count {
+                        let val = row.get_ref(i).map_err(|e| DbError::query(e.to_string()))?;
+                        row_vals.push(Self::convert_value(val));
+                    }
+                    rows.push(row_vals);
                 }
-                rows.push(row_vals);
+
+                last_result = Some(QueryResult {
+                    columns,
+                    column_types,
+                    rows,
+                    rows_affected: None,
+                    execution_time_ms: None,
+                });
+            } else {
+                let affected = conn
+                    .execute(stmt_str, [])
+                    .map_err(|e| {
+                        if total_stmts > 1 {
+                            DbError::query(format!(
+                                "Statement {}/{} execution failed [{}]: {e}",
+                                idx + 1,
+                                total_stmts,
+                                snippet
+                            ))
+                        } else {
+                            DbError::query(format!("Statement execution error: {e}"))
+                        }
+                    })? as u64;
+                total_affected += affected;
             }
+        }
 
-            let execution_time_ms = start.elapsed().as_millis() as u64;
-            Ok(QueryResult {
-                columns,
-                column_types,
-                rows,
-                rows_affected: None,
-                execution_time_ms: Some(execution_time_ms),
-            })
+        let execution_time_ms = start.elapsed().as_millis() as u64;
+
+        if let Some(mut res) = last_result {
+            res.execution_time_ms = Some(execution_time_ms);
+            Ok(res)
         } else {
-            let affected = conn
-                .execute(sql, [])
-                .map_err(|e| DbError::query(format!("Statement execution error: {e}")))?
-                as u64;
-            let execution_time_ms = start.elapsed().as_millis() as u64;
-
             Ok(QueryResult {
                 columns: Vec::new(),
                 column_types: Vec::new(),
                 rows: Vec::new(),
-                rows_affected: Some(affected),
+                rows_affected: Some(total_affected),
                 execution_time_ms: Some(execution_time_ms),
             })
         }
@@ -897,5 +957,37 @@ mod tests {
             reloaded.rows[1][2],
             QueryValue::String("Second Item".into())
         );
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_execute_query_multi_statements() {
+        let config = ConnectionConfig::sqlite("test_multi_exec", ":memory:");
+        let mut adapter = SqliteAdapter::new(config);
+        adapter.connect().await.expect("connect should succeed");
+
+        let multi_sql = r#"
+            CREATE TABLE multi_test (id INTEGER PRIMARY KEY, name TEXT);
+            INSERT INTO multi_test (name) VALUES ('Alice');
+            INSERT INTO multi_test (name) VALUES ('Bob');
+            SELECT id, name FROM multi_test ORDER BY id;
+        "#;
+
+        let res = adapter
+            .execute_query(multi_sql)
+            .await
+            .expect("multi-statement execute_query should succeed");
+
+        assert_eq!(res.columns, vec!["id".to_string(), "name".to_string()]);
+        assert_eq!(res.rows.len(), 2);
+        assert_eq!(res.rows[0][1], QueryValue::String("Alice".into()));
+        assert_eq!(res.rows[1][1], QueryValue::String("Bob".into()));
+
+        // Also test multi-statement with only DDL/DML
+        let dml_sql = "INSERT INTO multi_test (name) VALUES ('Charlie'); INSERT INTO multi_test (name) VALUES ('David');";
+        let res_dml = adapter
+            .execute_query(dml_sql)
+            .await
+            .expect("multi-statement DML should succeed");
+        assert_eq!(res_dml.rows_affected, Some(2));
     }
 }

@@ -33,7 +33,8 @@ pub use remote_adapter::RemoteHttpAdapter;
 pub use runtime::{run_on_tokio, tokio_runtime};
 pub use safety::QuerySafetyValidator;
 pub use sql_gen::{
-    ColumnDef, CreateTableDef, SqlReviewPlan, generate_create_table_sql, generate_review_plan,
+    ColumnDef, CreateTableDef, SqlReviewPlan, dialect_data_types, dialect_presets,
+    generate_create_table_sql, generate_review_plan, split_sql_statements,
 };
 pub use sqlite::SqliteAdapter;
 pub use types::*;

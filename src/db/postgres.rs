@@ -14,6 +14,36 @@ use std::time::Instant;
 use tokio::sync::Mutex;
 use tokio_postgres::{Client, Config, NoTls, Row, types::Type};
 
+/// Formats a tokio-postgres error, extracting detailed server diagnostics
+/// (severity, message, detail, hint, where, table, column) from `as_db_error()`.
+pub fn format_pg_error(e: &tokio_postgres::Error) -> String {
+    if let Some(db_err) = e.as_db_error() {
+        let severity = db_err.severity();
+        let message = db_err.message();
+        let mut msg = format!("{severity}: {message}");
+        if let Some(detail) = db_err.detail() {
+            msg.push_str(&format!("\nDetail: {detail}"));
+        }
+        if let Some(hint) = db_err.hint() {
+            msg.push_str(&format!("\nHint: {hint}"));
+        }
+        if let Some(where_) = db_err.where_() {
+            msg.push_str(&format!("\nWhere: {where_}"));
+        }
+        if let Some(table) = db_err.table() {
+            msg.push_str(&format!("\nTable: {table}"));
+        }
+        if let Some(column) = db_err.column() {
+            msg.push_str(&format!("\nColumn: {column}"));
+        }
+        msg
+    } else if let Some(source) = std::error::Error::source(e) {
+        format!("{e}: {source}")
+    } else {
+        e.to_string()
+    }
+}
+
 pub struct PostgresAdapter {
     config: ConnectionConfig,
     client: Option<Arc<Mutex<Client>>>,
@@ -144,7 +174,7 @@ impl DatabaseAdapter for PostgresAdapter {
         let row = client
             .query_one("SELECT version(), current_database();", &[])
             .await
-            .map_err(|e| DbError::query(format!("PostgreSQL health check failed: {e}")))?;
+            .map_err(|e| DbError::query(format!("PostgreSQL health check failed: {}", format_pg_error(&e))))?;
 
         let version: String = row.get(0);
         let curr_db: String = row.get(1);
@@ -166,63 +196,117 @@ impl DatabaseAdapter for PostgresAdapter {
             .ok_or_else(|| DbError::connection("Not connected"))?;
         let client = client_arc.lock().await;
 
-        let is_select = crate::db::safety::QuerySafetyValidator::is_result_set_query(sql);
+        let statements = crate::db::sql_gen::split_sql_statements(sql);
+        if statements.is_empty() {
+            return Ok(QueryResult {
+                columns: Vec::new(),
+                column_types: Vec::new(),
+                rows: Vec::new(),
+                rows_affected: Some(0),
+                execution_time_ms: Some(start.elapsed().as_millis() as u64),
+            });
+        }
 
-        if is_select {
-            let rows = client
-                .query(sql, &[])
-                .await
-                .map_err(|e| DbError::query(format!("Query failed: {e}")))?;
+        let mut last_result: Option<QueryResult> = None;
+        let mut total_affected: u64 = 0;
+        let total_stmts = statements.len();
 
-            let columns: Vec<String> = if let Some(first) = rows.first() {
-                first
-                    .columns()
-                    .iter()
-                    .map(|c| c.name().to_string())
-                    .collect()
+        for (idx, stmt) in statements.iter().enumerate() {
+            let is_select = crate::db::safety::QuerySafetyValidator::is_result_set_query(stmt);
+            let snippet = if stmt.len() > 60 {
+                format!("{}...", &stmt[..60].replace('\n', " "))
             } else {
-                Vec::new()
+                stmt.replace('\n', " ")
             };
 
-            let column_types: Vec<String> = if let Some(first) = rows.first() {
-                first
-                    .columns()
-                    .iter()
-                    .map(|c| c.type_().name().to_string())
-                    .collect()
-            } else {
-                Vec::new()
-            };
+            if is_select {
+                let rows = client
+                    .query(stmt.as_str(), &[])
+                    .await
+                    .map_err(|e| {
+                        let err_desc = format_pg_error(&e);
+                        if total_stmts > 1 {
+                            DbError::query(format!(
+                                "Statement {}/{} failed [{}]:\n{}",
+                                idx + 1,
+                                total_stmts,
+                                snippet,
+                                err_desc
+                            ))
+                        } else {
+                            DbError::query(format!("Query failed: {err_desc}"))
+                        }
+                    })?;
 
-            let mut result_rows = Vec::with_capacity(rows.len());
-            for row in &rows {
-                let mut row_vals = Vec::with_capacity(columns.len());
-                for i in 0..columns.len() {
-                    row_vals.push(Self::convert_value(row, i));
+                let columns: Vec<String> = if let Some(first) = rows.first() {
+                    first
+                        .columns()
+                        .iter()
+                        .map(|c| c.name().to_string())
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+
+                let column_types: Vec<String> = if let Some(first) = rows.first() {
+                    first
+                        .columns()
+                        .iter()
+                        .map(|c| c.type_().name().to_string())
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+
+                let mut result_rows = Vec::with_capacity(rows.len());
+                for row in &rows {
+                    let mut row_vals = Vec::with_capacity(columns.len());
+                    for i in 0..columns.len() {
+                        row_vals.push(Self::convert_value(row, i));
+                    }
+                    result_rows.push(row_vals);
                 }
-                result_rows.push(row_vals);
+
+                last_result = Some(QueryResult {
+                    columns,
+                    column_types,
+                    rows: result_rows,
+                    rows_affected: None,
+                    execution_time_ms: None,
+                });
+            } else {
+                let affected = client
+                    .execute(stmt.as_str(), &[])
+                    .await
+                    .map_err(|e| {
+                        let err_desc = format_pg_error(&e);
+                        if total_stmts > 1 {
+                            DbError::query(format!(
+                                "Statement {}/{} failed [{}]:\n{}",
+                                idx + 1,
+                                total_stmts,
+                                snippet,
+                                err_desc
+                            ))
+                        } else {
+                            DbError::query(format!("Execution failed: {err_desc}"))
+                        }
+                    })?;
+                total_affected += affected;
             }
+        }
 
-            let execution_time_ms = start.elapsed().as_millis() as u64;
-            Ok(QueryResult {
-                columns,
-                column_types,
-                rows: result_rows,
-                rows_affected: None,
-                execution_time_ms: Some(execution_time_ms),
-            })
+        let execution_time_ms = start.elapsed().as_millis() as u64;
+
+        if let Some(mut res) = last_result {
+            res.execution_time_ms = Some(execution_time_ms);
+            Ok(res)
         } else {
-            let affected = client
-                .execute(sql, &[])
-                .await
-                .map_err(|e| DbError::query(format!("Execution failed: {e}")))?;
-            let execution_time_ms = start.elapsed().as_millis() as u64;
-
             Ok(QueryResult {
                 columns: Vec::new(),
                 column_types: Vec::new(),
                 rows: Vec::new(),
-                rows_affected: Some(affected),
+                rows_affected: Some(total_affected),
                 execution_time_ms: Some(execution_time_ms),
             })
         }
@@ -237,7 +321,7 @@ impl DatabaseAdapter for PostgresAdapter {
         client
             .batch_execute(sql)
             .await
-            .map_err(|e| DbError::query(format!("PostgreSQL batch execution failed: {e}")))?;
+            .map_err(|e| DbError::query(format!("PostgreSQL batch execution failed: {}", format_pg_error(&e))))?;
         Ok(())
     }
 
@@ -252,7 +336,7 @@ impl DatabaseAdapter for PostgresAdapter {
         let rows = client
             .query(sql, &[])
             .await
-            .map_err(|e| DbError::query(e.to_string()))?;
+            .map_err(|e| DbError::query(format_pg_error(&e)))?;
 
         let mut dbs = Vec::new();
         for row in rows {
@@ -277,7 +361,7 @@ impl DatabaseAdapter for PostgresAdapter {
         let rows = client
             .query(sql, &[])
             .await
-            .map_err(|e| DbError::query(e.to_string()))?;
+            .map_err(|e| DbError::query(format_pg_error(&e)))?;
 
         let mut schemas = Vec::new();
         for row in rows {
@@ -316,7 +400,7 @@ impl DatabaseAdapter for PostgresAdapter {
                 )
                 .await
         }
-        .map_err(|e| DbError::query(e.to_string()))?;
+        .map_err(|e| DbError::query(format_pg_error(&e)))?;
 
         let mut tables = Vec::new();
         for row in rows {
@@ -355,7 +439,7 @@ impl DatabaseAdapter for PostgresAdapter {
         let rows = client
             .query(sql, &[&schema_name, &table])
             .await
-            .map_err(|e| DbError::query(e.to_string()))?;
+            .map_err(|e| DbError::query(format_pg_error(&e)))?;
 
         let mut columns = Vec::new();
         for row in rows {
@@ -397,7 +481,7 @@ impl DatabaseAdapter for PostgresAdapter {
         let rows = client
             .query(sql, &[&schema_name, &table])
             .await
-            .map_err(|e| DbError::query(e.to_string()))?;
+            .map_err(|e| DbError::query(format_pg_error(&e)))?;
 
         let mut indexes = Vec::new();
         for row in rows {
@@ -411,5 +495,17 @@ impl DatabaseAdapter for PostgresAdapter {
             });
         }
         Ok(indexes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_postgres_adapter_initial_state() {
+        let config = ConnectionConfig::postgres("test_pg", "localhost", 5432, "testdb", "postgres", None);
+        let adapter = PostgresAdapter::new(config);
+        assert!(!adapter.is_connected());
     }
 }

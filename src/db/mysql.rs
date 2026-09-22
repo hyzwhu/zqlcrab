@@ -198,69 +198,129 @@ impl DatabaseAdapter for MysqlAdapter {
             .await
             .map_err(|e| DbError::connection(e.to_string()))?;
 
-        let is_select = crate::db::safety::QuerySafetyValidator::is_result_set_query(sql);
+        let statements = crate::db::sql_gen::split_sql_statements(sql);
+        if statements.is_empty() {
+            return Ok(QueryResult {
+                columns: Vec::new(),
+                column_types: Vec::new(),
+                rows: Vec::new(),
+                rows_affected: Some(0),
+                execution_time_ms: Some(start.elapsed().as_millis() as u64),
+            });
+        }
 
-        if is_select {
-            let mut query_result = conn
-                .query_iter(sql)
-                .await
-                .map_err(|e| DbError::query(format!("Query failed: {e}")))?;
+        let mut last_result: Option<QueryResult> = None;
+        let mut total_affected: u64 = 0;
+        let total_stmts = statements.len();
 
-            let columns: Vec<String> = query_result
-                .columns()
-                .map(|cols| cols.iter().map(|c| c.name_str().to_string()).collect())
-                .unwrap_or_default();
-            let col_count = columns.len();
-            let column_types: Vec<String> = query_result
-                .columns()
-                .map(|cols| {
-                    cols.iter()
-                        .map(|c| format!("{:?}", c.column_type()))
-                        .collect()
-                })
-                .unwrap_or_default();
+        for (idx, stmt_str) in statements.iter().enumerate() {
+            let is_select = crate::db::safety::QuerySafetyValidator::is_result_set_query(stmt_str);
+            let snippet = if stmt_str.len() > 60 {
+                format!("{}...", &stmt_str[..60].replace('\n', " "))
+            } else {
+                stmt_str.replace('\n', " ")
+            };
 
-            let col_types: Vec<ColumnType> = query_result
-                .columns()
-                .map(|cols| cols.iter().map(|c| c.column_type()).collect())
-                .unwrap_or_default();
+            if is_select {
+                let mut query_result = conn
+                    .query_iter(stmt_str.as_str())
+                    .await
+                    .map_err(|e| {
+                        if total_stmts > 1 {
+                            DbError::query(format!(
+                                "Statement {}/{} query failed [{}]: {e}",
+                                idx + 1,
+                                total_stmts,
+                                snippet
+                            ))
+                        } else {
+                            DbError::query(format!("Query failed: {e}"))
+                        }
+                    })?;
 
-            let rows_raw = query_result
-                .collect::<mysql_async::Row>()
-                .await
-                .map_err(|e| DbError::query(format!("Failed to collect rows: {e}")))?;
+                let columns: Vec<String> = query_result
+                    .columns()
+                    .map(|cols| cols.iter().map(|c| c.name_str().to_string()).collect())
+                    .unwrap_or_default();
+                let col_count = columns.len();
+                let column_types: Vec<String> = query_result
+                    .columns()
+                    .map(|cols| {
+                        cols.iter()
+                            .map(|c| format!("{:?}", c.column_type()))
+                            .collect()
+                    })
+                    .unwrap_or_default();
 
-            let mut rows = Vec::with_capacity(rows_raw.len());
-            for r in rows_raw {
-                let mut row_vals = Vec::with_capacity(col_count);
-                for i in 0..col_count {
-                    let val: Value = r.get(i).unwrap_or(Value::NULL);
-                    let ct = col_types.get(i).copied();
-                    row_vals.push(Self::convert_typed_value(val, ct));
+                let col_types: Vec<ColumnType> = query_result
+                    .columns()
+                    .map(|cols| cols.iter().map(|c| c.column_type()).collect())
+                    .unwrap_or_default();
+
+                let rows_raw = query_result
+                    .collect::<mysql_async::Row>()
+                    .await
+                    .map_err(|e| {
+                        if total_stmts > 1 {
+                            DbError::query(format!(
+                                "Statement {}/{} collect rows failed [{}]: {e}",
+                                idx + 1,
+                                total_stmts,
+                                snippet
+                            ))
+                        } else {
+                            DbError::query(format!("Failed to collect rows: {e}"))
+                        }
+                    })?;
+
+                let mut rows = Vec::with_capacity(rows_raw.len());
+                for r in rows_raw {
+                    let mut row_vals = Vec::with_capacity(col_count);
+                    for i in 0..col_count {
+                        let val: Value = r.get(i).unwrap_or(Value::NULL);
+                        let ct = col_types.get(i).copied();
+                        row_vals.push(Self::convert_typed_value(val, ct));
+                    }
+                    rows.push(row_vals);
                 }
-                rows.push(row_vals);
+
+                last_result = Some(QueryResult {
+                    columns,
+                    column_types,
+                    rows,
+                    rows_affected: None,
+                    execution_time_ms: None,
+                });
+            } else {
+                conn.query_drop(stmt_str.as_str())
+                    .await
+                    .map_err(|e| {
+                        if total_stmts > 1 {
+                            DbError::query(format!(
+                                "Statement {}/{} execution failed [{}]: {e}",
+                                idx + 1,
+                                total_stmts,
+                                snippet
+                            ))
+                        } else {
+                            DbError::query(format!("Statement execution failed: {e}"))
+                        }
+                    })?;
+                total_affected += conn.affected_rows();
             }
+        }
 
-            let execution_time_ms = start.elapsed().as_millis() as u64;
-            Ok(QueryResult {
-                columns,
-                column_types,
-                rows,
-                rows_affected: None,
-                execution_time_ms: Some(execution_time_ms),
-            })
+        let execution_time_ms = start.elapsed().as_millis() as u64;
+
+        if let Some(mut res) = last_result {
+            res.execution_time_ms = Some(execution_time_ms);
+            Ok(res)
         } else {
-            conn.query_drop(sql)
-                .await
-                .map_err(|e| DbError::query(format!("Statement execution failed: {e}")))?;
-            let affected = conn.affected_rows();
-            let execution_time_ms = start.elapsed().as_millis() as u64;
-
             Ok(QueryResult {
                 columns: Vec::new(),
                 column_types: Vec::new(),
                 rows: Vec::new(),
-                rows_affected: Some(affected),
+                rows_affected: Some(total_affected),
                 execution_time_ms: Some(execution_time_ms),
             })
         }
