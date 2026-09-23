@@ -16,10 +16,10 @@ use gpui_kit::gpui::{
 };
 use ui::app::{
     AboutZqlcrab, AddNewRow, CheckForUpdates, CloseDialog, CloseWindow, CrabStudioApp,
-    DeleteGridRow, DuplicateGridRow, ExplainQuery, FormatSql, MinimizeWindow, NewConnection,
-    NewQueryTab, OpenDocs, OpenGithub, OpenSettings, Quit, RefreshTables, ReportIssue, RunQuery,
-    SaveGridChanges, SelectConsoleTab, SelectGridTab, SelectHistoryTab, SelectSchemaTab,
-    ToggleActivityBar, ToggleFullscreen, ToggleStatusBar, ZoomWindow,
+    DeleteGridRow, DuplicateGridRow, ExplainQuery, FocusGridFilter, FormatSql, MinimizeWindow,
+    NewConnection, NewQueryTab, OpenDocs, OpenGithub, OpenSettings, Quit, RefreshTables,
+    ReportIssue, RunQuery, SaveGridChanges, SelectConsoleTab, SelectGridTab, SelectHistoryTab,
+    SelectSchemaTab, ToggleActivityBar, ToggleFullscreen, ToggleStatusBar, ZoomWindow,
 };
 
 #[cfg(target_os = "macos")]
@@ -177,6 +177,8 @@ fn main() {
             KeyBinding::new("cmd-shift-e", ExplainQuery, Some("CrabStudio")),
             KeyBinding::new("ctrl-shift-e", ExplainQuery, Some("CrabStudio")),
             // Grid Data Editing & Mutation
+            KeyBinding::new("cmd-f", FocusGridFilter, Some("CrabStudio")),
+            KeyBinding::new("ctrl-f", FocusGridFilter, Some("CrabStudio")),
             KeyBinding::new("cmd-s", SaveGridChanges, Some("CrabStudio")),
             KeyBinding::new("ctrl-s", SaveGridChanges, Some("CrabStudio")),
             KeyBinding::new("cmd-n", AddNewRow, Some("CrabStudio")),
@@ -213,6 +215,7 @@ fn main() {
                 MenuItem::os_action("Paste", Paste, OsAction::Paste),
                 MenuItem::os_action("Select All", SelectAll, OsAction::SelectAll),
                 MenuItem::separator(),
+                MenuItem::action("Find in Table...", FocusGridFilter),
                 MenuItem::action("Format SQL", FormatSql),
             ]),
             Menu::new("View").items([

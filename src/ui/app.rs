@@ -84,7 +84,8 @@ gpui_kit::actions!(
         DeleteGridRow,
         AddNewRow,
         DuplicateGridRow,
-        OpenImportModal
+        OpenImportModal,
+        FocusGridFilter
     ]
 );
 
@@ -229,6 +230,7 @@ pub struct CrabStudioApp {
     grid_page: usize,
     grid_page_size: usize,
     grid_filter: String,
+    grid_filter_input: Entity<InputState>,
     grid_selected_cell: Option<GridCellCoord>,
     grid_inspector_open: bool,
     grid_modal_open: bool,
@@ -429,6 +431,18 @@ impl CrabStudioApp {
 
         let grid_cell_edit_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Edit cell value..."));
+        let grid_filter_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Filter rows (text, num, col:val)..."));
+
+        cx.subscribe(&grid_filter_input, |this, input_handle, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                let val = input_handle.read(cx).value().to_string();
+                this.grid_filter = val;
+                this.grid_page = 0;
+                cx.notify();
+            }
+        })
+        .detach();
 
         let create_table_name_input =
             cx.new(|cx| InputState::new(window, cx).default_value("new_table"));
@@ -498,6 +512,7 @@ impl CrabStudioApp {
             grid_page: 0,
             grid_page_size: 50,
             grid_filter: String::new(),
+            grid_filter_input,
             grid_selected_cell: None,
             grid_inspector_open: false,
             grid_modal_open: false,
@@ -3716,6 +3731,20 @@ impl CrabStudioApp {
             }
         };
 
+        let on_set_filter = {
+            let handle = app_handle.clone();
+            move |flt: String, window: &mut Window, cx: &mut App| {
+                handle.update(cx, |this, cx| {
+                    this.grid_filter = flt.clone();
+                    this.grid_page = 0;
+                    this.grid_filter_input.update(cx, |inp, cx| {
+                        inp.set_value(&flt, window, cx);
+                    });
+                    cx.notify();
+                });
+            }
+        };
+
         DataGrid::new(grid_data)
             .table_name(table_name)
             .scroll_handle(self.grid_scroll_handle.clone())
@@ -3723,6 +3752,7 @@ impl CrabStudioApp {
             .current_page(self.grid_page)
             .sort(self.grid_sort_col, self.grid_sort_dir)
             .filter_keyword(self.grid_filter.clone())
+            .filter_input(Some(self.grid_filter_input.clone()))
             .selected_cell(self.grid_selected_cell)
             .inspector_open(self.grid_inspector_open)
             .modal_open(self.grid_modal_open)
@@ -3731,6 +3761,7 @@ impl CrabStudioApp {
             .read_only(is_read_only)
             .cell_edit_input(Some(self.grid_cell_edit_input.clone()))
             .inspector_split(Some(self.grid_inspector_split.clone()))
+            .on_set_filter(on_set_filter)
             .on_sort(on_sort)
             .on_page_change(on_page)
             .on_export(on_export)
@@ -5267,6 +5298,15 @@ impl Render for CrabStudioApp {
                             this.toggle_delete_grid_row(coord.row_idx, cx);
                         }
                     }
+                }
+            }))
+            .on_action(cx.listener(|this, _: &FocusGridFilter, window, cx| {
+                if this.active_tab == WorkspaceTab::DataGrid
+                    || this.active_tab == WorkspaceTab::QueryConsole
+                {
+                    this.grid_filter_input.update(cx, |inp, cx| {
+                        inp.focus(window, cx);
+                    });
                 }
             }))
             .on_action(cx.listener(|this, _: &CloseDialog, _, cx| {

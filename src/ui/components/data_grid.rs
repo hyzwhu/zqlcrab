@@ -10,9 +10,11 @@ use gpui_kit::component::{
     Icon, Sizable as _,
     button::{Button, ButtonVariants as _},
     input::{Input, InputState},
+    menu::{ContextMenuExt as _, PopupMenu, PopupMenuItem},
     resizable::{ResizableState, h_resizable, resizable_panel},
     scroll::{ScrollableElement as _, ScrollbarAxis},
     table::{Table, TableBody, TableCell, TableHead, TableHeader, TableRow},
+    tooltip::Tooltip,
 };
 use gpui_kit::gpui::{
     App, ClipboardItem, ElementId, Entity, FontWeight, InteractiveElement as _, IntoElement,
@@ -81,6 +83,17 @@ pub fn format_inspector_value(raw: &str, pretty_json: bool) -> (String, bool, us
         }
     }
     (raw.to_string(), false, char_count, line_count)
+}
+
+/// Helper function to format or minify JSON strings, returning an error message if not valid JSON.
+pub fn try_format_json(raw: &str, pretty: bool) -> Result<String, String> {
+    let parsed: serde_json::Value =
+        serde_json::from_str(raw.trim()).map_err(|e| format!("Invalid JSON: {e}"))?;
+    if pretty {
+        serde_json::to_string_pretty(&parsed).map_err(|e| e.to_string())
+    } else {
+        serde_json::to_string(&parsed).map_err(|e| e.to_string())
+    }
 }
 
 /// Represents an item in the displayed grid row sequence, either an existing table row or an inserted row.
@@ -222,6 +235,7 @@ pub struct DataGrid {
     sort_column: Option<usize>,
     sort_direction: Option<SortDirection>,
     filter_keyword: String,
+    filter_input: Option<Entity<InputState>>,
     selected_cell: Option<GridCellCoord>,
     inspector_open: bool,
     modal_open: bool,
@@ -231,6 +245,7 @@ pub struct DataGrid {
     cell_edit_input: Option<Entity<InputState>>,
     inspector_split: Option<Entity<ResizableState>>,
     on_sort: Option<Rc<dyn Fn(usize, &mut Window, &mut App)>>,
+    on_set_filter: Option<Rc<dyn Fn(String, &mut Window, &mut App)>>,
     on_page_change: Option<Rc<dyn Fn(usize, &mut Window, &mut App)>>,
     on_export: Option<Rc<dyn Fn(ExportFormat, &mut Window, &mut App)>>,
     on_import: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
@@ -263,6 +278,7 @@ impl DataGrid {
             sort_column: None,
             sort_direction: None,
             filter_keyword: String::new(),
+            filter_input: None,
             selected_cell: None,
             inspector_open: false,
             modal_open: false,
@@ -272,6 +288,7 @@ impl DataGrid {
             cell_edit_input: None,
             inspector_split: None,
             on_sort: None,
+            on_set_filter: None,
             on_page_change: None,
             on_export: None,
             on_import: None,
@@ -323,6 +340,19 @@ impl DataGrid {
 
     pub fn filter_keyword(mut self, keyword: impl Into<String>) -> Self {
         self.filter_keyword = keyword.into();
+        self
+    }
+
+    pub fn filter_input(mut self, input: Option<Entity<InputState>>) -> Self {
+        self.filter_input = input;
+        self
+    }
+
+    pub fn on_set_filter<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(String, &mut Window, &mut App) + 'static,
+    {
+        self.on_set_filter = Some(Rc::new(handler));
         self
     }
 
@@ -556,6 +586,240 @@ fn compare_query_values(a: &QueryValue, b: &QueryValue, dir: SortDirection) -> O
     }
 }
 
+/// Filters original rows according to the specified keyword.
+/// Supports general text matching across all columns and `column:keyword` syntax.
+pub fn filter_rows_by_keyword(
+    rows: &[Vec<QueryValue>],
+    columns: &[String],
+    filter: &str,
+) -> Vec<usize> {
+    let filter = filter.trim().to_lowercase();
+    if filter.is_empty() {
+        return (0..rows.len()).collect();
+    }
+
+    if let Some((target_col, kw)) = filter.split_once(':') {
+        let target_col = target_col.trim();
+        let kw = kw.trim();
+        if let Some(col_idx) = columns.iter().position(|c| c.to_lowercase() == target_col) {
+            rows.iter()
+                .enumerate()
+                .filter(|(_, row)| {
+                    if let Some(val) = row.get(col_idx) {
+                        if kw == "null" {
+                            val.is_null()
+                        } else {
+                            val.to_display_string().to_lowercase().contains(kw)
+                        }
+                    } else {
+                        false
+                    }
+                })
+                .map(|(i, _)| i)
+                .collect()
+        } else {
+            (0..rows.len()).collect()
+        }
+    } else {
+        rows.iter()
+            .enumerate()
+            .filter(|(_, row)| {
+                row.iter().any(|v| {
+                    if filter == "null" {
+                        v.is_null()
+                    } else {
+                        v.to_display_string().to_lowercase().contains(&filter)
+                    }
+                })
+            })
+            .map(|(i, _)| i)
+            .collect()
+    }
+}
+
+/// Helper function to construct a cell's right-click context menu.
+#[allow(clippy::too_many_arguments)]
+fn render_cell_context_menu(
+    coord: GridCellCoord,
+    raw_val_str: &str,
+    is_inserted: bool,
+    is_dirty: bool,
+    is_row_deleted: bool,
+    is_read_only: bool,
+    on_toggle_modal: &Option<Rc<dyn Fn(bool, &mut Window, &mut App)>>,
+    on_set_filter: &Option<Rc<dyn Fn(String, &mut Window, &mut App)>>,
+    on_copy_val: &Option<Rc<dyn Fn(String, String, &mut Window, &mut App)>>,
+    on_copy_row_json: &Option<Rc<dyn Fn(usize, String, &mut Window, &mut App)>>,
+    on_copy_row_tsv: &Option<Rc<dyn Fn(usize, String, &mut Window, &mut App)>>,
+    on_set_cell_null: &Option<Rc<dyn Fn(&mut Window, &mut App)>>,
+    on_revert_cell: &Option<Rc<dyn Fn(usize, usize, &mut Window, &mut App)>>,
+    on_duplicate_row: &Option<Rc<dyn Fn(GridCellCoord, &mut Window, &mut App)>>,
+    on_toggle_delete_row: &Option<Rc<dyn Fn(usize, &mut Window, &mut App)>>,
+    on_select_cell: &Option<Rc<dyn Fn(GridCellCoord, &mut Window, &mut App)>>,
+    col_name: &str,
+    row_json: String,
+    row_tsv: String,
+    menu: PopupMenu,
+    _window: &mut Window,
+    _cx: &mut Context<PopupMenu>,
+) -> PopupMenu {
+    let mut menu = menu;
+
+    // 1. Inspect Value (Modal)
+    let on_m = on_toggle_modal.clone();
+    let on_sel = on_select_cell.clone();
+    menu = menu.item(
+        PopupMenuItem::new("Inspect Value...")
+            .icon(IconName::Maximize2)
+            .on_click(move |_, window, cx| {
+                if let Some(ref h_sel) = on_sel {
+                    h_sel(coord, window, cx);
+                }
+                if let Some(ref h) = on_m {
+                    h(true, window, cx);
+                }
+            }),
+    );
+
+    // 2. Filter by this value
+    let on_flt = on_set_filter.clone();
+    let flt_val = raw_val_str.to_string();
+    menu = menu.item(
+        PopupMenuItem::new("Filter by this Value")
+            .icon(IconName::Search)
+            .on_click(move |_, window, cx| {
+                if let Some(ref h) = on_flt {
+                    h(flt_val.clone(), window, cx);
+                }
+            }),
+    );
+
+    menu = menu.separator();
+
+    // 3. Copy Cell Value
+    let on_cp = on_copy_val.clone();
+    let c_name = col_name.to_string();
+    let c_val = raw_val_str.to_string();
+    menu = menu.item(
+        PopupMenuItem::new("Copy Cell Value")
+            .icon(IconName::Copy)
+            .on_click(move |_, window, cx| {
+                if let Some(ref h) = on_cp {
+                    h(c_name.clone(), c_val.clone(), window, cx);
+                } else {
+                    cx.write_to_clipboard(ClipboardItem::new_string(c_val.clone()));
+                }
+            }),
+    );
+
+    // 4. Copy Row as JSON
+    let on_cp_json = on_copy_row_json.clone();
+    let r_json = row_json;
+    let r_idx = coord.row_idx;
+    menu = menu.item(
+        PopupMenuItem::new("Copy Row as JSON")
+            .icon(IconName::Code)
+            .on_click(move |_, window, cx| {
+                if let Some(ref h) = on_cp_json {
+                    h(r_idx, r_json.clone(), window, cx);
+                } else {
+                    cx.write_to_clipboard(ClipboardItem::new_string(r_json.clone()));
+                }
+            }),
+    );
+
+    // 5. Copy Row as TSV
+    let on_cp_tsv = on_copy_row_tsv.clone();
+    let r_tsv = row_tsv;
+    menu = menu.item(
+        PopupMenuItem::new("Copy Row as TSV")
+            .icon(IconName::Table)
+            .on_click(move |_, window, cx| {
+                if let Some(ref h) = on_cp_tsv {
+                    h(r_idx, r_tsv.clone(), window, cx);
+                } else {
+                    cx.write_to_clipboard(ClipboardItem::new_string(r_tsv.clone()));
+                }
+            }),
+    );
+
+    if !is_read_only {
+        menu = menu.separator();
+
+        // 6. Set NULL
+        let on_null = on_set_cell_null.clone();
+        let on_sel_null = on_select_cell.clone();
+        menu = menu.item(
+            PopupMenuItem::new("Set NULL")
+                .icon(IconName::CornerDownLeft)
+                .on_click(move |_, window, cx| {
+                    if let Some(ref h_sel) = on_sel_null {
+                        h_sel(coord, window, cx);
+                    }
+                    if let Some(ref h) = on_null {
+                        h(window, cx);
+                    }
+                }),
+        );
+
+        // 7. Revert Cell (if dirty and not inserted)
+        if is_dirty && !is_inserted {
+            let on_rev = on_revert_cell.clone();
+            menu = menu.item(
+                PopupMenuItem::new("Revert Cell Change")
+                    .icon(IconName::Undo)
+                    .on_click(move |_, window, cx| {
+                        if let Some(ref h) = on_rev {
+                            h(coord.row_idx, coord.col_idx, window, cx);
+                        }
+                    }),
+            );
+        }
+
+        // 8. Duplicate Row
+        let on_dup = on_duplicate_row.clone();
+        menu = menu.item(
+            PopupMenuItem::new("Duplicate Row")
+                .icon(IconName::Plus)
+                .on_click(move |_, window, cx| {
+                    if let Some(ref h) = on_dup {
+                        h(coord, window, cx);
+                    }
+                }),
+        );
+
+        // 9. Delete / Restore Row (if not inserted)
+        if !is_inserted {
+            let on_del = on_toggle_delete_row.clone();
+            if is_row_deleted {
+                menu = menu.item(
+                    PopupMenuItem::new("Restore Deleted Row")
+                        .icon(IconName::Undo)
+                        .on_click(move |_, window, cx| {
+                            if let Some(ref h) = on_del {
+                                h(coord.row_idx, window, cx);
+                            }
+                        }),
+                );
+            } else {
+                menu = menu.item(
+                    PopupMenuItem::element(|_, _| {
+                        div().text_color(ThemeColors::ERROR).child("Delete Row")
+                    })
+                    .icon(Icon::new(IconName::Trash).text_color(ThemeColors::ERROR))
+                    .on_click(move |_, window, cx| {
+                        if let Some(ref h) = on_del {
+                            h(coord.row_idx, window, cx);
+                        }
+                    }),
+                );
+            }
+        }
+    }
+
+    menu
+}
+
 impl RenderOnce for DataGrid {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let result =
@@ -616,22 +880,13 @@ impl RenderOnce for DataGrid {
                 .into_any_element();
         }
 
-        // Apply keyword filter
-        let filter = self.filter_keyword.to_lowercase();
-        let mut row_indices: Vec<usize> = if filter.is_empty() {
-            (0..result.rows.len()).collect()
+        // Apply keyword filter (supports full-text match and column:keyword syntax)
+        let filter_raw = if let Some(ref inp) = self.filter_input {
+            inp.read(cx).value().to_string()
         } else {
-            result
-                .rows
-                .iter()
-                .enumerate()
-                .filter(|(_, row)| {
-                    row.iter()
-                        .any(|v| v.to_display_string().to_lowercase().contains(&filter))
-                })
-                .map(|(i, _)| i)
-                .collect()
+            self.filter_keyword.clone()
         };
+        let mut row_indices = filter_rows_by_keyword(&result.rows, &result.columns, &filter_raw);
 
         // Apply sorting
         if let (Some(col_idx), Some(dir)) = (self.sort_column, self.sort_direction) {
@@ -1175,6 +1430,79 @@ impl RenderOnce for DataGrid {
             None
         };
 
+        // Grid filter search bar
+        let filter_bar = if let Some(ref filter_inp) = self.filter_input {
+            let current_filter_val = filter_inp.read(cx).value().to_string();
+            let has_filter = !current_filter_val.trim().is_empty();
+            let on_set_filter = self.on_set_filter.clone();
+
+            let clear_btn = if has_filter {
+                let on_clear = on_set_filter.clone();
+                let filter_inp_entity = filter_inp.clone();
+                Some(
+                    Button::new("grid_filter_clear_btn")
+                        .ghost()
+                        .xsmall()
+                        .icon(IconName::X)
+                        .tooltip("Clear filter (Esc)")
+                        .on_click(move |_, window, cx| {
+                            filter_inp_entity.update(cx, |state, cx| {
+                                state.set_value(String::new(), window, cx);
+                            });
+                            if let Some(ref h) = on_clear {
+                                h(String::new(), window, cx);
+                            }
+                        }),
+                )
+            } else {
+                None
+            };
+
+            let match_pill = if has_filter {
+                Some(
+                    div()
+                        .px_1p5()
+                        .py_0p5()
+                        .rounded_sm()
+                        .bg(ThemeColors::PRIMARY_BG)
+                        .text_xs()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(ThemeColors::PRIMARY_LIGHT)
+                        .flex_shrink_0()
+                        .child(format!("{total_matching_rows}/{}", result.rows.len())),
+                )
+            } else {
+                None
+            };
+
+            Some(
+                h_flex()
+                    .items_center()
+                    .gap_1()
+                    .w(px(200.0))
+                    .min_w(px(130.0))
+                    .flex_shrink(1.0)
+                    .child(
+                        Input::new(filter_inp)
+                            .small()
+                            .w_full()
+                            .prefix(
+                                Icon::new(IconName::Search)
+                                    .size(px(13.0))
+                                    .text_color(if has_filter {
+                                        ThemeColors::PRIMARY_LIGHT
+                                    } else {
+                                        ThemeColors::TEXT_FAINT
+                                    }),
+                            ),
+                    )
+                    .children(clear_btn)
+                    .children(match_pill),
+            )
+        } else {
+            None
+        };
+
         // Grid Toolbar
         let toolbar = h_flex()
             .h(px(36.0))
@@ -1207,12 +1535,13 @@ impl RenderOnce for DataGrid {
                                 .child(table.clone()),
                         )
                     })
+                    .children(filter_bar)
                     .child(
                         div()
                             .text_xs()
                             .text_color(ThemeColors::TEXT_MUTED)
                             .flex_shrink_0()
-                            .child(if filter.is_empty() {
+                            .child(if filter_raw.trim().is_empty() {
                                 format!("{} row(s)", result.rows.len())
                             } else {
                                 format!("{total_matching_rows} of {} row(s)", result.rows.len())
@@ -1632,6 +1961,29 @@ impl RenderOnce for DataGrid {
 
                         let on_sel_cell = self.on_select_cell.clone();
                         let on_tog_modal = self.on_toggle_modal.clone();
+
+                        let row_json_ctx = row_to_json(&result.columns, &insertion.values);
+                        let row_tsv_ctx = row_to_tsv(&insertion.values);
+                        let col_name_ctx = result
+                            .columns
+                            .get(col_idx)
+                            .cloned()
+                            .unwrap_or_else(|| format!("col_{col_idx}"));
+                        let raw_val_ctx = cur_val.to_display_string();
+                        let coord_ctx = GridCellCoord::inserted(ins_idx, col_idx);
+
+                        let on_m_ctx = self.on_toggle_modal.clone();
+                        let on_flt_ctx = self.on_set_filter.clone();
+                        let on_cp_ctx = self.on_copy_value.clone();
+                        let on_cp_j_ctx = self.on_copy_row_json.clone();
+                        let on_cp_t_ctx = self.on_copy_row_tsv.clone();
+                        let on_null_ctx = self.on_set_cell_null.clone();
+                        let on_rev_ctx = self.on_revert_cell.clone();
+                        let on_dup_ctx = self.on_duplicate_row.clone();
+                        let on_del_ctx = self.on_toggle_delete_row.clone();
+                        let on_sel_ctx = self.on_select_cell.clone();
+                        let is_ro = self.is_read_only;
+
                         let cell_container = div()
                             .size_full()
                             .h(px(32.0))
@@ -1663,6 +2015,32 @@ impl RenderOnce for DataGrid {
                                         h_m(true, window, cx);
                                     }
                                 }
+                            })
+                            .context_menu(move |menu, window, cx| {
+                                render_cell_context_menu(
+                                    coord_ctx,
+                                    &raw_val_ctx,
+                                    true,  // is_inserted
+                                    false, // is_dirty
+                                    false, // is_row_deleted
+                                    is_ro,
+                                    &on_m_ctx,
+                                    &on_flt_ctx,
+                                    &on_cp_ctx,
+                                    &on_cp_j_ctx,
+                                    &on_cp_t_ctx,
+                                    &on_null_ctx,
+                                    &on_rev_ctx,
+                                    &on_dup_ctx,
+                                    &on_del_ctx,
+                                    &on_sel_ctx,
+                                    &col_name_ctx,
+                                    row_json_ctx.clone(),
+                                    row_tsv_ctx.clone(),
+                                    menu,
+                                    window,
+                                    cx,
+                                )
                             })
                             .child(val_element);
 
@@ -1763,6 +2141,15 @@ impl RenderOnce for DataGrid {
                                 .child(index_cell_btn),
                         );
 
+                    let eff_row_vals: Vec<QueryValue> = (0..result.columns.len())
+                        .map(|c| {
+                            let orig = row_data.get(c).unwrap_or(&QueryValue::Null);
+                            self.changeset.get_effective_cell_value(orig_row_idx, c, orig).clone()
+                        })
+                        .collect();
+                    let orig_row_json = row_to_json(&result.columns, &eff_row_vals);
+                    let orig_row_tsv = row_to_tsv(&eff_row_vals);
+
                     for (col_idx, orig_val) in row_data.iter().enumerate() {
                         let is_last = col_idx + 1 == col_count;
                         let col_w = col_widths.get(col_idx).copied().unwrap_or(120.0);
@@ -1834,6 +2221,28 @@ impl RenderOnce for DataGrid {
                         let on_sel_cell = self.on_select_cell.clone();
                         let on_tog_modal = self.on_toggle_modal.clone();
 
+                        let row_json_ctx = orig_row_json.clone();
+                        let row_tsv_ctx = orig_row_tsv.clone();
+                        let col_name_ctx = result
+                            .columns
+                            .get(col_idx)
+                            .cloned()
+                            .unwrap_or_else(|| format!("col_{col_idx}"));
+                        let raw_val_ctx = display_raw.clone();
+                        let coord_ctx = GridCellCoord::existing(orig_row_idx, col_idx);
+
+                        let on_m_ctx = self.on_toggle_modal.clone();
+                        let on_flt_ctx = self.on_set_filter.clone();
+                        let on_cp_ctx = self.on_copy_value.clone();
+                        let on_cp_j_ctx = self.on_copy_row_json.clone();
+                        let on_cp_t_ctx = self.on_copy_row_tsv.clone();
+                        let on_null_ctx = self.on_set_cell_null.clone();
+                        let on_rev_ctx = self.on_revert_cell.clone();
+                        let on_dup_ctx = self.on_duplicate_row.clone();
+                        let on_del_ctx = self.on_toggle_delete_row.clone();
+                        let on_sel_ctx = self.on_select_cell.clone();
+                        let is_ro = self.is_read_only;
+
                         let cell_container = div()
                             .size_full()
                             .h(px(32.0))
@@ -1871,6 +2280,32 @@ impl RenderOnce for DataGrid {
                                         h_m(true, window, cx);
                                     }
                                 }
+                            })
+                            .context_menu(move |menu, window, cx| {
+                                render_cell_context_menu(
+                                    coord_ctx,
+                                    &raw_val_ctx,
+                                    false, // is_inserted
+                                    is_cell_dirty,
+                                    is_row_deleted,
+                                    is_ro,
+                                    &on_m_ctx,
+                                    &on_flt_ctx,
+                                    &on_cp_ctx,
+                                    &on_cp_j_ctx,
+                                    &on_cp_t_ctx,
+                                    &on_null_ctx,
+                                    &on_rev_ctx,
+                                    &on_dup_ctx,
+                                    &on_del_ctx,
+                                    &on_sel_ctx,
+                                    &col_name_ctx,
+                                    row_json_ctx.clone(),
+                                    row_tsv_ctx.clone(),
+                                    menu,
+                                    window,
+                                    cx,
+                                )
                             })
                             .child(if is_row_deleted {
                                 div().w_full().opacity(0.4).child(cell_elem)
@@ -2755,7 +3190,18 @@ impl RenderOnce for DataGrid {
 
                     let on_tog_modal = self.on_toggle_modal.clone();
                     let on_tog_pretty = self.on_toggle_json_pretty.clone();
-                    let is_pretty = self.json_pretty;
+                    let is_cell_dirty = !is_inserted && self.changeset.is_cell_dirty(sel_row, sel_col);
+                    let cell_edit_inp = self.cell_edit_input.clone();
+                    let on_apply_edit = self.on_apply_cell_edit.clone();
+                    let on_null_edit = self.on_set_cell_null.clone();
+                    let on_revert_edit = self.on_revert_cell.clone();
+                    let is_ro = self.is_read_only;
+
+                    let json_eval = if is_json {
+                        Some(try_format_json(&raw_val_str, false))
+                    } else {
+                        None
+                    };
 
                     let modal_dialog = v_flex()
                         .w(px(800.0))
@@ -2813,22 +3259,85 @@ impl RenderOnce for DataGrid {
                                     h_flex()
                                         .items_center()
                                         .gap_2()
+                                        .when_some(json_eval.clone(), |this, res| {
+                                            match res {
+                                                Ok(_) => this.child(
+                                                    div()
+                                                        .px_1p5()
+                                                        .py_0p5()
+                                                        .rounded_sm()
+                                                        .bg(ThemeColors::PRIMARY_BG)
+                                                        .text_color(ThemeColors::SUCCESS)
+                                                        .text_xs()
+                                                        .font_weight(FontWeight::MEDIUM)
+                                                        .child("✓ Valid JSON"),
+                                                ),
+                                                Err(e) => this.child(
+                                                    h_flex()
+                                                        .id("modal_invalid_json_pill")
+                                                        .px_1p5()
+                                                        .py_0p5()
+                                                        .rounded_sm()
+                                                        .bg(ThemeColors::BG_SURFACE_HOVER)
+                                                        .text_color(ThemeColors::ERROR)
+                                                        .text_xs()
+                                                        .font_weight(FontWeight::MEDIUM)
+                                                        .tooltip(move |window, cx| {
+                                                            Tooltip::new(e.clone()).build(window, cx)
+                                                        })
+                                                        .child("⚠ Invalid JSON"),
+                                                ),
+                                            }
+                                        })
                                         .when(is_json, |this| {
-                                            let on_tog_pretty = on_tog_pretty.clone();
+                                            let edit_inp_fmt = cell_edit_inp.clone();
+                                            let on_tog_pretty_fmt = on_tog_pretty.clone();
+                                            let raw_for_fmt = raw_val_str.clone();
+                                            let edit_inp_min = cell_edit_inp.clone();
+                                            let on_tog_pretty_min = on_tog_pretty.clone();
+                                            let raw_for_min = raw_val_str.clone();
+
                                             this.child(
-                                                Button::new("modal_json_toggle_btn")
+                                                Button::new("modal_json_format_btn")
                                                     .ghost()
                                                     .xsmall()
-                                                    .label(if is_pretty {
-                                                        "JSON Pretty"
-                                                    } else {
-                                                        "JSON Raw"
-                                                    })
+                                                    .icon(IconName::Code)
+                                                    .label("Format")
+                                                    .tooltip("Prettify and indent JSON")
                                                     .border_1()
                                                     .border_color(ThemeColors::BORDER)
                                                     .on_click(move |_, window, cx| {
-                                                        if let Some(ref h) = on_tog_pretty {
-                                                            h(!is_pretty, window, cx);
+                                                        if let Ok(formatted) = try_format_json(&raw_for_fmt, true) {
+                                                            if let Some(ref inp) = edit_inp_fmt {
+                                                                inp.update(cx, |state, cx| {
+                                                                    state.set_value(&formatted, window, cx);
+                                                                });
+                                                            }
+                                                            if let Some(ref h) = on_tog_pretty_fmt {
+                                                                h(true, window, cx);
+                                                            }
+                                                        }
+                                                    }),
+                                            )
+                                            .child(
+                                                Button::new("modal_json_minify_btn")
+                                                    .ghost()
+                                                    .xsmall()
+                                                    .icon(IconName::Minimize)
+                                                    .label("Minify")
+                                                    .tooltip("Compact JSON to single line")
+                                                    .border_1()
+                                                    .border_color(ThemeColors::BORDER)
+                                                    .on_click(move |_, window, cx| {
+                                                        if let Ok(minified) = try_format_json(&raw_for_min, false) {
+                                                            if let Some(ref inp) = edit_inp_min {
+                                                                inp.update(cx, |state, cx| {
+                                                                    state.set_value(&minified, window, cx);
+                                                                });
+                                                            }
+                                                            if let Some(ref h) = on_tog_pretty_min {
+                                                                h(false, window, cx);
+                                                            }
                                                         }
                                                     }),
                                             )
@@ -2849,25 +3358,76 @@ impl RenderOnce for DataGrid {
                         )
                         // Modal Body
                         .child(
-                            div()
-                                .id("data_grid_modal_body_scroll")
+                            v_flex()
                                 .flex_1()
                                 .min_h_0()
                                 .p_4()
+                                .gap_3()
                                 .bg(ThemeColors::BG_APP)
-                                .overflow_y_scroll()
-                                .child(if current_val.is_null() {
-                                    div()
-                                        .text_sm()
-                                        .text_color(ThemeColors::TEXT_FAINT)
-                                        .child("<NULL>")
-                                } else {
-                                    div()
-                                        .text_xs()
-                                        .font_family("JetBrains Mono")
-                                        .text_color(ThemeColors::TEXT_PRIMARY)
-                                        .child(display_val_str)
-                                }),
+                                .when(!is_ro && cell_edit_inp.is_some(), |this| {
+                                    let inp = cell_edit_inp.as_ref().unwrap().clone();
+                                    this.child(
+                                        v_flex()
+                                            .w_full()
+                                            .gap_1()
+                                            .child(
+                                                h_flex()
+                                                    .justify_between()
+                                                    .items_center()
+                                                    .child(
+                                                        div()
+                                                            .text_xs()
+                                                            .font_weight(FontWeight::SEMIBOLD)
+                                                            .text_color(ThemeColors::TEXT_MUTED)
+                                                            .child("EDIT VALUE"),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .text_xs()
+                                                            .text_color(ThemeColors::TEXT_FAINT)
+                                                            .child("Type here to edit, then click 'Save to Cell' below"),
+                                                    ),
+                                            )
+                                            .child(Input::new(&inp).small().w_full()),
+                                    )
+                                })
+                                .child(
+                                    v_flex()
+                                        .flex_1()
+                                        .min_h_0()
+                                        .gap_1()
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .font_weight(FontWeight::SEMIBOLD)
+                                                .text_color(ThemeColors::TEXT_MUTED)
+                                                .child("PREVIEW / FORMATTED CONTENT"),
+                                        )
+                                        .child(
+                                            div()
+                                                .id("data_grid_modal_body_scroll")
+                                                .flex_1()
+                                                .min_h_0()
+                                                .p_3()
+                                                .rounded_md()
+                                                .bg(ThemeColors::BG_SURFACE)
+                                                .border_1()
+                                                .border_color(ThemeColors::BORDER)
+                                                .overflow_y_scroll()
+                                                .child(if current_val.is_null() {
+                                                    div()
+                                                        .text_sm()
+                                                        .text_color(ThemeColors::TEXT_FAINT)
+                                                        .child("<NULL>")
+                                                } else {
+                                                    div()
+                                                        .text_xs()
+                                                        .font_family("JetBrains Mono")
+                                                        .text_color(ThemeColors::TEXT_PRIMARY)
+                                                        .child(display_val_str)
+                                                }),
+                                        ),
+                                ),
                         )
                         // Modal Footer
                         .child(
@@ -2880,9 +3440,30 @@ impl RenderOnce for DataGrid {
                                 .border_t_1()
                                 .border_color(ThemeColors::BORDER)
                                 .bg(ThemeColors::BG_SURFACE)
-                                .child(div().text_xs().text_color(ThemeColors::TEXT_FAINT).child(
-                                    format!("{char_count} characters · {line_count} line(s)"),
-                                ))
+                                .child(
+                                    h_flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(ThemeColors::TEXT_FAINT)
+                                                .child(format!("{char_count} characters · {line_count} line(s)")),
+                                        )
+                                        .when(is_cell_dirty, |this| {
+                                            this.child(
+                                                div()
+                                                    .px_1p5()
+                                                    .py_0p5()
+                                                    .rounded_sm()
+                                                    .bg(ThemeColors::PRIMARY_BG)
+                                                    .text_color(ThemeColors::WARNING)
+                                                    .text_xs()
+                                                    .font_weight(FontWeight::MEDIUM)
+                                                    .child("Modified (Unsaved)"),
+                                            )
+                                        }),
+                                )
                                 .child(
                                     h_flex()
                                         .items_center()
@@ -2901,6 +3482,7 @@ impl RenderOnce for DataGrid {
                                         })
                                         .child(
                                             Button::new("modal_footer_copy_btn")
+                                                .ghost()
                                                 .small()
                                                 .icon(IconName::Copy)
                                                 .label("Copy Value")
@@ -2920,7 +3502,66 @@ impl RenderOnce for DataGrid {
                                                         );
                                                     }
                                                 }),
-                                        ),
+                                        )
+                                        .when(!is_ro, |this| {
+                                            let on_null = on_null_edit.clone();
+                                            let on_tog_null = on_tog_modal.clone();
+                                            let on_rev = on_revert_edit.clone();
+                                            let on_tog_rev = on_tog_modal.clone();
+                                            let on_save = on_apply_edit.clone();
+                                            let on_tog_save = on_tog_modal.clone();
+
+                                            this.child(
+                                                Button::new("modal_footer_null_btn")
+                                                    .ghost()
+                                                    .small()
+                                                    .icon(IconName::Slash)
+                                                    .label("Set NULL")
+                                                    .tooltip("Set this cell to NULL")
+                                                    .on_click(move |_, window, cx| {
+                                                        if let Some(ref h) = on_null {
+                                                            h(window, cx);
+                                                        }
+                                                        if let Some(ref h_close) = on_tog_null {
+                                                            h_close(false, window, cx);
+                                                        }
+                                                    }),
+                                            )
+                                            .when(is_cell_dirty, |t| {
+                                                t.child(
+                                                    Button::new("modal_footer_revert_btn")
+                                                        .ghost()
+                                                        .small()
+                                                        .icon(IconName::RotateCcw)
+                                                        .label("Revert")
+                                                        .tooltip("Revert to original value")
+                                                        .on_click(move |_, window, cx| {
+                                                            if let Some(ref h) = on_rev {
+                                                                h(sel_row, sel_col, window, cx);
+                                                            }
+                                                            if let Some(ref h_close) = on_tog_rev {
+                                                                h_close(false, window, cx);
+                                                            }
+                                                        }),
+                                                )
+                                            })
+                                            .child(
+                                                Button::new("modal_footer_save_btn")
+                                                    .primary()
+                                                    .small()
+                                                    .icon(IconName::Check)
+                                                    .label("Save to Cell")
+                                                    .tooltip("Save changes and commit to cell")
+                                                    .on_click(move |_, window, cx| {
+                                                        if let Some(ref h) = on_save {
+                                                            h(window, cx);
+                                                        }
+                                                        if let Some(ref h_close) = on_tog_save {
+                                                            h_close(false, window, cx);
+                                                        }
+                                                    }),
+                                            )
+                                        }),
                                 ),
                         );
 
@@ -3078,4 +3719,53 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn test_try_format_json_and_minify() {
+        let raw = r#"{"name":"zqlcrab","version":"0.1.3","features":["gpui","fast"]}"#;
+        // Test pretty formatting
+        let formatted = try_format_json(raw, true).expect("should format valid JSON");
+        assert!(formatted.contains('\n'));
+        assert!(formatted.contains("  \"name\": \"zqlcrab\""));
+
+        // Test minify
+        let minified = try_format_json(&formatted, false).expect("should minify JSON");
+        assert!(!minified.contains('\n'));
+        assert!(minified.contains(r#""version":"0.1.3""#));
+
+        // Test invalid JSON returns Err
+        let invalid = r#"{"incomplete": "#;
+        assert!(try_format_json(invalid, true).is_err());
+    }
+
+    #[test]
+    fn test_filter_rows_by_keyword_multi_types() {
+        let cols = vec!["id".to_string(), "user".to_string(), "active".to_string(), "score".to_string()];
+        let rows = vec![
+            vec![QueryValue::Int(1), QueryValue::String("Alice".into()), QueryValue::Bool(true), QueryValue::Float(95.5)],
+            vec![QueryValue::Int(2), QueryValue::String("Bob".into()), QueryValue::Bool(false), QueryValue::Float(80.0)],
+            vec![QueryValue::Int(3), QueryValue::String("Charlie".into()), QueryValue::Bool(true), QueryValue::Null],
+        ];
+
+        // 1. General search: "ali" -> matches row 0
+        let matches_ali = filter_rows_by_keyword(&rows, &cols, "ali");
+        assert_eq!(matches_ali, vec![0]);
+
+        // 2. Numeric search: "80" -> matches row 1
+        let matches_num = filter_rows_by_keyword(&rows, &cols, "80");
+        assert_eq!(matches_num, vec![1]);
+
+        // 3. Column-targeted search: "user:bob" -> matches row 1
+        let matches_col = filter_rows_by_keyword(&rows, &cols, "user:bob");
+        assert_eq!(matches_col, vec![1]);
+
+        // 4. Boolean column-targeted search: "active:true" -> matches row 0 and row 2
+        let matches_bool = filter_rows_by_keyword(&rows, &cols, "active:true");
+        assert_eq!(matches_bool, vec![0, 2]);
+
+        // 5. NULL search: "null" -> matches row 2
+        let matches_null = filter_rows_by_keyword(&rows, &cols, "null");
+        assert_eq!(matches_null, vec![2]);
+    }
 }
+
