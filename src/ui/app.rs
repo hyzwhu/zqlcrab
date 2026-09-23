@@ -13,9 +13,9 @@ use crate::db::import::{
 use crate::db::manager::ConnectionManager;
 use crate::db::sql_format::format_sql_with_indent;
 use crate::db::sql_gen::{
-    ColumnDef, CreateTableDef, SqlReviewPlan, TableIndexDef, TableIndexType,
-    column_matches_index_spec, extract_table_from_sql, generate_create_table_sql,
-    generate_review_plan, parse_create_table_sql, parse_sql_column_list,
+    AlterColumnTarget, ColumnDef, CreateTableDef, SqlReviewPlan, TableIndexDef, TableIndexType,
+    column_matches_index_spec, extract_table_from_sql, generate_alter_table_plan,
+    generate_create_table_sql, generate_review_plan, parse_create_table_sql, parse_sql_column_list,
 };
 use crate::db::types::{
     ColumnInfo, ConnectionConfig, DatabaseFamily, DatabaseType, IndexInfo, QueryResult, QueryValue,
@@ -29,6 +29,7 @@ use crate::ui::components::{
     SqlReviewModal,
     create_table_modal::{CreateTableColumnState, CreateTableIndexState, CreateTableModal},
     data_grid::GridCellCoord,
+    schema_viewer::SchemaEditColumnState,
 };
 use crate::ui::i18n::t;
 use crate::ui::theme::ThemeColors;
@@ -205,6 +206,8 @@ pub struct CrabStudioApp {
     schema_columns: Vec<ColumnInfo>,
     schema_indexes: Vec<IndexInfo>,
     schema_ddl: Option<String>,
+    schema_is_editing: bool,
+    schema_edit_columns: Vec<SchemaEditColumnState>,
     active_tab: WorkspaceTab,
 
     // Table confirm dialog state (Drop/Truncate)
@@ -513,6 +516,8 @@ impl CrabStudioApp {
             schema_columns: Vec::new(),
             schema_indexes: Vec::new(),
             schema_ddl: None,
+            schema_is_editing: false,
+            schema_edit_columns: Vec::new(),
             active_tab: WorkspaceTab::QueryConsole,
             table_confirm_modal: None,
             connection_error_modal: None,
@@ -925,6 +930,8 @@ impl CrabStudioApp {
         self.grid_changeset.clear();
         self.sql_review_modal_open = false;
         self.sql_review_plan = None;
+        self.schema_is_editing = false;
+        self.schema_edit_columns.clear();
         self.status_message = Some(format!("Loading table {}...", table.name));
         cx.notify();
 
@@ -2217,6 +2224,13 @@ impl CrabStudioApp {
                         app.sql_review_modal_open = false;
                         app.sql_review_plan = None;
                         app.grid_changeset.clear();
+                        if app.schema_is_editing {
+                            app.schema_is_editing = false;
+                            app.schema_edit_columns.clear();
+                            if let Some(ref tbl) = table_name {
+                                app.refresh_table_schema_after_alteration(tbl.clone(), cx);
+                            }
+                        }
                         if let Some(qr) = reloaded {
                             let qr_arc = Arc::new(qr);
                             app.table_data = Some(qr_arc.clone());
@@ -2240,6 +2254,342 @@ impl CrabStudioApp {
                 }
             }
         }).detach();
+    }
+
+    /// Refresh table columns, indexes, and DDL metadata after a schema alteration
+    pub fn refresh_table_schema_after_alteration(
+        &mut self,
+        table_name: String,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(conn) = self.active_connection.clone() else {
+            return;
+        };
+        let schema = self
+            .active_tables
+            .iter()
+            .find(|t| t.name == table_name)
+            .and_then(|t| t.schema.clone());
+
+        cx.spawn(async move |this, cx: &mut AsyncApp| {
+            let cols = conn
+                .list_columns(None, schema.as_deref(), &table_name)
+                .await
+                .unwrap_or_default();
+            let idxs = conn
+                .list_indexes(None, schema.as_deref(), &table_name)
+                .await
+                .unwrap_or_default();
+            let ddl = conn
+                .get_table_ddl(None, schema.as_deref(), &table_name)
+                .await
+                .ok()
+                .flatten();
+
+            this.update(cx, |app, cx| {
+                let mut cols = cols;
+                ColumnInfo::apply_primary_key_index(&mut cols, &idxs);
+                if let Ok(mut cache) = app.sql_metadata_cache.write() {
+                    cache.set_columns_for_table(&table_name, cols.clone());
+                }
+                if app.selected_table.as_deref() == Some(&table_name) {
+                    app.schema_columns = cols;
+                    app.schema_indexes = idxs;
+                    app.schema_ddl = ddl;
+                }
+                app.refresh_schema(cx);
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Enter interactive schema structure editing mode for the active table
+    pub fn start_schema_editing(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.schema_columns.is_empty() {
+            self.status_message = Some("No columns available to edit".to_string());
+            cx.notify();
+            return;
+        }
+
+        self.schema_edit_columns = self
+            .schema_columns
+            .iter()
+            .map(|col| {
+                let name = cx.new(|cx| InputState::new(window, cx).default_value(&col.name));
+                let data_type =
+                    cx.new(|cx| InputState::new(window, cx).default_value(&col.data_type));
+                let default_val = cx.new(|cx| {
+                    InputState::new(window, cx)
+                        .default_value(col.default_value.as_deref().unwrap_or(""))
+                });
+                let comment = cx.new(|cx| {
+                    InputState::new(window, cx)
+                        .default_value(col.description.as_deref().unwrap_or(""))
+                });
+
+                cx.subscribe(&name, |_, _, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Change) {
+                        cx.notify();
+                    }
+                })
+                .detach();
+                cx.subscribe(&data_type, |_, _, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Change) {
+                        cx.notify();
+                    }
+                })
+                .detach();
+                cx.subscribe(&default_val, |_, _, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Change) {
+                        cx.notify();
+                    }
+                })
+                .detach();
+                cx.subscribe(&comment, |_, _, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Change) {
+                        cx.notify();
+                    }
+                })
+                .detach();
+
+                SchemaEditColumnState {
+                    original_name: Some(col.name.clone()),
+                    name,
+                    data_type,
+                    is_primary_key: col.is_primary_key,
+                    is_nullable: col.is_nullable,
+                    is_auto_increment: col.is_auto_increment,
+                    default_val,
+                    comment,
+                    is_deleted: false,
+                }
+            })
+            .collect();
+
+        self.schema_is_editing = true;
+        self.status_message = Some("Entered table structure edit mode".to_string());
+        cx.notify();
+    }
+
+    /// Discard all uncommitted schema changes and exit edit mode
+    pub fn cancel_schema_editing(&mut self, cx: &mut Context<Self>) {
+        self.schema_is_editing = false;
+        self.schema_edit_columns.clear();
+        self.status_message = Some("Discarded table structure changes".to_string());
+        cx.notify();
+    }
+
+    /// Add a new column to the schema editor
+    pub fn add_schema_edit_column(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let family = self
+            .active_connection
+            .as_ref()
+            .map(|c| c.config.db_type.family())
+            .unwrap_or(DatabaseFamily::Sqlite);
+
+        let default_type = match family {
+            DatabaseFamily::Sqlite => "TEXT",
+            DatabaseFamily::Postgres => "VARCHAR(255)",
+            DatabaseFamily::MySql => "VARCHAR(255)",
+        };
+
+        let new_col_name = format!("new_col_{}", self.schema_edit_columns.len() + 1);
+
+        let name_inp = cx.new(|cx| InputState::new(window, cx).default_value(&new_col_name));
+        let type_inp = cx.new(|cx| InputState::new(window, cx).default_value(default_type));
+        let def_inp = cx.new(|cx| InputState::new(window, cx).default_value(""));
+        let comm_inp = cx.new(|cx| InputState::new(window, cx).default_value(""));
+
+        cx.subscribe(&name_inp, |_, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
+        })
+        .detach();
+        cx.subscribe(&type_inp, |_, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
+        })
+        .detach();
+        cx.subscribe(&def_inp, |_, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
+        })
+        .detach();
+        cx.subscribe(&comm_inp, |_, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
+        })
+        .detach();
+
+        self.schema_edit_columns.push(SchemaEditColumnState {
+            original_name: None,
+            name: name_inp,
+            data_type: type_inp,
+            is_primary_key: false,
+            is_nullable: true,
+            is_auto_increment: false,
+            default_val: def_inp,
+            comment: comm_inp,
+            is_deleted: false,
+        });
+
+        cx.notify();
+    }
+
+    pub fn toggle_schema_column_delete(&mut self, idx: usize, cx: &mut Context<Self>) {
+        if idx < self.schema_edit_columns.len() {
+            let is_new = self.schema_edit_columns[idx].original_name.is_none();
+            if is_new && !self.schema_edit_columns[idx].is_deleted {
+                self.schema_edit_columns.remove(idx);
+            } else {
+                self.schema_edit_columns[idx].is_deleted =
+                    !self.schema_edit_columns[idx].is_deleted;
+            }
+            cx.notify();
+        }
+    }
+
+    pub fn toggle_schema_column_nullable(&mut self, idx: usize, cx: &mut Context<Self>) {
+        if idx < self.schema_edit_columns.len() {
+            let cur = self.schema_edit_columns[idx].is_nullable;
+            if cur {
+                self.schema_edit_columns[idx].is_nullable = false;
+            } else if !self.schema_edit_columns[idx].is_primary_key {
+                self.schema_edit_columns[idx].is_nullable = true;
+            }
+            cx.notify();
+        }
+    }
+
+    pub fn toggle_schema_column_pk(&mut self, idx: usize, cx: &mut Context<Self>) {
+        if idx < self.schema_edit_columns.len() {
+            let cur = self.schema_edit_columns[idx].is_primary_key;
+            self.schema_edit_columns[idx].is_primary_key = !cur;
+            if !cur {
+                self.schema_edit_columns[idx].is_nullable = false;
+            }
+            cx.notify();
+        }
+    }
+
+    pub fn toggle_schema_column_auto_increment(&mut self, idx: usize, cx: &mut Context<Self>) {
+        if idx < self.schema_edit_columns.len() {
+            let cur = self.schema_edit_columns[idx].is_auto_increment;
+            self.schema_edit_columns[idx].is_auto_increment = !cur;
+            if !cur {
+                self.schema_edit_columns[idx].is_primary_key = true;
+                self.schema_edit_columns[idx].is_nullable = false;
+            }
+            cx.notify();
+        }
+    }
+
+    pub fn collect_alter_column_targets(&self, cx: &App) -> Vec<AlterColumnTarget> {
+        let mut targets = Vec::new();
+        for col in &self.schema_edit_columns {
+            if col.is_deleted {
+                continue;
+            }
+            let name = col.name.read(cx).value().trim().to_string();
+            if name.is_empty() {
+                continue;
+            }
+            let data_type = col.data_type.read(cx).value().trim().to_string();
+            let def_val = {
+                let s = col.default_val.read(cx).value().trim().to_string();
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(s)
+                }
+            };
+            let comment = {
+                let s = col.comment.read(cx).value().trim().to_string();
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(s)
+                }
+            };
+
+            let def = ColumnDef::new(name, data_type)
+                .primary_key(col.is_primary_key)
+                .nullable(col.is_nullable)
+                .auto_increment(col.is_auto_increment)
+                .default_value(def_val)
+                .comment(comment);
+
+            targets.push(AlterColumnTarget::new(col.original_name.clone(), def));
+        }
+        targets
+    }
+
+    pub fn count_pending_schema_alterations(&self, cx: &App) -> usize {
+        if !self.schema_is_editing {
+            return 0;
+        }
+        let Some(ref tbl) = self.selected_table else {
+            return 0;
+        };
+        let family = self
+            .active_connection
+            .as_ref()
+            .map(|c| c.config.db_type.family())
+            .unwrap_or(DatabaseFamily::Sqlite);
+
+        let targets = self.collect_alter_column_targets(cx);
+        let plan = generate_alter_table_plan(tbl, None, family, &self.schema_columns, &targets);
+        plan.alterations.len()
+    }
+
+    pub fn review_schema_alterations(&mut self, cx: &mut Context<Self>) {
+        let Some(conn) = self.active_connection.as_ref() else {
+            self.status_message = Some("No active database connection".to_string());
+            cx.notify();
+            return;
+        };
+
+        if conn.config.is_read_only {
+            self.status_message =
+                Some("Cannot alter table: connection is in Read-Only mode".to_string());
+            cx.notify();
+            return;
+        }
+
+        let Some(ref tbl) = self.selected_table else {
+            return;
+        };
+
+        let family = conn.config.db_type.family();
+        let schema = self
+            .active_tables
+            .iter()
+            .find(|t| t.name == *tbl)
+            .and_then(|t| t.schema.as_deref());
+
+        let targets = self.collect_alter_column_targets(cx);
+        let alter_plan =
+            generate_alter_table_plan(tbl, schema, family, &self.schema_columns, &targets);
+
+        if alter_plan.alterations.is_empty() {
+            self.status_message = Some("No schema alterations detected to apply".to_string());
+            cx.notify();
+            return;
+        }
+
+        let review_plan = alter_plan.to_review_plan();
+        self.sql_review_plan = Some(review_plan);
+        self.sql_review_modal_open = true;
+        self.sql_review_is_executing = false;
+        self.sql_review_error = None;
+        self.sql_review_copied = false;
+        cx.notify();
     }
 
     /// Open the create table modal and configure default inputs according to database family
@@ -4785,6 +5135,77 @@ impl Render for CrabStudioApp {
                             });
                         }
                     };
+                    let on_start_edit = {
+                        let handle = app_handle.clone();
+                        move |window: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                this.start_schema_editing(window, cx);
+                            });
+                        }
+                    };
+                    let on_cancel_edit = {
+                        let handle = app_handle.clone();
+                        move |_: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                this.cancel_schema_editing(cx);
+                            });
+                        }
+                    };
+                    let on_add_col = {
+                        let handle = app_handle.clone();
+                        move |window: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                this.add_schema_edit_column(window, cx);
+                            });
+                        }
+                    };
+                    let on_toggle_del = {
+                        let handle = app_handle.clone();
+                        move |idx: usize, _: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                this.toggle_schema_column_delete(idx, cx);
+                            });
+                        }
+                    };
+                    let on_toggle_null = {
+                        let handle = app_handle.clone();
+                        move |idx: usize, _: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                this.toggle_schema_column_nullable(idx, cx);
+                            });
+                        }
+                    };
+                    let on_toggle_pk = {
+                        let handle = app_handle.clone();
+                        move |idx: usize, _: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                this.toggle_schema_column_pk(idx, cx);
+                            });
+                        }
+                    };
+                    let on_toggle_auto = {
+                        let handle = app_handle.clone();
+                        move |idx: usize, _: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                this.toggle_schema_column_auto_increment(idx, cx);
+                            });
+                        }
+                    };
+                    let on_review_alter = {
+                        let handle = app_handle.clone();
+                        move |_: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                this.review_schema_alterations(cx);
+                            });
+                        }
+                    };
+
+                    let db_family = self
+                        .active_connection
+                        .as_ref()
+                        .map(|c| c.config.db_type.family())
+                        .unwrap_or(DatabaseFamily::Sqlite);
+                    let pending_alterations = self.count_pending_schema_alterations(cx);
 
                     SchemaViewer::new(
                         self.selected_table.clone(),
@@ -4792,8 +5213,20 @@ impl Render for CrabStudioApp {
                         self.schema_indexes.clone(),
                         self.schema_ddl.clone(),
                     )
+                    .family(db_family)
+                    .is_editing(self.schema_is_editing)
+                    .edit_columns(self.schema_edit_columns.clone())
+                    .pending_alterations_count(pending_alterations)
                     .on_quick_query(on_quick)
                     .on_create_table(on_create)
+                    .on_start_edit(on_start_edit)
+                    .on_cancel_edit(on_cancel_edit)
+                    .on_add_column(on_add_col)
+                    .on_toggle_delete_column(on_toggle_del)
+                    .on_toggle_nullable(on_toggle_null)
+                    .on_toggle_pk(on_toggle_pk)
+                    .on_toggle_auto_increment(on_toggle_auto)
+                    .on_review_alterations(on_review_alter)
                     .into_any_element()
                 }
                 WorkspaceTab::History => {

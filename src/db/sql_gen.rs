@@ -1951,6 +1951,546 @@ pub fn build_insert_template(
     }
 }
 
+/// Target column specification during schema alteration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AlterColumnTarget {
+    /// Original column name if this target column was derived from an existing column.
+    /// `None` indicates a newly added column.
+    pub original_name: Option<String>,
+    /// Updated column definition.
+    pub definition: ColumnDef,
+}
+
+impl AlterColumnTarget {
+    pub fn new(original_name: Option<String>, definition: ColumnDef) -> Self {
+        Self {
+            original_name,
+            definition,
+        }
+    }
+}
+
+/// Represents an individual column-level change in an ALTER TABLE plan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ColumnAlteration {
+    AddColumn {
+        column: ColumnDef,
+        after: Option<String>,
+    },
+    ModifyColumn {
+        old_column: ColumnInfo,
+        new_column: ColumnDef,
+    },
+    RenameColumn {
+        old_name: String,
+        new_name: String,
+        new_column: ColumnDef,
+    },
+    DropColumn {
+        name: String,
+    },
+}
+
+/// Structured plan of table alteration statements and metadata.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AlterTablePlan {
+    pub table_name: String,
+    pub schema_name: Option<String>,
+    pub family: DatabaseFamily,
+    pub alterations: Vec<ColumnAlteration>,
+    pub statements: Vec<String>,
+    pub warnings: Vec<String>,
+    pub full_script: String,
+}
+
+impl AlterTablePlan {
+    /// Converts this alteration plan into a standard SqlReviewPlan for execution review.
+    pub fn to_review_plan(&self) -> SqlReviewPlan {
+        let inserts_count = self
+            .alterations
+            .iter()
+            .filter(|a| matches!(a, ColumnAlteration::AddColumn { .. }))
+            .count();
+        let updates_count = self
+            .alterations
+            .iter()
+            .filter(|a| {
+                matches!(
+                    a,
+                    ColumnAlteration::ModifyColumn { .. } | ColumnAlteration::RenameColumn { .. }
+                )
+            })
+            .count();
+        let deletes_count = self
+            .alterations
+            .iter()
+            .filter(|a| matches!(a, ColumnAlteration::DropColumn { .. }))
+            .count();
+
+        SqlReviewPlan {
+            table_name: self.table_name.clone(),
+            schema_name: self.schema_name.clone(),
+            database_family: self.family,
+            inserts_count,
+            updates_count,
+            deletes_count,
+            has_primary_key: true,
+            primary_keys: vec![],
+            warnings: self.warnings.clone(),
+            statements: self.statements.clone(),
+            full_script: self.full_script.clone(),
+        }
+    }
+}
+
+/// Generates dialect-safe ALTER TABLE migration scripts comparing baseline schema against target columns.
+pub fn generate_alter_table_plan(
+    table_name: &str,
+    schema_name: Option<&str>,
+    family: DatabaseFamily,
+    original_cols: &[ColumnInfo],
+    target_cols: &[AlterColumnTarget],
+) -> AlterTablePlan {
+    let mut warnings = Vec::new();
+    let mut statements = Vec::new();
+    let mut alterations = Vec::new();
+
+    let qualified_table = match schema_name {
+        Some(s) if !s.trim().is_empty() && !s.eq_ignore_ascii_case("main") => {
+            format!("{}.{}", quote_ident(s, family), quote_ident(table_name, family))
+        }
+        _ => quote_ident(table_name, family),
+    };
+
+    // 1. Detect dropped columns (present in original_cols, but absent from target_cols)
+    let retained_orig_names: std::collections::HashSet<String> = target_cols
+        .iter()
+        .filter_map(|t| t.original_name.as_ref().map(|s| s.trim().to_lowercase()))
+        .collect();
+
+    for orig in original_cols {
+        if !retained_orig_names.contains(&orig.name.trim().to_lowercase()) {
+            alterations.push(ColumnAlteration::DropColumn {
+                name: orig.name.clone(),
+            });
+        }
+    }
+
+    // 2. Detect added, renamed, or modified columns
+    let mut prev_col_name: Option<String> = None;
+    for target in target_cols {
+        let col = &target.definition;
+        let col_name = col.name.trim();
+        if col_name.is_empty() {
+            continue;
+        }
+
+        match &target.original_name {
+            None => {
+                // Brand new column
+                alterations.push(ColumnAlteration::AddColumn {
+                    column: col.clone(),
+                    after: prev_col_name.clone(),
+                });
+            }
+            Some(old_name) => {
+                let orig_opt = original_cols
+                    .iter()
+                    .find(|c| c.name.eq_ignore_ascii_case(old_name));
+
+                if let Some(orig) = orig_opt {
+                    let is_renamed = !orig.name.eq_ignore_ascii_case(col_name);
+                    let type_changed = !orig.data_type.eq_ignore_ascii_case(col.data_type.trim());
+                    let null_changed = orig.is_nullable != col.is_nullable;
+                    let def_changed = normalize_opt_str(orig.default_value.as_deref())
+                        != normalize_opt_str(col.default_value.as_deref());
+                    let comment_changed = normalize_opt_str(orig.description.as_deref())
+                        != normalize_opt_str(col.comment.as_deref());
+                    let pk_changed = orig.is_primary_key != col.is_primary_key;
+
+                    if is_renamed {
+                        alterations.push(ColumnAlteration::RenameColumn {
+                            old_name: orig.name.clone(),
+                            new_name: col_name.to_string(),
+                            new_column: col.clone(),
+                        });
+                    } else if type_changed || null_changed || def_changed || comment_changed || pk_changed {
+                        alterations.push(ColumnAlteration::ModifyColumn {
+                            old_column: orig.clone(),
+                            new_column: col.clone(),
+                        });
+                    }
+                } else {
+                    // Fallback to add column if original metadata was missing
+                    alterations.push(ColumnAlteration::AddColumn {
+                        column: col.clone(),
+                        after: prev_col_name.clone(),
+                    });
+                }
+            }
+        }
+        prev_col_name = Some(col_name.to_string());
+    }
+
+    if alterations.is_empty() {
+        return AlterTablePlan {
+            table_name: table_name.to_string(),
+            schema_name: schema_name.map(|s| s.to_string()),
+            family,
+            alterations,
+            statements: vec!["-- No changes detected in table columns".to_string()],
+            warnings,
+            full_script: "-- No changes detected in table columns".to_string(),
+        };
+    }
+
+    // 3. Generate dialect-specific statements
+    match family {
+        DatabaseFamily::MySql => {
+            for alt in &alterations {
+                match alt {
+                    ColumnAlteration::DropColumn { name } => {
+                        statements.push(format!(
+                            "ALTER TABLE {qualified_table} DROP COLUMN {};",
+                            quote_ident(name, family)
+                        ));
+                    }
+                    ColumnAlteration::AddColumn { column, after } => {
+                        let mut clause = format!(
+                            "ADD COLUMN {} {}",
+                            quote_ident(&column.name, family),
+                            column.data_type.trim()
+                        );
+                        if column.is_auto_increment {
+                            clause.push_str(" NOT NULL AUTO_INCREMENT");
+                        } else if !column.is_nullable {
+                            clause.push_str(" NOT NULL");
+                        }
+                        if let Some(ref d) = column.default_value {
+                            let dt = d.trim();
+                            if !dt.is_empty() {
+                                clause.push_str(&format!(" DEFAULT {dt}"));
+                            }
+                        }
+                        if let Some(ref c) = column.comment {
+                            let ct = c.trim();
+                            if !ct.is_empty() {
+                                clause.push_str(&format!(" COMMENT '{}'", ct.replace('\'', "''")));
+                            }
+                        }
+                        if let Some(prev) = after {
+                            clause.push_str(&format!(" AFTER {}", quote_ident(prev, family)));
+                        }
+                        statements.push(format!("ALTER TABLE {qualified_table} {clause};"));
+                    }
+                    ColumnAlteration::ModifyColumn {
+                        old_column: _,
+                        new_column,
+                    } => {
+                        let mut clause = format!(
+                            "MODIFY COLUMN {} {}",
+                            quote_ident(&new_column.name, family),
+                            new_column.data_type.trim()
+                        );
+                        if new_column.is_auto_increment {
+                            clause.push_str(" NOT NULL AUTO_INCREMENT");
+                        } else if !new_column.is_nullable {
+                            clause.push_str(" NOT NULL");
+                        }
+                        if let Some(ref d) = new_column.default_value {
+                            let dt = d.trim();
+                            if !dt.is_empty() {
+                                clause.push_str(&format!(" DEFAULT {dt}"));
+                            }
+                        }
+                        if let Some(ref c) = new_column.comment {
+                            let ct = c.trim();
+                            if !ct.is_empty() {
+                                clause.push_str(&format!(" COMMENT '{}'", ct.replace('\'', "''")));
+                            }
+                        }
+                        statements.push(format!("ALTER TABLE {qualified_table} {clause};"));
+                    }
+                    ColumnAlteration::RenameColumn {
+                        old_name,
+                        new_name,
+                        new_column,
+                    } => {
+                        let mut clause = format!(
+                            "CHANGE COLUMN {} {} {}",
+                            quote_ident(old_name, family),
+                            quote_ident(new_name, family),
+                            new_column.data_type.trim()
+                        );
+                        if new_column.is_auto_increment {
+                            clause.push_str(" NOT NULL AUTO_INCREMENT");
+                        } else if !new_column.is_nullable {
+                            clause.push_str(" NOT NULL");
+                        }
+                        if let Some(ref d) = new_column.default_value {
+                            let dt = d.trim();
+                            if !dt.is_empty() {
+                                clause.push_str(&format!(" DEFAULT {dt}"));
+                            }
+                        }
+                        if let Some(ref c) = new_column.comment {
+                            let ct = c.trim();
+                            if !ct.is_empty() {
+                                clause.push_str(&format!(" COMMENT '{}'", ct.replace('\'', "''")));
+                            }
+                        }
+                        statements.push(format!("ALTER TABLE {qualified_table} {clause};"));
+                    }
+                }
+            }
+        }
+
+        DatabaseFamily::Postgres => {
+            for alt in &alterations {
+                match alt {
+                    ColumnAlteration::DropColumn { name } => {
+                        statements.push(format!(
+                            "ALTER TABLE {qualified_table} DROP COLUMN {};",
+                            quote_ident(name, family)
+                        ));
+                    }
+                    ColumnAlteration::AddColumn { column, .. } => {
+                        let mut clause = format!(
+                            "ADD COLUMN {} {}",
+                            quote_ident(&column.name, family),
+                            column.data_type.trim()
+                        );
+                        if let Some(ref d) = column.default_value {
+                            let dt = d.trim();
+                            if !dt.is_empty() {
+                                clause.push_str(&format!(" DEFAULT {dt}"));
+                            }
+                        }
+                        if !column.is_nullable {
+                            clause.push_str(" NOT NULL");
+                        }
+                        statements.push(format!("ALTER TABLE {qualified_table} {clause};"));
+
+                        if let Some(ref c) = column.comment {
+                            let ct = c.trim();
+                            if !ct.is_empty() {
+                                statements.push(format!(
+                                    "COMMENT ON COLUMN {qualified_table}.{} IS '{}';",
+                                    quote_ident(&column.name, family),
+                                    ct.replace('\'', "''")
+                                ));
+                            }
+                        }
+                    }
+                    ColumnAlteration::RenameColumn {
+                        old_name,
+                        new_name,
+                        new_column,
+                    } => {
+                        statements.push(format!(
+                            "ALTER TABLE {qualified_table} RENAME COLUMN {} TO {};",
+                            quote_ident(old_name, family),
+                            quote_ident(new_name, family)
+                        ));
+                        // Check if type also needs alteration
+                        let old_opt = original_cols.iter().find(|c| c.name == *old_name);
+                        if let Some(old) = old_opt {
+                            if !old.data_type.eq_ignore_ascii_case(new_column.data_type.trim()) {
+                                statements.push(format!(
+                                    "ALTER TABLE {qualified_table} ALTER COLUMN {} TYPE {};",
+                                    quote_ident(new_name, family),
+                                    new_column.data_type.trim()
+                                ));
+                            }
+                        }
+                    }
+                    ColumnAlteration::ModifyColumn {
+                        old_column,
+                        new_column,
+                    } => {
+                        let quoted_col = quote_ident(&new_column.name, family);
+
+                        // 1. Data type change
+                        if !old_column.data_type.eq_ignore_ascii_case(new_column.data_type.trim()) {
+                            statements.push(format!(
+                                "ALTER TABLE {qualified_table} ALTER COLUMN {quoted_col} TYPE {};",
+                                new_column.data_type.trim()
+                            ));
+                        }
+
+                        // 2. Nullability change
+                        if old_column.is_nullable != new_column.is_nullable {
+                            if new_column.is_nullable {
+                                statements.push(format!(
+                                    "ALTER TABLE {qualified_table} ALTER COLUMN {quoted_col} DROP NOT NULL;"
+                                ));
+                            } else {
+                                statements.push(format!(
+                                    "ALTER TABLE {qualified_table} ALTER COLUMN {quoted_col} SET NOT NULL;"
+                                ));
+                            }
+                        }
+
+                        // 3. Default value change
+                        let old_def = normalize_opt_str(old_column.default_value.as_deref());
+                        let new_def = normalize_opt_str(new_column.default_value.as_deref());
+                        if old_def != new_def {
+                            if let Some(d) = new_def {
+                                statements.push(format!(
+                                    "ALTER TABLE {qualified_table} ALTER COLUMN {quoted_col} SET DEFAULT {d};"
+                                ));
+                            } else {
+                                statements.push(format!(
+                                    "ALTER TABLE {qualified_table} ALTER COLUMN {quoted_col} DROP DEFAULT;"
+                                ));
+                            }
+                        }
+
+                        // 4. Column comment change
+                        let old_comment = normalize_opt_str(old_column.description.as_deref());
+                        let new_comment = normalize_opt_str(new_column.comment.as_deref());
+                        if old_comment != new_comment {
+                            let c_str = new_comment.unwrap_or_default();
+                            statements.push(format!(
+                                "COMMENT ON COLUMN {qualified_table}.{quoted_col} IS '{}';",
+                                c_str.replace('\'', "''")
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        DatabaseFamily::Sqlite => {
+            // Check if changes only contain AddColumn
+            let only_add_columns = alterations.iter().all(|a| matches!(a, ColumnAlteration::AddColumn { .. }));
+
+            if only_add_columns {
+                for alt in &alterations {
+                    if let ColumnAlteration::AddColumn { column, .. } = alt {
+                        let mut clause = format!(
+                            "ADD COLUMN {} {}",
+                            quote_ident(&column.name, family),
+                            column.data_type.trim()
+                        );
+                        if let Some(ref d) = column.default_value {
+                            let dt = d.trim();
+                            if !dt.is_empty() {
+                                clause.push_str(&format!(" DEFAULT {dt}"));
+                            }
+                        }
+                        if !column.is_nullable {
+                            if column.default_value.is_none() {
+                                warnings.push(format!(
+                                    "Adding NOT NULL column '{}' without a DEFAULT value in SQLite will fail if table contains existing rows.",
+                                    column.name
+                                ));
+                            }
+                            clause.push_str(" NOT NULL");
+                        }
+                        statements.push(format!("ALTER TABLE {qualified_table} {clause};"));
+                    }
+                }
+            } else {
+                // Table recreation pattern for complex SQLite schema changes
+                warnings.push(format!(
+                    "SQLite requires recreating table '{table_name}' to apply column modifications/deletions. Existing triggers or indexes may need manual recreation."
+                ));
+
+                let temp_table_name = format!("{table_name}_new_migration");
+                let quoted_temp = quote_ident(&temp_table_name, family);
+
+                // Build new column list
+                let mut new_col_defs = Vec::new();
+                for target in target_cols {
+                    let col = &target.definition;
+                    let mut clause = format!(
+                        "    {} {}",
+                        quote_ident(&col.name, family),
+                        if col.data_type.trim().is_empty() { "TEXT" } else { col.data_type.trim() }
+                    );
+                    if col.is_primary_key {
+                        if col.is_auto_increment {
+                            clause = format!("    {} INTEGER PRIMARY KEY AUTOINCREMENT", quote_ident(&col.name, family));
+                        } else {
+                            clause.push_str(" PRIMARY KEY");
+                        }
+                    } else if !col.is_nullable {
+                        clause.push_str(" NOT NULL");
+                    }
+                    if let Some(ref d) = col.default_value {
+                        let dt = d.trim();
+                        if !dt.is_empty() {
+                            clause.push_str(&format!(" DEFAULT {dt}"));
+                        }
+                    }
+                    new_col_defs.push(clause);
+                }
+
+                // Identify common columns for data migration
+                let mut select_pairs = Vec::new();
+                for target in target_cols {
+                    if let Some(ref orig_name) = target.original_name {
+                        if original_cols.iter().any(|c| c.name.eq_ignore_ascii_case(orig_name)) {
+                            select_pairs.push((
+                                quote_ident(&target.definition.name, family),
+                                quote_ident(orig_name, family),
+                            ));
+                        }
+                    }
+                }
+
+                let create_temp_stmt = format!(
+                    "CREATE TABLE {quoted_temp} (\n{}\n);",
+                    new_col_defs.join(",\n")
+                );
+
+                statements.push("PRAGMA foreign_keys = OFF;".to_string());
+                statements.push(create_temp_stmt);
+
+                if !select_pairs.is_empty() {
+                    let dest_cols = select_pairs
+                        .iter()
+                        .map(|p| p.0.clone())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let src_cols = select_pairs
+                        .iter()
+                        .map(|p| p.1.clone())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    statements.push(format!(
+                        "INSERT INTO {quoted_temp} ({dest_cols})\nSELECT {src_cols} FROM {qualified_table};"
+                    ));
+                }
+
+                statements.push(format!("DROP TABLE {qualified_table};"));
+                statements.push(format!(
+                    "ALTER TABLE {quoted_temp} RENAME TO {};",
+                    quote_ident(table_name, family)
+                ));
+                statements.push("PRAGMA foreign_keys = ON;".to_string());
+            }
+        }
+    }
+
+    let full_script = build_transaction_script(family, &statements);
+
+    AlterTablePlan {
+        table_name: table_name.to_string(),
+        schema_name: schema_name.map(|s| s.to_string()),
+        family,
+        alterations,
+        statements,
+        warnings,
+        full_script,
+    }
+}
+
+fn normalize_opt_str(s: Option<&str>) -> Option<String> {
+    s.map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2883,4 +3423,210 @@ CREATE UNIQUE INDEX "uk_name_title" ON "public"."lato_report" ("name", "title");
         assert!(mysql_insert.contains("(`name`, `note`)"));
         assert!(mysql_insert.contains("VALUES (?, ?)"));
     }
+
+    #[test]
+    fn test_generate_alter_table_plan_mysql() {
+        let orig_cols = vec![
+            ColumnInfo {
+                name: "id".into(),
+                data_type: "INT".into(),
+                is_nullable: false,
+                is_primary_key: true,
+                is_auto_increment: true,
+                default_value: None,
+                description: None,
+            },
+            ColumnInfo {
+                name: "title".into(),
+                data_type: "VARCHAR(100)".into(),
+                is_nullable: false,
+                is_primary_key: false,
+                is_auto_increment: false,
+                default_value: None,
+                description: None,
+            },
+            ColumnInfo {
+                name: "obsolete".into(),
+                data_type: "TEXT".into(),
+                is_nullable: true,
+                is_primary_key: false,
+                is_auto_increment: false,
+                default_value: None,
+                description: None,
+            },
+        ];
+
+        // Target:
+        // 1. Keep id
+        // 2. Modify title -> VARCHAR(255) nullable with comment
+        // 3. Drop obsolete (omitted)
+        // 4. Add new column `status`
+        let target_cols = vec![
+            AlterColumnTarget::new(
+                Some("id".into()),
+                ColumnDef::new("id", "INT").primary_key(true).auto_increment(true),
+            ),
+            AlterColumnTarget::new(
+                Some("title".into()),
+                ColumnDef::new("title", "VARCHAR(255)")
+                    .nullable(true)
+                    .comment(Some("Updated title".into())),
+            ),
+            AlterColumnTarget::new(
+                None,
+                ColumnDef::new("status", "VARCHAR(20)")
+                    .nullable(false)
+                    .default_value(Some("'active'".into())),
+            ),
+        ];
+
+        let plan = generate_alter_table_plan(
+            "articles",
+            Some("cms"),
+            DatabaseFamily::MySql,
+            &orig_cols,
+            &target_cols,
+        );
+
+        assert_eq!(plan.alterations.len(), 3);
+        assert!(plan.statements.iter().any(|s| s.contains("DROP COLUMN `obsolete`")));
+        assert!(plan.statements.iter().any(|s| s.contains("MODIFY COLUMN `title` VARCHAR(255) COMMENT 'Updated title'")));
+        assert!(plan.statements.iter().any(|s| s.contains("ADD COLUMN `status` VARCHAR(20) NOT NULL DEFAULT 'active' AFTER `title`")));
+        assert!(plan.full_script.starts_with("START TRANSACTION;"));
+        assert!(plan.full_script.ends_with("COMMIT;"));
+
+        let review_plan = plan.to_review_plan();
+        assert_eq!(review_plan.inserts_count, 1); // 1 add
+        assert_eq!(review_plan.updates_count, 1); // 1 modify
+        assert_eq!(review_plan.deletes_count, 1); // 1 drop
+    }
+
+    #[test]
+    fn test_generate_alter_table_plan_postgres() {
+        let orig_cols = vec![
+            ColumnInfo {
+                name: "id".into(),
+                data_type: "BIGSERIAL".into(),
+                is_nullable: false,
+                is_primary_key: true,
+                is_auto_increment: true,
+                default_value: None,
+                description: None,
+            },
+            ColumnInfo {
+                name: "nickname".into(),
+                data_type: "VARCHAR(50)".into(),
+                is_nullable: true,
+                is_primary_key: false,
+                is_auto_increment: false,
+                default_value: None,
+                description: None,
+            },
+        ];
+
+        // Rename nickname -> display_name, change type to VARCHAR(100), make NOT NULL
+        let target_cols = vec![
+            AlterColumnTarget::new(
+                Some("id".into()),
+                ColumnDef::new("id", "BIGSERIAL").primary_key(true).auto_increment(true),
+            ),
+            AlterColumnTarget::new(
+                Some("nickname".into()),
+                ColumnDef::new("display_name", "VARCHAR(100)").nullable(false),
+            ),
+        ];
+
+        let plan = generate_alter_table_plan(
+            "members",
+            Some("public"),
+            DatabaseFamily::Postgres,
+            &orig_cols,
+            &target_cols,
+        );
+
+        assert!(plan.statements.iter().any(|s| s.contains("RENAME COLUMN \"nickname\" TO \"display_name\"")));
+        assert!(plan.statements.iter().any(|s| s.contains("ALTER COLUMN \"display_name\" TYPE VARCHAR(100)")));
+        assert!(plan.full_script.starts_with("BEGIN;"));
+        assert!(plan.full_script.ends_with("COMMIT;"));
+    }
+
+    #[test]
+    fn test_generate_alter_table_plan_sqlite() {
+        let orig_cols = vec![
+            ColumnInfo {
+                name: "id".into(),
+                data_type: "INTEGER".into(),
+                is_nullable: false,
+                is_primary_key: true,
+                is_auto_increment: true,
+                default_value: None,
+                description: None,
+            },
+            ColumnInfo {
+                name: "score".into(),
+                data_type: "INTEGER".into(),
+                is_nullable: true,
+                is_primary_key: false,
+                is_auto_increment: false,
+                default_value: None,
+                description: None,
+            },
+        ];
+
+        // Case 1: Simple ADD COLUMN in SQLite -> native ALTER TABLE ADD COLUMN
+        let add_only_target = vec![
+            AlterColumnTarget::new(
+                Some("id".into()),
+                ColumnDef::new("id", "INTEGER").primary_key(true).auto_increment(true),
+            ),
+            AlterColumnTarget::new(
+                Some("score".into()),
+                ColumnDef::new("score", "INTEGER").nullable(true),
+            ),
+            AlterColumnTarget::new(
+                None,
+                ColumnDef::new("extra", "TEXT").default_value(Some("''".into())),
+            ),
+        ];
+
+        let plan_add = generate_alter_table_plan(
+            "games",
+            None,
+            DatabaseFamily::Sqlite,
+            &orig_cols,
+            &add_only_target,
+        );
+        assert!(plan_add.statements.iter().any(|s| s.contains("ALTER TABLE \"games\" ADD COLUMN \"extra\" TEXT DEFAULT ''")));
+
+        // Case 2: Dropping or modifying columns in SQLite -> safe table recreation migration
+        let modify_target = vec![
+            AlterColumnTarget::new(
+                Some("id".into()),
+                ColumnDef::new("id", "INTEGER").primary_key(true).auto_increment(true),
+            ),
+            // Dropped score, added points
+            AlterColumnTarget::new(
+                None,
+                ColumnDef::new("points", "REAL").default_value(Some("0.0".into())),
+            ),
+        ];
+
+        let plan_recreate = generate_alter_table_plan(
+            "games",
+            None,
+            DatabaseFamily::Sqlite,
+            &orig_cols,
+            &modify_target,
+        );
+
+        assert!(!plan_recreate.warnings.is_empty());
+        assert!(plan_recreate.warnings[0].contains("recreating table 'games'"));
+        assert!(plan_recreate.statements.iter().any(|s| s.contains("PRAGMA foreign_keys = OFF;")));
+        assert!(plan_recreate.statements.iter().any(|s| s.contains("CREATE TABLE \"games_new_migration\"")));
+        assert!(plan_recreate.statements.iter().any(|s| s.contains("INSERT INTO \"games_new_migration\" (\"id\")")));
+        assert!(plan_recreate.statements.iter().any(|s| s.contains("DROP TABLE \"games\";")));
+        assert!(plan_recreate.statements.iter().any(|s| s.contains("ALTER TABLE \"games_new_migration\" RENAME TO \"games\";")));
+        assert!(plan_recreate.statements.iter().any(|s| s.contains("PRAGMA foreign_keys = ON;")));
+    }
 }
+

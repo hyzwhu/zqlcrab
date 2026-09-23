@@ -742,7 +742,7 @@ impl QueryResult {
 }
 
 /// Metadata describing a single table column.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ColumnInfo {
     pub name: String,
     pub data_type: String,
