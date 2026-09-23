@@ -28,7 +28,9 @@ struct TableActionCallbacks {
     on_view_schema: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_query_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_quick_query: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
+    on_show_ddl: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_copy_name: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
+    on_copy_insert: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_import: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_truncate: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_drop: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
@@ -52,7 +54,9 @@ pub struct Sidebar {
     on_disconnect: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_refresh: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_quick_query: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
+    on_show_ddl: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_copy_table_name: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
+    on_copy_insert_template: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_edit_connection: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
     on_duplicate_connection: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
     on_delete_connection: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
@@ -88,7 +92,9 @@ impl Sidebar {
             on_disconnect: None,
             on_refresh: None,
             on_quick_query: None,
+            on_show_ddl: None,
             on_copy_table_name: None,
+            on_copy_insert_template: None,
             on_edit_connection: None,
             on_duplicate_connection: None,
             on_delete_connection: None,
@@ -125,11 +131,27 @@ impl Sidebar {
         self
     }
 
+    pub fn on_show_ddl<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(TableInfo, &mut Window, &mut App) + 'static,
+    {
+        self.on_show_ddl = Some(Rc::new(handler));
+        self
+    }
+
     pub fn on_copy_table_name<F>(mut self, handler: F) -> Self
     where
         F: Fn(String, &mut Window, &mut App) + 'static,
     {
         self.on_copy_table_name = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_copy_insert_template<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(TableInfo, &mut Window, &mut App) + 'static,
+    {
+        self.on_copy_insert_template = Some(Rc::new(handler));
         self
     }
 
@@ -382,6 +404,19 @@ impl Sidebar {
                 }),
         );
 
+        // Show CREATE TABLE (DDL) / 查看建表语句 (DDL)
+        let ddl_handler = actions.on_show_ddl.clone();
+        let tbl_ddl = info.clone();
+        menu = menu.item(
+            PopupMenuItem::new(t("table_menu.show_ddl", lang))
+                .icon(IconName::Code)
+                .on_click(move |_, window, cx| {
+                    if let Some(ref handler) = ddl_handler {
+                        handler(tbl_ddl.clone(), window, cx);
+                    }
+                }),
+        );
+
         // Import Data... / 导入数据...
         let import_handler = actions.on_import.clone();
         let tbl_import = info.clone();
@@ -424,6 +459,21 @@ impl Sidebar {
                     }
                 }),
         );
+
+        // 7. Copy INSERT Template / 复制 INSERT 插入模板
+        if !is_view {
+            let insert_handler = actions.on_copy_insert.clone();
+            let tbl_insert = info.clone();
+            menu = menu.item(
+                PopupMenuItem::new(t("table_menu.copy_insert", lang))
+                    .icon(IconName::FileText)
+                    .on_click(move |_, window, cx| {
+                        if let Some(ref handler) = insert_handler {
+                            handler(tbl_insert.clone(), window, cx);
+                        }
+                    }),
+            );
+        }
 
         menu = menu.separator();
 
@@ -958,7 +1008,9 @@ impl RenderOnce for Sidebar {
                         on_view_schema: self.on_view_schema.clone(),
                         on_query_table: self.on_query_table.clone(),
                         on_quick_query: on_quick.clone(),
+                        on_show_ddl: self.on_show_ddl.clone(),
                         on_copy_name: self.on_copy_table_name.clone(),
+                        on_copy_insert: self.on_copy_insert_template.clone(),
                         on_import: self.on_import_table.clone(),
                         on_truncate: self.on_truncate_table.clone(),
                         on_drop: self.on_drop_table.clone(),

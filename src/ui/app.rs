@@ -15,7 +15,7 @@ use crate::db::sql_format::format_sql_with_indent;
 use crate::db::sql_gen::{
     ColumnDef, CreateTableDef, SqlReviewPlan, TableIndexDef, TableIndexType,
     column_matches_index_spec, extract_table_from_sql, generate_create_table_sql,
-    generate_review_plan, parse_sql_column_list,
+    generate_review_plan, parse_create_table_sql, parse_sql_column_list,
 };
 use crate::db::types::{
     ColumnInfo, ConnectionConfig, DatabaseFamily, DatabaseType, IndexInfo, QueryResult, QueryValue,
@@ -269,6 +269,10 @@ pub struct CrabStudioApp {
     create_table_comment_input: Entity<InputState>,
     create_table_columns: Vec<CreateTableColumnState>,
     create_table_indexes: Vec<CreateTableIndexState>,
+    create_table_ddl_editor: Entity<EditorState>,
+    create_table_sync_status: Option<Result<String, String>>,
+    create_table_last_synced_sql: String,
+    create_table_is_syncing: bool,
     create_table_is_executing: bool,
     create_table_error: Option<String>,
     create_table_copied: bool,
@@ -480,6 +484,20 @@ impl CrabStudioApp {
             },
         ];
 
+        let create_table_ddl_editor = cx.new(|cx| {
+            let mut ed = EditorState::new(window, cx)
+                .language("sql")
+                .line_number(true);
+            ed.set_value("", window, cx);
+            ed
+        });
+        cx.subscribe(&create_table_ddl_editor, |_, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
+        })
+        .detach();
+
         let import_file_path_input = cx.new(|cx| InputState::new(window, cx));
 
         let mut history_manager = QueryHistoryManager::new();
@@ -547,6 +565,10 @@ impl CrabStudioApp {
             create_table_comment_input,
             create_table_columns,
             create_table_indexes: Vec::new(),
+            create_table_ddl_editor,
+            create_table_sync_status: None,
+            create_table_last_synced_sql: String::new(),
+            create_table_is_syncing: false,
             create_table_is_executing: false,
             create_table_error: None,
             create_table_copied: false,
@@ -2291,6 +2313,21 @@ impl CrabStudioApp {
         ];
         self.create_table_indexes.clear();
 
+        for col in &self.create_table_columns {
+            cx.subscribe(&col.name, |_, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { cx.notify(); }).detach();
+            cx.subscribe(&col.data_type, |_, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { cx.notify(); }).detach();
+            cx.subscribe(&col.default_val, |_, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { cx.notify(); }).detach();
+            cx.subscribe(&col.comment, |_, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { cx.notify(); }).detach();
+        }
+
+        let (initial_sql, _) = self.get_create_table_preview_sql(cx);
+        self.create_table_ddl_editor.update(cx, |ed, cx| {
+            ed.replace_all(&initial_sql, window, cx);
+        });
+        self.create_table_last_synced_sql = initial_sql;
+        self.create_table_sync_status = None;
+        self.create_table_is_syncing = false;
+
         self.create_table_modal_open = true;
         self.create_table_is_executing = false;
         self.create_table_error = None;
@@ -2323,6 +2360,11 @@ impl CrabStudioApp {
         let type_inp = cx.new(|cx| InputState::new(window, cx).default_value(default_type));
         let def_inp = cx.new(|cx| InputState::new(window, cx).default_value(""));
         let comm_inp = cx.new(|cx| InputState::new(window, cx).default_value(""));
+
+        cx.subscribe(&name_inp, |_, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { cx.notify(); }).detach();
+        cx.subscribe(&type_inp, |_, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { cx.notify(); }).detach();
+        cx.subscribe(&def_inp, |_, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { cx.notify(); }).detach();
+        cx.subscribe(&comm_inp, |_, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { cx.notify(); }).detach();
 
         self.create_table_columns.push(CreateTableColumnState {
             name: name_inp,
@@ -2569,9 +2611,125 @@ impl CrabStudioApp {
         }
     }
 
+    /// Synchronize Create Table columns, types, and indexes from editable DDL text
+    pub fn sync_create_table_from_ddl(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        manual: bool,
+    ) -> bool {
+        let current_sql = self.create_table_ddl_editor.read(cx).value().to_string();
+        let trimmed_sql = current_sql.trim();
+        if trimmed_sql.is_empty() {
+            if manual {
+                self.create_table_error = Some("DDL editor is empty".to_string());
+                cx.notify();
+            }
+            return false;
+        }
+
+        let family = self
+            .active_connection
+            .as_ref()
+            .map(|c| c.config.db_type.family())
+            .unwrap_or(DatabaseFamily::Sqlite);
+
+        match parse_create_table_sql(trimmed_sql, family) {
+            Ok(def) => {
+                self.create_table_is_syncing = true;
+
+                // Sync Table Name
+                self.create_table_name_input.update(cx, |inp, cx| {
+                    inp.set_value(&def.table_name, window, cx);
+                });
+
+                // Sync Schema if present
+                if let Some(ref schema) = def.schema {
+                    self.create_table_schema_input.update(cx, |inp, cx| {
+                        inp.set_value(schema, window, cx);
+                    });
+                }
+
+                // Sync Table Comment if present
+                if let Some(ref comment) = def.comment {
+                    self.create_table_comment_input.update(cx, |inp, cx| {
+                        inp.set_value(comment, window, cx);
+                    });
+                }
+
+                // Sync Columns
+                self.create_table_columns.clear();
+                for col in def.columns {
+                    let name_inp = cx.new(|cx| InputState::new(window, cx).default_value(&col.name));
+                    let type_inp = cx.new(|cx| InputState::new(window, cx).default_value(&col.data_type));
+                    let def_val_str = col.default_value.unwrap_or_default();
+                    let def_inp = cx.new(|cx| InputState::new(window, cx).default_value(&def_val_str));
+                    let comm_str = col.comment.unwrap_or_default();
+                    let comm_inp = cx.new(|cx| InputState::new(window, cx).default_value(&comm_str));
+
+                    cx.subscribe(&name_inp, |_, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { cx.notify(); }).detach();
+                    cx.subscribe(&type_inp, |_, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { cx.notify(); }).detach();
+                    cx.subscribe(&def_inp, |_, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { cx.notify(); }).detach();
+                    cx.subscribe(&comm_inp, |_, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { cx.notify(); }).detach();
+
+                    self.create_table_columns.push(CreateTableColumnState {
+                        name: name_inp,
+                        data_type: type_inp,
+                        is_primary_key: col.is_primary_key,
+                        is_nullable: col.is_nullable,
+                        is_auto_increment: col.is_auto_increment,
+                        default_val: def_inp,
+                        comment: comm_inp,
+                    });
+                }
+
+                // Sync Indexes
+                self.create_table_indexes.clear();
+                for idx in def.indexes {
+                    let name_inp = cx.new(|cx| InputState::new(window, cx).default_value(&idx.name));
+                    let cols_str = idx.columns.join(", ");
+                    let cols_inp = cx.new(|cx| InputState::new(window, cx).default_value(&cols_str));
+
+                    cx.subscribe(&name_inp, |_, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { cx.notify(); }).detach();
+                    cx.subscribe(&cols_inp, |_, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { cx.notify(); }).detach();
+
+                    self.create_table_indexes.push(CreateTableIndexState {
+                        name: name_inp,
+                        index_type: idx.index_type,
+                        columns: cols_inp,
+                    });
+                }
+
+                self.create_table_last_synced_sql = current_sql;
+                self.create_table_sync_status = Some(Ok(format!(
+                    "Synced {} column(s), {} index(es)",
+                    self.create_table_columns.len(),
+                    self.create_table_indexes.len()
+                )));
+                self.create_table_error = None;
+                self.create_table_is_syncing = false;
+                cx.notify();
+                true
+            }
+            Err(err) => {
+                self.create_table_sync_status = Some(Err(err.clone()));
+                if manual {
+                    self.create_table_error = Some(format!("DDL parse failed: {err}"));
+                }
+                cx.notify();
+                false
+            }
+        }
+    }
+
     /// Execute CREATE TABLE DDL atomically and refresh tables
     pub fn execute_create_table(&mut self, cx: &mut Context<Self>) {
-        let (sql, validation_err) = self.get_create_table_preview_sql(cx);
+        let editor_sql = self.create_table_ddl_editor.read(cx).value().to_string();
+        let (sql, validation_err) = if !editor_sql.trim().is_empty() {
+            (editor_sql, None)
+        } else {
+            self.get_create_table_preview_sql(cx)
+        };
         if let Some(err) = validation_err {
             self.create_table_error = Some(err);
             cx.notify();
@@ -2638,6 +2796,97 @@ impl CrabStudioApp {
         self.create_query_tab(Some("create_table.sql".to_string()), Some(&sql), window, cx);
         self.status_message = Some("Loaded Create Table DDL into new Query Tab".to_string());
         cx.notify();
+    }
+
+    /// Extract table DDL and open it in a new Query Console tab
+    pub fn show_table_ddl(
+        &mut self,
+        table: TableInfo,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(ref conn) = self.active_connection else {
+            return;
+        };
+        let family = conn.config.db_type.family();
+        let tbl_name = table.name.clone();
+
+        let ddl = if self.selected_table.as_deref() == Some(&tbl_name) && self.schema_ddl.is_some() {
+            self.schema_ddl.clone().unwrap()
+        } else if let Ok(cache) = self.sql_metadata_cache.read() {
+            if let Some(cols) = cache.get_columns_for_table(&tbl_name) {
+                let mut def = crate::db::sql_gen::CreateTableDef::new(&tbl_name)
+                    .schema(table.schema.clone());
+                for col in cols {
+                    let mut cdef = crate::db::sql_gen::ColumnDef::new(&col.name, &col.data_type)
+                        .primary_key(col.is_primary_key)
+                        .nullable(col.is_nullable)
+                        .auto_increment(col.is_auto_increment)
+                        .default_value(col.default_value.clone());
+                    if let Some(ref comment) = col.description {
+                        cdef = cdef.comment(Some(comment.clone()));
+                    }
+                    def = def.column(cdef);
+                }
+                crate::db::sql_gen::generate_create_table_sql(&def, family)
+                    .unwrap_or_else(|_| format!("-- Table: {}\n", tbl_name))
+            } else {
+                format!("-- DDL for {}\n-- Note: Select table in sidebar to inspect live schema", tbl_name)
+            }
+        } else {
+            format!("-- Table: {}\n", tbl_name)
+        };
+
+        let tab_title = format!("DDL: {}", tbl_name);
+        self.create_query_tab(Some(tab_title), Some(&ddl), window, cx);
+        self.status_message = Some(format!("Opened DDL for {}", tbl_name));
+        cx.notify();
+    }
+
+    /// Generate an INSERT INTO template for a table and copy it to clipboard
+    pub fn copy_insert_template(&mut self, table: TableInfo, cx: &mut Context<Self>) {
+        let Some(ref conn) = self.active_connection else {
+            return;
+        };
+        let family = conn.config.db_type.family();
+        let conn = conn.clone();
+        let schema = table.schema.clone();
+        let tbl_name = table.name.clone();
+
+        let cached_cols = if self.selected_table.as_deref() == Some(&tbl_name) && !self.schema_columns.is_empty() {
+            Some(self.schema_columns.clone())
+        } else if let Ok(cache) = self.sql_metadata_cache.read() {
+            cache.get_columns_for_table(&tbl_name).cloned()
+        } else {
+            None
+        };
+
+        if let Some(cols) = cached_cols {
+            let template = crate::db::sql_gen::build_insert_template(&table, &cols, family);
+            cx.write_to_clipboard(ClipboardItem::new_string(template));
+            self.status_message = Some(format!("Copied INSERT template for {tbl_name}"));
+            cx.notify();
+            return;
+        }
+
+        self.status_message = Some(format!("Generating INSERT template for {}...", tbl_name));
+        cx.notify();
+
+        cx.spawn(async move |this, cx: &mut AsyncApp| {
+            let cols = conn
+                .list_columns(None, schema.as_deref(), &tbl_name)
+                .await
+                .unwrap_or_default();
+
+            this.update(cx, |app, cx| {
+                let template = crate::db::sql_gen::build_insert_template(&table, &cols, family);
+                cx.write_to_clipboard(ClipboardItem::new_string(template));
+                app.status_message = Some(format!("Copied INSERT template for {tbl_name}"));
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// Open Drop Table / Drop View confirmation dialog
@@ -3786,7 +4035,7 @@ impl CrabStudioApp {
 }
 
 impl Render for CrabStudioApp {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let active_conn_id = self.active_connection.as_ref().map(|c| c.config.id.clone());
         let is_connected = self.active_connection.is_some();
         let is_read_only = self
@@ -3943,6 +4192,14 @@ impl Render for CrabStudioApp {
                 });
             }
         })
+        .on_show_ddl({
+            let handle = app_handle.clone();
+            move |table, window, cx| {
+                handle.update(cx, |this, cx| {
+                    this.show_table_ddl(table, window, cx);
+                });
+            }
+        })
         .on_copy_table_name({
             let handle = app_handle.clone();
             move |text, _, cx| {
@@ -3950,6 +4207,14 @@ impl Render for CrabStudioApp {
                     cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
                     this.status_message = Some(format!("Copied to clipboard: {text}"));
                     cx.notify();
+                });
+            }
+        })
+        .on_copy_insert_template({
+            let handle = app_handle.clone();
+            move |table, _, cx| {
+                handle.update(cx, |this, cx| {
+                    this.copy_insert_template(table, cx);
                 });
             }
         })
@@ -4742,6 +5007,31 @@ impl Render for CrabStudioApp {
                 let db_name = conn.config.database.clone();
                 let (preview_sql, validation_err) = self.get_create_table_preview_sql(cx);
 
+                // Bidirectional synchronization between visual form and DDL code editor
+                let editor_val = self.create_table_ddl_editor.read(cx).value().to_string();
+                if !self.create_table_is_syncing {
+                    if editor_val != self.create_table_last_synced_sql {
+                        // User typed or pasted in DDL editor -> attempt auto sync to visual columns
+                        self.sync_create_table_from_ddl(window, cx, false);
+                    } else if preview_sql != self.create_table_last_synced_sql {
+                        // User changed visual form and editor has not been modified -> update DDL editor
+                        self.create_table_is_syncing = true;
+                        self.create_table_ddl_editor.update(cx, |ed, cx| {
+                            ed.set_value(&preview_sql, window, cx);
+                        });
+                        self.create_table_last_synced_sql = preview_sql.clone();
+                        self.create_table_sync_status = None;
+                        self.create_table_is_syncing = false;
+                    }
+                }
+
+                let current_editor_sql = self.create_table_ddl_editor.read(cx).value().to_string();
+                let effective_sql = if !current_editor_sql.trim().is_empty() {
+                    current_editor_sql
+                } else {
+                    preview_sql
+                };
+
                 let on_cancel = {
                     let handle = app_handle.clone();
                     move |_: &mut Window, cx: &mut App| {
@@ -4755,6 +5045,14 @@ impl Render for CrabStudioApp {
                     move |_: &mut Window, cx: &mut App| {
                         handle.update(cx, |this, cx| {
                             this.execute_create_table(cx);
+                        });
+                    }
+                };
+                let on_sync_ddl = {
+                    let handle = app_handle.clone();
+                    move |window: &mut Window, cx: &mut App| {
+                        handle.update(cx, |this, cx| {
+                            this.sync_create_table_from_ddl(window, cx, true);
                         });
                     }
                 };
@@ -4867,8 +5165,11 @@ impl Render for CrabStudioApp {
                         &self.create_table_schema_input,
                         &self.create_table_comment_input,
                         self.create_table_columns.clone(),
-                        preview_sql,
+                        effective_sql,
                     )
+                    .ddl_editor(self.create_table_ddl_editor.clone())
+                    .sync_status(self.create_table_sync_status.clone())
+                    .on_sync_from_ddl(on_sync_ddl)
                     .indexes(self.create_table_indexes.clone())
                     .on_add_index(on_add_idx)
                     .on_remove_index(on_remove_idx)

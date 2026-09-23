@@ -1,7 +1,7 @@
 //! SQL statement generator for atomic tabular updates and deletions across database dialects.
 
 use crate::db::changeset::GridChangeset;
-use crate::db::types::{ColumnInfo, DatabaseFamily, QueryValue, quote_ident};
+use crate::db::types::{ColumnInfo, DatabaseFamily, QueryValue, TableInfo, quote_ident};
 use std::collections::BTreeMap;
 
 /// Detailed review plan generated from pending changeset modifications.
@@ -1340,6 +1340,617 @@ pub fn generate_create_table_sql(
     }
 }
 
+/// Parses a CREATE TABLE SQL script (supporting SQLite, PostgreSQL, and MySQL dialects)
+/// into a structured `CreateTableDef`.
+/// Also supports multi-statement scripts containing subsequent `COMMENT ON` or `CREATE INDEX` statements.
+pub fn parse_create_table_sql(
+    sql: &str,
+    _default_family: DatabaseFamily,
+) -> Result<CreateTableDef, String> {
+    let raw = sql.trim();
+    if raw.is_empty() {
+        return Err("SQL statement is empty".to_string());
+    }
+
+    // Split multi-statement scripts (e.g. CREATE TABLE + COMMENT ON + CREATE INDEX)
+    let statements = split_sql_statements(raw);
+    let mut main_stmt = None;
+    let mut extra_stmts = Vec::new();
+
+    for stmt in statements {
+        let upper = stmt.trim().to_ascii_uppercase();
+        if upper.starts_with("CREATE TABLE") || upper.starts_with("CREATE TEMPORARY TABLE") || upper.starts_with("CREATE TEMP TABLE") {
+            if main_stmt.is_none() {
+                main_stmt = Some(stmt);
+            } else {
+                extra_stmts.push(stmt);
+            }
+        } else {
+            extra_stmts.push(stmt);
+        }
+    }
+
+    let Some(main_sql) = main_stmt else {
+        return Err("No valid 'CREATE TABLE' statement found in input".to_string());
+    };
+
+    let mut def = parse_single_create_table_statement(&main_sql)?;
+
+    // Process supplementary statements (PostgreSQL COMMENT ON and independent CREATE INDEX)
+    for extra in extra_stmts {
+        let trimmed = extra.trim();
+        let upper = trimmed.to_ascii_uppercase();
+
+        if upper.starts_with("COMMENT ON TABLE") {
+            // COMMENT ON TABLE [schema.]table IS 'comment';
+            if let Some(pos) = upper.find(" IS ") {
+                let comment_part = &trimmed[pos + 4..].trim_end_matches(';').trim();
+                if let Some(c) = extract_quoted_literal(comment_part) {
+                    def.comment = Some(c);
+                }
+            }
+        } else if upper.starts_with("COMMENT ON COLUMN") {
+            // COMMENT ON COLUMN [schema.]table.column IS 'comment';
+            if let Some(pos) = upper.find(" IS ") {
+                let target_part = trimmed[17..pos].trim();
+                let comment_part = &trimmed[pos + 4..].trim_end_matches(';').trim();
+                if let Some(c) = extract_quoted_literal(comment_part) {
+                    // Extract column name from dot notation (e.g. "public"."users"."id" or users.id)
+                    let sub_parts: Vec<&str> = target_part.split('.').collect();
+                    if let Some(last_col) = sub_parts.last() {
+                        let clean_col = strip_identifier_quotes(last_col);
+                        if let Some(col) = def.columns.iter_mut().find(|c| c.name.eq_ignore_ascii_case(&clean_col)) {
+                            col.comment = Some(c);
+                        }
+                    }
+                }
+            }
+        } else if upper.starts_with("CREATE INDEX") || upper.starts_with("CREATE UNIQUE INDEX") {
+            // CREATE [UNIQUE] INDEX [name] ON [table] (col1, col2)
+            let is_unique = upper.starts_with("CREATE UNIQUE INDEX");
+            let after_idx = if is_unique { &trimmed[19..] } else { &trimmed[12..] }.trim();
+
+            if let Some(on_idx) = after_idx.to_ascii_uppercase().find(" ON ") {
+                let idx_name_raw = after_idx[..on_idx].trim();
+                let idx_name = strip_identifier_quotes(idx_name_raw);
+                let rem = &after_idx[on_idx + 4..];
+
+                if let Some(paren_start) = rem.find('(') {
+                    if let Some(paren_end) = rem.rfind(')') {
+                        let cols_raw = &rem[paren_start + 1..paren_end];
+                        let cols = parse_sql_column_list(cols_raw);
+                        if !cols.is_empty() {
+                            let mut index_def = TableIndexDef::new(idx_name, cols);
+                            if is_unique {
+                                index_def = index_def.unique(true);
+                            }
+                            def.indexes.push(index_def);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(def)
+}
+
+/// Parses the primary `CREATE TABLE ... (...)` statement body.
+fn parse_single_create_table_statement(sql: &str) -> Result<CreateTableDef, String> {
+    let clean = sql.trim();
+    let upper = clean.to_ascii_uppercase();
+
+    // 1. Locate start of table name
+    let create_idx = upper
+        .find("CREATE TABLE")
+        .or_else(|| upper.find("CREATE TEMPORARY TABLE"))
+        .or_else(|| upper.find("CREATE TEMP TABLE"))
+        .ok_or_else(|| "Not a CREATE TABLE statement".to_string())?;
+
+    let after_create = if upper[create_idx..].starts_with("CREATE TEMPORARY TABLE") {
+        &clean[create_idx + 22..]
+    } else if upper[create_idx..].starts_with("CREATE TEMP TABLE") {
+        &clean[create_idx + 17..]
+    } else {
+        &clean[create_idx + 12..]
+    }
+    .trim();
+
+    // Skip optional IF NOT EXISTS
+    let after_if_not_exists = if after_create.to_ascii_uppercase().starts_with("IF NOT EXISTS") {
+        after_create[13..].trim()
+    } else {
+        after_create
+    };
+
+    // Find the opening parenthesis of column definitions
+    let open_paren_idx = after_if_not_exists
+        .find('(')
+        .ok_or_else(|| "Missing opening parenthesis '(' in CREATE TABLE".to_string())?;
+
+    let table_ident = after_if_not_exists[..open_paren_idx].trim();
+    let (schema_opt, table_name) = parse_qualified_identifier(table_ident)
+        .ok_or_else(|| format!("Invalid table name identifier: '{table_ident}'"))?;
+
+    // Find the matching outermost closing parenthesis
+    let body_start = open_paren_idx + 1;
+    let mut depth = 1;
+    let chars: Vec<char> = after_if_not_exists.chars().collect();
+    let mut close_paren_idx = None;
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut in_backtick = false;
+
+    let mut i = body_start;
+    while i < chars.len() {
+        let ch = chars[i];
+        if ch == '\'' && !in_double_quote && !in_backtick {
+            in_single_quote = !in_single_quote;
+        } else if ch == '"' && !in_single_quote && !in_backtick {
+            in_double_quote = !in_double_quote;
+        } else if ch == '`' && !in_single_quote && !in_double_quote {
+            in_backtick = !in_backtick;
+        } else if !in_single_quote && !in_double_quote && !in_backtick {
+            if ch == '(' {
+                depth += 1;
+            } else if ch == ')' {
+                depth -= 1;
+                if depth == 0 {
+                    close_paren_idx = Some(i);
+                    break;
+                }
+            }
+        }
+        i += 1;
+    }
+
+    let close_paren_idx = close_paren_idx
+        .ok_or_else(|| "Unmatched closing parenthesis ')' in CREATE TABLE".to_string())?;
+
+    let body_content: String = chars[body_start..close_paren_idx].iter().collect();
+    let after_body: String = chars[close_paren_idx + 1..].iter().collect();
+
+    let mut def = CreateTableDef::new(table_name).schema(schema_opt);
+
+    // Extract table comment from options after closing parenthesis (e.g. MySQL COMMENT='...')
+    if let Some(c) = extract_mysql_table_comment(&after_body) {
+        def.comment = Some(c);
+    }
+
+    // Split body into comma-separated items safely
+    let items = split_bracket_comma_items(&body_content);
+
+    let mut table_pks: Vec<String> = Vec::new();
+
+    for item in items {
+        let trimmed_item = item.trim();
+        if trimmed_item.is_empty() {
+            continue;
+        }
+
+        let item_upper = trimmed_item.to_ascii_uppercase();
+
+        // 1. Table-level PRIMARY KEY constraint: PRIMARY KEY (col1, col2)
+        if item_upper.starts_with("PRIMARY KEY") || item_upper.starts_with("CONSTRAINT") && item_upper.contains("PRIMARY KEY") {
+            if let Some(open) = trimmed_item.find('(') {
+                if let Some(close) = trimmed_item.rfind(')') {
+                    let cols_str = &trimmed_item[open + 1..close];
+                    for col in parse_sql_column_list(cols_str) {
+                        let clean_pk = extract_base_column_name(&col);
+                        if !clean_pk.is_empty() {
+                            table_pks.push(clean_pk);
+                        }
+                    }
+                    continue;
+                }
+            }
+        }
+
+        // 2. Table-level index constraint:
+        //    UNIQUE KEY [name] (col1), KEY [name] (col1), INDEX [name] (col1)
+        if item_upper.starts_with("UNIQUE KEY")
+            || item_upper.starts_with("UNIQUE INDEX")
+            || item_upper.starts_with("KEY")
+            || item_upper.starts_with("INDEX")
+            || (item_upper.starts_with("CONSTRAINT") && item_upper.contains("UNIQUE"))
+        {
+            if let Some(idx_def) = parse_table_level_index_item(trimmed_item) {
+                def.indexes.push(idx_def);
+                continue;
+            }
+        }
+
+        // 3. Skip standalone FOREIGN KEY or CHECK table constraints
+        if item_upper.starts_with("FOREIGN KEY")
+            || item_upper.starts_with("CHECK")
+            || (item_upper.starts_with("CONSTRAINT") && (item_upper.contains("FOREIGN KEY") || item_upper.contains("CHECK")))
+        {
+            continue;
+        }
+
+        // 4. Otherwise, parse as ColumnDef
+        if let Some(col_def) = parse_column_def_item(trimmed_item) {
+            def.columns.push(col_def);
+        }
+    }
+
+    // Apply any table-level PRIMARY KEY annotations to matching columns
+    if !table_pks.is_empty() {
+        for col in &mut def.columns {
+            if table_pks.iter().any(|pk| pk.eq_ignore_ascii_case(&col.name)) {
+                col.is_primary_key = true;
+                col.is_nullable = false;
+            }
+        }
+    }
+
+    if def.columns.is_empty() {
+        return Err("No column definitions found in CREATE TABLE".to_string());
+    }
+
+    Ok(def)
+}
+
+/// Safely splits the contents of the main CREATE TABLE parenthesis by commas,
+/// respecting nested parentheses (e.g. `DECIMAL(10, 2)`) and quoted strings.
+fn split_bracket_comma_items(s: &str) -> Vec<String> {
+    let mut items = Vec::new();
+    let mut current = String::new();
+    let mut depth: usize = 0;
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut in_backtick = false;
+
+    let chars: Vec<char> = s.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+
+    while i < len {
+        let ch = chars[i];
+
+        if ch == '\'' && !in_double && !in_backtick {
+            in_single = !in_single;
+            current.push(ch);
+        } else if ch == '"' && !in_single && !in_backtick {
+            in_double = !in_double;
+            current.push(ch);
+        } else if ch == '`' && !in_single && !in_double {
+            in_backtick = !in_backtick;
+            current.push(ch);
+        } else if !in_single && !in_double && !in_backtick {
+            if ch == '(' {
+                depth += 1;
+                current.push(ch);
+            } else if ch == ')' {
+                depth = depth.saturating_sub(1);
+                current.push(ch);
+            } else if ch == ',' && depth == 0 {
+                let trimmed = current.trim();
+                if !trimmed.is_empty() {
+                    items.push(trimmed.to_string());
+                }
+                current.clear();
+            } else {
+                current.push(ch);
+            }
+        } else {
+            current.push(ch);
+        }
+        i += 1;
+    }
+
+    let trimmed = current.trim();
+    if !trimmed.is_empty() {
+        items.push(trimmed.to_string());
+    }
+
+    items
+}
+
+/// Parses an individual column definition string (e.g. `"name" VARCHAR(255) NOT NULL DEFAULT 'active' COMMENT 'username'`).
+fn parse_column_def_item(item: &str) -> Option<ColumnDef> {
+    let clean = item.trim();
+    if clean.is_empty() {
+        return None;
+    }
+
+    // Split words while respecting quotes and parenthesis
+    let tokens = tokenize_sql_clause(clean);
+    if tokens.is_empty() {
+        return None;
+    }
+
+    let col_name = strip_identifier_quotes(&tokens[0]);
+    if col_name.is_empty() {
+        return None;
+    }
+
+    let mut data_type_tokens = Vec::new();
+    let mut is_primary_key = false;
+    let mut is_nullable = true;
+    let mut is_auto_increment = false;
+    let mut default_value = None;
+    let mut comment = None;
+
+    let mut idx = 1;
+    let token_count = tokens.len();
+
+    // 1. Gather data type tokens until modifier keywords are met
+    while idx < token_count {
+        let tok = &tokens[idx];
+        let tok_upper = tok.to_ascii_uppercase();
+
+        if tok_upper == "PRIMARY"
+            || tok_upper == "NOT"
+            || tok_upper == "NULL"
+            || tok_upper == "AUTO_INCREMENT"
+            || tok_upper == "AUTOINCREMENT"
+            || tok_upper == "DEFAULT"
+            || tok_upper == "COMMENT"
+            || tok_upper == "UNIQUE"
+            || tok_upper == "REFERENCES"
+            || tok_upper == "CHECK"
+            || tok_upper == "COLLATE"
+            || tok_upper == "GENERATED"
+            || tok_upper == "AS"
+        {
+            break;
+        }
+
+        data_type_tokens.push(tok.clone());
+        idx += 1;
+    }
+
+    let mut data_type = data_type_tokens.join(" ");
+    let dt_upper = data_type.to_ascii_uppercase();
+
+    // Check for PostgreSQL serial types or SQLite INTEGER PRIMARY KEY AUTOINCREMENT
+    if dt_upper == "SERIAL" || dt_upper == "BIGSERIAL" || dt_upper == "SMALLSERIAL" {
+        is_auto_increment = true;
+        is_primary_key = true;
+        is_nullable = false;
+    }
+
+    // 2. Parse remaining modifier tokens
+    while idx < token_count {
+        let tok = &tokens[idx];
+        let tok_upper = tok.to_ascii_uppercase();
+
+        if tok_upper == "PRIMARY" {
+            if idx + 1 < token_count && tokens[idx + 1].eq_ignore_ascii_case("KEY") {
+                is_primary_key = true;
+                is_nullable = false;
+                idx += 2;
+                continue;
+            }
+        } else if tok_upper == "NOT" {
+            if idx + 1 < token_count && tokens[idx + 1].eq_ignore_ascii_case("NULL") {
+                is_nullable = false;
+                idx += 2;
+                continue;
+            }
+        } else if tok_upper == "NULL" {
+            is_nullable = true;
+            idx += 1;
+            continue;
+        } else if tok_upper == "AUTO_INCREMENT" || tok_upper == "AUTOINCREMENT" {
+            is_auto_increment = true;
+            is_primary_key = true;
+            is_nullable = false;
+            idx += 1;
+            continue;
+        } else if tok_upper == "DEFAULT" {
+            if idx + 1 < token_count {
+                let val_token = &tokens[idx + 1];
+                default_value = Some(val_token.clone());
+                idx += 2;
+                continue;
+            }
+        } else if tok_upper == "COMMENT" {
+            if idx + 1 < token_count {
+                let comment_token = &tokens[idx + 1];
+                comment = extract_quoted_literal(comment_token).or_else(|| Some(comment_token.clone()));
+                idx += 2;
+                continue;
+            }
+        }
+
+        idx += 1;
+    }
+
+    // If data type is empty, default to TEXT
+    if data_type.trim().is_empty() {
+        data_type = "TEXT".to_string();
+    }
+
+    if is_primary_key {
+        is_nullable = false;
+    }
+
+    Some(ColumnDef {
+        name: col_name,
+        data_type,
+        is_primary_key,
+        is_nullable,
+        is_auto_increment,
+        default_value,
+        comment,
+    })
+}
+
+/// Parses an inline table-level index (e.g. `UNIQUE KEY uk_name (col1, col2)` or `KEY (col1)`).
+fn parse_table_level_index_item(item: &str) -> Option<TableIndexDef> {
+    let clean = item.trim();
+
+    let open_paren = clean.find('(')?;
+    let close_paren = clean.rfind(')')?;
+    if close_paren <= open_paren {
+        return None;
+    }
+
+    let cols_str = &clean[open_paren + 1..close_paren];
+    let cols = parse_sql_column_list(cols_str);
+    if cols.is_empty() {
+        return None;
+    }
+
+    let prefix = clean[..open_paren].trim();
+    let prefix_upper = prefix.to_ascii_uppercase();
+    let is_unique = prefix_upper.starts_with("UNIQUE");
+
+    let tokens: Vec<&str> = prefix.split_whitespace().collect();
+    let mut idx_name = String::new();
+
+    // Look for identifier after KEY / INDEX
+    for (i, &t) in tokens.iter().enumerate() {
+        let tu = t.to_ascii_uppercase();
+        if (tu == "KEY" || tu == "INDEX" || tu == "UNIQUE") && i + 1 < tokens.len() {
+            let candidate = strip_identifier_quotes(tokens[i + 1]);
+            if !candidate.is_empty()
+                && !candidate.eq_ignore_ascii_case("KEY")
+                && !candidate.eq_ignore_ascii_case("INDEX")
+            {
+                idx_name = candidate;
+                break;
+            }
+        }
+    }
+
+    let mut index_def = TableIndexDef::new(idx_name, cols);
+    if is_unique {
+        index_def = index_def.unique(true);
+    }
+    Some(index_def)
+}
+
+/// Tokenizes a SQL clause while preserving quoted strings and parenthesized groups (like VARCHAR(255)).
+fn tokenize_sql_clause(s: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut in_backtick = false;
+    let mut paren_depth: usize = 0;
+
+    for ch in s.chars() {
+        if ch == '\'' && !in_double && !in_backtick {
+            in_single = !in_single;
+            current.push(ch);
+        } else if ch == '"' && !in_single && !in_backtick {
+            in_double = !in_double;
+            current.push(ch);
+        } else if ch == '`' && !in_single && !in_double {
+            in_backtick = !in_backtick;
+            current.push(ch);
+        } else if !in_single && !in_double && !in_backtick {
+            if ch == '(' {
+                paren_depth += 1;
+                current.push(ch);
+            } else if ch == ')' {
+                paren_depth = paren_depth.saturating_sub(1);
+                current.push(ch);
+            } else if ch.is_whitespace() && paren_depth == 0 {
+                if !current.is_empty() {
+                    tokens.push(current.clone());
+                    current.clear();
+                }
+            } else {
+                current.push(ch);
+            }
+        } else {
+            current.push(ch);
+        }
+    }
+
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+
+    tokens
+}
+
+/// Extracts the literal content from a single-quoted string literal (e.g. `'hello world'` -> `hello world`),
+/// un-escaping `''` and `\'`.
+fn extract_quoted_literal(s: &str) -> Option<String> {
+    let trimmed = s.trim();
+    if trimmed.starts_with('\'') && trimmed.ends_with('\'') && trimmed.len() >= 2 {
+        let inner = &trimmed[1..trimmed.len() - 1];
+        Some(inner.replace("''", "'").replace("\\'", "'"))
+    } else {
+        None
+    }
+}
+
+/// Extracts MySQL table comment from table options (e.g. `ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Table info'`).
+fn extract_mysql_table_comment(options: &str) -> Option<String> {
+    let upper = options.to_ascii_uppercase();
+    let comment_pos = upper.find("COMMENT")?;
+    let rem = options[comment_pos + 7..].trim();
+    let after_eq = if rem.starts_with('=') { rem[1..].trim() } else { rem };
+    extract_quoted_literal(after_eq)
+}
+
+/// Builds an INSERT INTO SQL template statement with dialect identifier quoting and parameter placeholders.
+/// Automatically omits auto-increment / serial primary key columns when other writable columns exist.
+pub fn build_insert_template(
+    table: &TableInfo,
+    columns: &[ColumnInfo],
+    family: DatabaseFamily,
+) -> String {
+    let qualified = table.qualified_name(family);
+    if columns.is_empty() {
+        return match family {
+            DatabaseFamily::MySql => format!("INSERT INTO {qualified} () VALUES ();"),
+            _ => format!("INSERT INTO {qualified} DEFAULT VALUES;"),
+        };
+    }
+
+    // Filter columns: omit auto-increment columns if at least one non-auto column exists
+    let has_non_auto = columns.iter().any(|c| !c.is_auto_increment);
+    let target_cols: Vec<&ColumnInfo> = if has_non_auto {
+        columns.iter().filter(|c| !c.is_auto_increment).collect()
+    } else {
+        columns.iter().collect()
+    };
+
+    let col_names: Vec<String> = target_cols
+        .iter()
+        .map(|c| quote_ident(&c.name, family))
+        .collect();
+
+    let placeholders: Vec<String> = target_cols
+        .iter()
+        .map(|c| {
+            if let Some(ref def) = c.default_value {
+                let d = def.trim();
+                if !d.is_empty() {
+                    return d.to_string();
+                }
+            }
+            "?".to_string()
+        })
+        .collect();
+
+    let cols_str = col_names.join(", ");
+    let vals_str = placeholders.join(", ");
+
+    if cols_str.len() > 60 || target_cols.len() > 5 {
+        let indented_cols = col_names
+            .iter()
+            .map(|c| format!("    {c}"))
+            .collect::<Vec<_>>()
+            .join(",\n");
+        let indented_vals = placeholders
+            .iter()
+            .map(|v| format!("    {v}"))
+            .collect::<Vec<_>>()
+            .join(",\n");
+        format!("INSERT INTO {qualified} (\n{indented_cols}\n) VALUES (\n{indented_vals}\n);")
+    } else {
+        format!("INSERT INTO {qualified} ({cols_str}) VALUES ({vals_str});")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2135,5 +2746,141 @@ CREATE UNIQUE INDEX "uk_name_title" ON "public"."lato_report" ("name", "title");
             let snippet = truncate_sql_snippet(stmt, 60);
             assert!(!snippet.is_empty());
         }
+    }
+
+    #[test]
+    fn test_parse_create_table_mysql() {
+        let sql = r#"
+        CREATE TABLE `shop_db`.`products` (
+            `id` INT NOT NULL AUTO_INCREMENT,
+            `title` VARCHAR(255) NOT NULL COMMENT 'Item title',
+            `price` DECIMAL(10, 2) DEFAULT 0.00,
+            `status` VARCHAR(20) DEFAULT 'draft',
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uk_title` (`title`),
+            KEY `idx_status` (`status`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Catalog products';
+        "#;
+
+        let def = parse_create_table_sql(sql, DatabaseFamily::MySql).unwrap();
+        assert_eq!(def.table_name, "products");
+        assert_eq!(def.schema.as_deref(), Some("shop_db"));
+        assert_eq!(def.comment.as_deref(), Some("Catalog products"));
+        assert_eq!(def.columns.len(), 4);
+
+        // id
+        assert_eq!(def.columns[0].name, "id");
+        assert_eq!(def.columns[0].data_type, "INT");
+        assert!(def.columns[0].is_primary_key);
+        assert!(def.columns[0].is_auto_increment);
+        assert!(!def.columns[0].is_nullable);
+
+        // title
+        assert_eq!(def.columns[1].name, "title");
+        assert_eq!(def.columns[1].data_type, "VARCHAR(255)");
+        assert_eq!(def.columns[1].comment.as_deref(), Some("Item title"));
+        assert!(!def.columns[1].is_nullable);
+
+        // price (verifying DECIMAL(10, 2) preserved correctly)
+        assert_eq!(def.columns[2].name, "price");
+        assert_eq!(def.columns[2].data_type, "DECIMAL(10, 2)");
+        assert_eq!(def.columns[2].default_value.as_deref(), Some("0.00"));
+
+        // indexes
+        assert_eq!(def.indexes.len(), 2);
+        assert_eq!(def.indexes[0].name, "uk_title");
+        assert_eq!(def.indexes[0].index_type, TableIndexType::Unique);
+        assert_eq!(def.indexes[0].columns, vec!["`title`"]);
+    }
+
+    #[test]
+    fn test_parse_create_table_postgres_with_comments() {
+        let sql = r#"
+        CREATE TABLE "public"."users" (
+            "id" SERIAL PRIMARY KEY,
+            "username" VARCHAR(50) NOT NULL,
+            "bio" TEXT,
+            "created_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        );
+
+        COMMENT ON TABLE "public"."users" IS 'User account records';
+        COMMENT ON COLUMN "public"."users"."id" IS 'Auto-increment primary key';
+        COMMENT ON COLUMN "public"."users"."username" IS 'Unique login name';
+
+        CREATE UNIQUE INDEX "uk_username" ON "public"."users" ("username");
+        "#;
+
+        let def = parse_create_table_sql(sql, DatabaseFamily::Postgres).unwrap();
+        assert_eq!(def.table_name, "users");
+        assert_eq!(def.schema.as_deref(), Some("public"));
+        assert_eq!(def.comment.as_deref(), Some("User account records"));
+        assert_eq!(def.columns.len(), 4);
+
+        assert_eq!(def.columns[0].name, "id");
+        assert!(def.columns[0].is_primary_key);
+        assert!(def.columns[0].is_auto_increment);
+        assert_eq!(def.columns[0].comment.as_deref(), Some("Auto-increment primary key"));
+
+        assert_eq!(def.columns[1].name, "username");
+        assert_eq!(def.columns[1].comment.as_deref(), Some("Unique login name"));
+
+        assert_eq!(def.columns[3].name, "created_at");
+        assert_eq!(def.columns[3].data_type, "TIMESTAMPTZ");
+        assert_eq!(def.columns[3].default_value.as_deref(), Some("CURRENT_TIMESTAMP"));
+
+        assert_eq!(def.indexes.len(), 1);
+        assert_eq!(def.indexes[0].name, "uk_username");
+        assert_eq!(def.indexes[0].index_type, TableIndexType::Unique);
+    }
+
+    #[test]
+    fn test_parse_create_table_sqlite() {
+        let sql = r#"
+        CREATE TABLE "items" (
+            "id" INTEGER PRIMARY KEY AUTOINCREMENT,
+            "name" TEXT NOT NULL,
+            "count" INTEGER DEFAULT 1
+        );
+        "#;
+
+        let def = parse_create_table_sql(sql, DatabaseFamily::Sqlite).unwrap();
+        assert_eq!(def.table_name, "items");
+        assert_eq!(def.columns.len(), 3);
+        assert!(def.columns[0].is_primary_key);
+        assert!(def.columns[0].is_auto_increment);
+        assert_eq!(def.columns[1].name, "name");
+        assert!(!def.columns[1].is_nullable);
+        assert_eq!(def.columns[2].default_value.as_deref(), Some("1"));
+    }
+
+    #[test]
+    fn test_parse_create_table_invalid_inputs() {
+        assert!(parse_create_table_sql("", DatabaseFamily::Sqlite).is_err());
+        assert!(parse_create_table_sql("SELECT * FROM users;", DatabaseFamily::Sqlite).is_err());
+        assert!(parse_create_table_sql("CREATE TABLE missing_parenthesis", DatabaseFamily::Sqlite).is_err());
+    }
+
+    #[test]
+    fn test_build_insert_template_with_auto_increment() {
+        let cols = sample_columns(); // id (auto-inc), name, note
+        let tbl = TableInfo {
+            name: "users".to_string(),
+            schema: Some("public".to_string()),
+            table_type: "BASE TABLE".to_string(),
+            comment: None,
+            row_count_estimate: None,
+        };
+
+        // PostgreSQL: omits auto-increment id and quotes columns/tables
+        let pg_insert = build_insert_template(&tbl, &cols, DatabaseFamily::Postgres);
+        assert!(pg_insert.contains("INSERT INTO \"public\".\"users\""));
+        assert!(pg_insert.contains("(\"name\", \"note\")"));
+        assert!(pg_insert.contains("VALUES (?, ?)"));
+
+        // MySQL
+        let mysql_insert = build_insert_template(&tbl, &cols, DatabaseFamily::MySql);
+        assert!(mysql_insert.contains("INSERT INTO `public`.`users`"));
+        assert!(mysql_insert.contains("(`name`, `note`)"));
+        assert!(mysql_insert.contains("VALUES (?, ?)"));
     }
 }

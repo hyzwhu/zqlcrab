@@ -11,7 +11,7 @@ use gpui_kit::base::{h_flex, v_flex};
 use gpui_kit::component::{
     Disableable as _, Icon, Sizable as _,
     button::{Button, ButtonVariants as _},
-    input::{Input, InputState},
+    input::{Editor, EditorState, Input, InputState},
     menu::{DropdownMenu as _, PopupMenuItem},
 };
 use gpui_kit::gpui::{
@@ -55,6 +55,8 @@ pub struct CreateTableModal {
     columns: Vec<CreateTableColumnState>,
     indexes: Vec<CreateTableIndexState>,
     preview_sql: String,
+    ddl_editor: Option<Entity<EditorState>>,
+    sync_status: Option<Result<String, String>>,
     validation_error: Option<String>,
     error_message: Option<String>,
     is_executing: bool,
@@ -74,6 +76,7 @@ pub struct CreateTableModal {
     on_remove_index: Option<IndexActionCallback>,
     on_toggle_index_type: Option<IndexActionCallback>,
     on_toggle_index_column: Option<IndexStringCallback>,
+    on_sync_from_ddl: Option<ActionCallback>,
 }
 
 impl CreateTableModal {
@@ -95,6 +98,8 @@ impl CreateTableModal {
             columns,
             indexes: Vec::new(),
             preview_sql,
+            ddl_editor: None,
+            sync_status: None,
             validation_error: None,
             error_message: None,
             is_executing: false,
@@ -113,7 +118,26 @@ impl CreateTableModal {
             on_remove_index: None,
             on_toggle_index_type: None,
             on_toggle_index_column: None,
+            on_sync_from_ddl: None,
         }
+    }
+
+    pub fn ddl_editor(mut self, editor: Entity<EditorState>) -> Self {
+        self.ddl_editor = Some(editor);
+        self
+    }
+
+    pub fn sync_status(mut self, status: Option<Result<String, String>>) -> Self {
+        self.sync_status = status;
+        self
+    }
+
+    pub fn on_sync_from_ddl<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&mut Window, &mut App) + 'static,
+    {
+        self.on_sync_from_ddl = Some(Rc::new(handler));
+        self
     }
 
     pub fn indexes(mut self, indexes: Vec<CreateTableIndexState>) -> Self {
@@ -354,6 +378,21 @@ impl RenderOnce for CreateTableModal {
             let on_copy = on_copy.clone();
             copy_btn = copy_btn.on_click(move |_, window, cx| {
                 on_copy(sql_to_copy.clone(), window, cx);
+            });
+        }
+
+        // Sync DDL to Columns Form button
+        let sync_handler = self.on_sync_from_ddl.clone();
+        let mut sync_btn = Button::new("sync_create_table_ddl_btn")
+            .outline()
+            .xsmall()
+            .icon(IconName::RefreshCw)
+            .label("Sync to Form")
+            .tooltip("Parse DDL syntax and synchronize columns, types, and indexes into the visual designer");
+        if let Some(ref on_sync) = sync_handler {
+            let on_sync = on_sync.clone();
+            sync_btn = sync_btn.on_click(move |_, window, cx| {
+                on_sync(window, cx);
             });
         }
 
@@ -1208,11 +1247,11 @@ impl RenderOnce for CreateTableModal {
                             )
                             .child(indexes_list),
                     )
-                    // Section 4: Live SQL Preview
+                    // Section 4: Live Editable SQL DDL
                     .child(
                         v_flex()
                             .w_full()
-                            .gap_1()
+                            .gap_1p5()
                             .child(
                                 h_flex()
                                     .w_full()
@@ -1221,10 +1260,10 @@ impl RenderOnce for CreateTableModal {
                                     .child(
                                         h_flex()
                                             .items_center()
-                                            .gap_1p5()
+                                            .gap_2()
                                             .child(
                                                 Icon::new(IconName::Code)
-                                                    .size(px(13.0))
+                                                    .size(px(14.0))
                                                     .text_color(ThemeColors::PRIMARY_LIGHT),
                                             )
                                             .child(
@@ -1232,7 +1271,7 @@ impl RenderOnce for CreateTableModal {
                                                     .text_xs()
                                                     .font_weight(FontWeight::BOLD)
                                                     .text_color(ThemeColors::TEXT_PRIMARY)
-                                                    .child("Generated SQL Preview"),
+                                                    .child("SQL DDL (Editable)"),
                                             )
                                             .child(
                                                 div()
@@ -1244,29 +1283,110 @@ impl RenderOnce for CreateTableModal {
                                                     .font_weight(FontWeight::SEMIBOLD)
                                                     .text_color(ThemeColors::PRIMARY_LIGHT)
                                                     .child(family_str),
-                                            ),
+                                            )
+                                            .child({
+                                                match &self.sync_status {
+                                                    Some(Ok(msg)) => h_flex()
+                                                        .items_center()
+                                                        .gap_1()
+                                                        .px_1p5()
+                                                        .py_0p5()
+                                                        .rounded_sm()
+                                                        .bg(rgba(0x10B98118))
+                                                        .border_1()
+                                                        .border_color(rgba(0x10B98140))
+                                                        .child(
+                                                            Icon::new(IconName::Check)
+                                                                .size(px(11.0))
+                                                                .text_color(ThemeColors::SUCCESS),
+                                                        )
+                                                        .child(
+                                                            div()
+                                                                .text_xs()
+                                                                .font_weight(FontWeight::MEDIUM)
+                                                                .text_color(ThemeColors::SUCCESS)
+                                                                .child(msg.clone()),
+                                                        ),
+                                                    Some(Err(err)) => {
+                                                        let short_err = if err.len() > 38 {
+                                                            format!("{}...", &err[..35])
+                                                        } else {
+                                                            err.clone()
+                                                        };
+                                                        h_flex()
+                                                            .items_center()
+                                                            .gap_1()
+                                                            .px_1p5()
+                                                            .py_0p5()
+                                                            .rounded_sm()
+                                                            .bg(rgba(0xF59E0B18))
+                                                            .border_1()
+                                                            .border_color(rgba(0xF59E0B40))
+                                                            .child(
+                                                                Icon::new(IconName::TriangleAlert)
+                                                                    .size(px(11.0))
+                                                                    .text_color(ThemeColors::WARNING),
+                                                            )
+                                                            .child(
+                                                                div()
+                                                                    .text_xs()
+                                                                    .font_weight(FontWeight::MEDIUM)
+                                                                    .text_color(ThemeColors::WARNING)
+                                                                    .child(short_err),
+                                                            )
+                                                    }
+                                                    None => div()
+                                                        .text_xs()
+                                                        .text_color(ThemeColors::TEXT_FAINT)
+                                                        .child("Auto-syncs on edit or paste"),
+                                                }
+                                            }),
                                     )
-                                    .child(copy_btn),
-                            )
-                            .child(
-                                div()
-                                    .id("create_table_sql_scroll")
-                                    .w_full()
-                                    .max_h(px(160.0))
-                                    .overflow_x_scroll()
-                                    .overflow_y_scroll()
-                                    .p_3()
-                                    .rounded_md()
-                                    .bg(rgba(0x0B1120FF))
-                                    .border_1()
-                                    .border_color(ThemeColors::BORDER)
                                     .child(
-                                        div()
-                                            .min_w_full()
-                                            .w_auto()
-                                            .child(code_lines),
+                                        h_flex()
+                                            .items_center()
+                                            .gap_2()
+                                            .child(sync_btn)
+                                            .child(copy_btn),
                                     ),
-                            ),
+                            )
+                            .child({
+                                if let Some(ref ed_state) = self.ddl_editor {
+                                    div()
+                                        .id("create_table_ddl_editor_wrap")
+                                        .w_full()
+                                        .h(px(150.0))
+                                        .rounded_md()
+                                        .overflow_hidden()
+                                        .border_1()
+                                        .border_color(ThemeColors::BORDER)
+                                        .child(
+                                            Editor::new(ed_state)
+                                                .h(px(150.0))
+                                                .appearance(true)
+                                                .bordered(false)
+                                                .bg(rgba(0x0B1120FF)),
+                                        )
+                                } else {
+                                    div()
+                                        .id("create_table_sql_scroll")
+                                        .w_full()
+                                        .max_h(px(150.0))
+                                        .overflow_x_scroll()
+                                        .overflow_y_scroll()
+                                        .p_3()
+                                        .rounded_md()
+                                        .bg(rgba(0x0B1120FF))
+                                        .border_1()
+                                        .border_color(ThemeColors::BORDER)
+                                        .child(
+                                            div()
+                                                .min_w_full()
+                                                .w_auto()
+                                                .child(code_lines),
+                                        )
+                                }
+                            }),
                     ),
             )
             // Modal Footer
