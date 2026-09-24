@@ -151,7 +151,9 @@ impl CsvSniffer {
             while i + 1 < sample.len() {
                 let b1 = sample[i];
                 let b2 = sample[i + 1];
-                if (0x81..=0xFE).contains(&b1) && ((0x40..=0x7E).contains(&b2) || (0x80..=0xFE).contains(&b2)) {
+                if (0x81..=0xFE).contains(&b1)
+                    && ((0x40..=0x7E).contains(&b2) || (0x80..=0xFE).contains(&b2))
+                {
                     gbk_like = true;
                     break;
                 }
@@ -388,7 +390,8 @@ impl CsvSniffer {
         let estimated_row_count = if sample_text.is_empty() || sample_rows.is_empty() {
             0
         } else {
-            let avg_line_len = sample_text.len() / (sample_rows.len() + if has_headers { 1 } else { 0 });
+            let avg_line_len =
+                sample_text.len() / (sample_rows.len() + if has_headers { 1 } else { 0 });
             if avg_line_len > 0 {
                 (file_size_bytes as usize / avg_line_len).max(sample_rows.len())
             } else {
@@ -463,10 +466,16 @@ mod tests {
         assert_eq!(CsvSniffer::detect_encoding(&utf8_bom), FileEncoding::Utf8);
 
         let utf16_le = [0xFF, 0xFE, b'a', 0x00, b'b', 0x00];
-        assert_eq!(CsvSniffer::detect_encoding(&utf16_le), FileEncoding::Utf16Le);
+        assert_eq!(
+            CsvSniffer::detect_encoding(&utf16_le),
+            FileEncoding::Utf16Le
+        );
 
         let utf16_be = [0xFE, 0xFF, 0x00, b'a', 0x00, b'b'];
-        assert_eq!(CsvSniffer::detect_encoding(&utf16_be), FileEncoding::Utf16Be);
+        assert_eq!(
+            CsvSniffer::detect_encoding(&utf16_be),
+            FileEncoding::Utf16Be
+        );
 
         let plain_ascii = b"id,name,age\n1,alice,30\n";
         assert_eq!(CsvSniffer::detect_encoding(plain_ascii), FileEncoding::Utf8);
@@ -475,13 +484,19 @@ mod tests {
     #[test]
     fn test_infer_delimiter() {
         let comma_sample = "id,name,age\n1,alice,30\n2,bob,25\n3,charlie,40\n";
-        assert_eq!(CsvSniffer::infer_delimiter(comma_sample), CsvDelimiter::Comma);
+        assert_eq!(
+            CsvSniffer::infer_delimiter(comma_sample),
+            CsvDelimiter::Comma
+        );
 
         let tab_sample = "id\tname\tage\n1\talice\t30\n2\tbob\t25\n3\tcharlie\t40\n";
         assert_eq!(CsvSniffer::infer_delimiter(tab_sample), CsvDelimiter::Tab);
 
         let semi_sample = "id;name;age\n1;alice;30\n2;bob;25\n3;charlie;40\n";
-        assert_eq!(CsvSniffer::infer_delimiter(semi_sample), CsvDelimiter::Semicolon);
+        assert_eq!(
+            CsvSniffer::infer_delimiter(semi_sample),
+            CsvDelimiter::Semicolon
+        );
 
         let pipe_sample = "id|name|age\n1|alice|30\n2|bob|25\n3|charlie|40\n";
         assert_eq!(CsvSniffer::infer_delimiter(pipe_sample), CsvDelimiter::Pipe);
@@ -490,7 +505,11 @@ mod tests {
     #[test]
     fn test_detect_header() {
         let with_headers = vec![
-            vec!["id".to_string(), "username".to_string(), "score".to_string()],
+            vec![
+                "id".to_string(),
+                "username".to_string(),
+                "score".to_string(),
+            ],
             vec!["1".to_string(), "alice".to_string(), "95.5".to_string()],
             vec!["2".to_string(), "bob".to_string(), "88.0".to_string()],
         ];
@@ -543,4 +562,3 @@ mod tests {
         let _ = std::fs::remove_file(&sql_path);
     }
 }
-

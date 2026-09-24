@@ -641,9 +641,7 @@ impl ExportModal {
                                     .text_color(ThemeColors::TEXT_MUTED)
                                     .child(t("export_modal.where_clause", lang)),
                             )
-                            .child(
-                                Input::new(&self.where_input).small().w_full(),
-                            ),
+                            .child(Input::new(&self.where_input).small().w_full()),
                     )
                     .child(
                         v_flex()
@@ -689,11 +687,7 @@ impl ExportModal {
                             h_flex()
                                 .gap_2()
                                 .items_center()
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .child(Input::new(&self.file_path_input)),
-                                )
+                                .child(div().flex_1().child(Input::new(&self.file_path_input)))
                                 .child(browse_btn),
                         )
                     }),
@@ -734,14 +728,13 @@ impl ExportModal {
                     .dropdown_menu_with_anchor(Anchor::BottomLeft, move |mut menu, _, _| {
                         for sz in batch_sizes {
                             let sel = on_batch.clone();
-                            menu = menu.item(
-                                PopupMenuItem::new(format!("{sz} rows"))
-                                    .on_click(move |_, window, cx| {
-                                        if let Some(ref h) = sel {
-                                            h(sz, window, cx);
-                                        }
-                                    }),
-                            );
+                            menu = menu.item(PopupMenuItem::new(format!("{sz} rows")).on_click(
+                                move |_, window, cx| {
+                                    if let Some(ref h) = sel {
+                                        h(sz, window, cx);
+                                    }
+                                },
+                            ));
                         }
                         menu
                     });
@@ -869,15 +862,13 @@ impl ExportModal {
                     .dropdown_menu_with_anchor(Anchor::BottomLeft, move |mut menu, _, _| {
                         for (ch, label) in delimiters {
                             let sel = on_delim.clone();
-                            menu = menu.item(
-                                PopupMenuItem::new(label.to_string()).on_click(
-                                    move |_, window, cx| {
-                                        if let Some(ref h) = sel {
-                                            h(ch, window, cx);
-                                        }
-                                    },
-                                ),
-                            );
+                            menu = menu.item(PopupMenuItem::new(label.to_string()).on_click(
+                                move |_, window, cx| {
+                                    if let Some(ref h) = sel {
+                                        h(ch, window, cx);
+                                    }
+                                },
+                            ));
                         }
                         menu
                     });
@@ -1212,7 +1203,10 @@ impl ExportModal {
         let bytes = info.as_ref().map(|i| i.bytes_written).unwrap_or(0);
         let elapsed = info.as_ref().map(|i| i.elapsed_millis).unwrap_or(0);
         let file_path = info.as_ref().and_then(|i| i.file_path.clone());
-        let to_clip = info.as_ref().map(|i| i.copied_to_clipboard).unwrap_or(false);
+        let to_clip = info
+            .as_ref()
+            .map(|i| i.copied_to_clipboard)
+            .unwrap_or(false);
 
         let mut done_btn = Button::new("export_done_btn")
             .primary()
@@ -1288,13 +1282,7 @@ impl ExportModal {
                         )
                     }),
             )
-            .child(
-                h_flex()
-                    .gap_3()
-                    .pt_3()
-                    .child(reveal_btn)
-                    .child(done_btn),
-            )
+            .child(h_flex().gap_3().pt_3().child(reveal_btn).child(done_btn))
     }
 }
 

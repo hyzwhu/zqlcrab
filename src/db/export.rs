@@ -194,9 +194,7 @@ pub fn generate_table_dump(
     config: &TableDumpConfig,
 ) -> String {
     match config.format {
-        ExportFormat::SqlDump | ExportFormat::SqlInsert => {
-            generate_sql_dump(ddl, data, config)
-        }
+        ExportFormat::SqlDump | ExportFormat::SqlInsert => generate_sql_dump(ddl, data, config),
         ExportFormat::Csv => {
             if let Some(res) = data {
                 export_csv_with_options(res, &config.csv_options)
@@ -326,7 +324,9 @@ fn generate_sql_dump(
     if config.scope == ExportScope::SchemaAndData || config.scope == ExportScope::SchemaOnly {
         if config.sql_options.drop_table_if_exists {
             let drop_sql = match config.family {
-                DatabaseFamily::Postgres => format!("DROP TABLE IF EXISTS {quoted_table} CASCADE;\n\n"),
+                DatabaseFamily::Postgres => {
+                    format!("DROP TABLE IF EXISTS {quoted_table} CASCADE;\n\n")
+                }
                 _ => format!("DROP TABLE IF EXISTS {quoted_table};\n\n"),
             };
             out.push_str(&drop_sql);

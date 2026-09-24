@@ -183,18 +183,24 @@ impl ImportExecutor {
         let mut error_rows = Vec::new();
         let mut current_line = if config.has_headers { 2 } else { 1 };
 
-        let total_estimated = decoded_text.lines().count().saturating_sub(if config.has_headers { 1 } else { 0 });
+        let total_estimated = decoded_text
+            .lines()
+            .count()
+            .saturating_sub(if config.has_headers { 1 } else { 0 });
 
         for result in rdr.records() {
             match result {
                 Ok(record) => {
                     total_processed += 1;
-                    let raw_str = record.iter().collect::<Vec<_>>().join(match config.delimiter {
-                        CsvDelimiter::Tab => "\t",
-                        CsvDelimiter::Semicolon => ";",
-                        CsvDelimiter::Pipe => "|",
-                        _ => ",",
-                    });
+                    let raw_str = record
+                        .iter()
+                        .collect::<Vec<_>>()
+                        .join(match config.delimiter {
+                            CsvDelimiter::Tab => "\t",
+                            CsvDelimiter::Semicolon => ";",
+                            CsvDelimiter::Pipe => "|",
+                            _ => ",",
+                        });
 
                     // Build value tuple
                     let mut vals = Vec::with_capacity(active_mappings.len());
@@ -321,7 +327,8 @@ impl ImportExecutor {
 
                 // Fallback: isolate individual rows in chunk to preserve valid records
                 for (line_no, raw_data, tuple) in chunk_rows.drain(..) {
-                    let single_sql = format!("INSERT INTO {table_sql} ({cols_sql}) VALUES {tuple};");
+                    let single_sql =
+                        format!("INSERT INTO {table_sql} ({cols_sql}) VALUES {tuple};");
                     match conn.execute_batch(&single_sql).await {
                         Ok(_) => {
                             *total_succeeded += 1;
@@ -439,18 +446,9 @@ mod tests {
             format_csv_value_for_sql("hello 'world'", Some("TEXT")),
             "'hello ''world'''"
         );
-        assert_eq!(
-            format_csv_value_for_sql("NULL", Some("INTEGER")),
-            "NULL"
-        );
-        assert_eq!(
-            format_csv_value_for_sql("42", Some("INTEGER")),
-            "42"
-        );
-        assert_eq!(
-            format_csv_value_for_sql("true", Some("BOOLEAN")),
-            "TRUE"
-        );
+        assert_eq!(format_csv_value_for_sql("NULL", Some("INTEGER")), "NULL");
+        assert_eq!(format_csv_value_for_sql("42", Some("INTEGER")), "42");
+        assert_eq!(format_csv_value_for_sql("true", Some("BOOLEAN")), "TRUE");
     }
 
     #[tokio::test]
@@ -577,14 +575,9 @@ mod tests {
             writeln!(f, "INSERT INTO items VALUES (2, 'Pen');").unwrap();
         }
 
-        let res = ImportExecutor::execute_sql_import(
-            &conn,
-            &temp_sql,
-            ErrorPolicy::Abort,
-            None,
-        )
-        .await
-        .unwrap();
+        let res = ImportExecutor::execute_sql_import(&conn, &temp_sql, ErrorPolicy::Abort, None)
+            .await
+            .unwrap();
 
         assert_eq!(res.total_processed, 3);
         assert_eq!(res.total_succeeded, 3);
@@ -599,4 +592,3 @@ mod tests {
         let _ = std::fs::remove_file(&temp_sql);
     }
 }
-

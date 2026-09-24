@@ -277,15 +277,22 @@ impl MockDataModal {
                     .text_size(px(10.0))
                     .font_weight(FontWeight::BOLD)
                     .when(is_active, |d| {
-                        d.bg(ThemeColors::PRIMARY).text_color(ThemeColors::TEXT_PRIMARY)
+                        d.bg(ThemeColors::PRIMARY)
+                            .text_color(ThemeColors::TEXT_PRIMARY)
                     })
                     .when(is_past, |d| {
-                        d.bg(ThemeColors::SUCCESS).text_color(ThemeColors::TEXT_PRIMARY)
+                        d.bg(ThemeColors::SUCCESS)
+                            .text_color(ThemeColors::TEXT_PRIMARY)
                     })
                     .when(!is_active && !is_past, |d| {
-                        d.bg(ThemeColors::BG_SURFACE_HOVER).text_color(ThemeColors::TEXT_MUTED)
+                        d.bg(ThemeColors::BG_SURFACE_HOVER)
+                            .text_color(ThemeColors::TEXT_MUTED)
                     })
-                    .child(if is_past { "✓" } else { (idx + 1).to_string().leak() });
+                    .child(if is_past {
+                        "✓"
+                    } else {
+                        (idx + 1).to_string().leak()
+                    });
 
                 h_flex()
                     .items_center()
@@ -321,13 +328,13 @@ impl MockDataModal {
                 for tbl in &tables_clone {
                     let tbl_name = tbl.clone();
                     let cb = on_sel_table.clone();
-                    menu = menu.item(
-                        PopupMenuItem::new(tbl_name.clone()).on_click(move |_, window, cx| {
+                    menu = menu.item(PopupMenuItem::new(tbl_name.clone()).on_click(
+                        move |_, window, cx| {
                             if let Some(ref handler) = cb {
                                 handler(tbl_name.clone(), window, cx);
                             }
-                        }),
-                    );
+                        },
+                    ));
                 }
                 menu
             });
@@ -374,25 +381,24 @@ impl MockDataModal {
                                     .text_color(ThemeColors::TEXT_MUTED)
                                     .child(t("mock_modal.rows_to_generate", lang)),
                             )
-                            .child(
-                                h_flex().gap_1().children(row_counts.iter().map(|&cnt| {
-                                    let is_sel = cnt == current_count;
-                                    let cb = on_sel_count.clone();
-                                    let mut btn = Button::new(ElementId::Name(format!("rc_{}", cnt).into()))
+                            .child(h_flex().gap_1().children(row_counts.iter().map(|&cnt| {
+                                let is_sel = cnt == current_count;
+                                let cb = on_sel_count.clone();
+                                let mut btn =
+                                    Button::new(ElementId::Name(format!("rc_{}", cnt).into()))
                                         .text_size(px(12.0));
-                                    if is_sel {
-                                        btn = btn.primary();
-                                    } else {
-                                        btn = btn.outline();
-                                    }
-                                    btn.child(format!("{} rows", cnt))
-                                        .on_click(move |_, window, cx| {
-                                            if let Some(ref handler) = cb {
-                                                handler(cnt, window, cx);
-                                            }
-                                        })
-                                })),
-                            ),
+                                if is_sel {
+                                    btn = btn.primary();
+                                } else {
+                                    btn = btn.outline();
+                                }
+                                btn.child(format!("{} rows", cnt))
+                                    .on_click(move |_, window, cx| {
+                                        if let Some(ref handler) = cb {
+                                            handler(cnt, window, cx);
+                                        }
+                                    })
+                            }))),
                     )
                     .child(
                         v_flex()
@@ -404,25 +410,23 @@ impl MockDataModal {
                                     .text_color(ThemeColors::TEXT_MUTED)
                                     .child(t("mock_modal.batch_size", lang)),
                             )
-                            .child(
-                                h_flex().gap_1().children(batch_sizes.iter().map(|&bs| {
-                                    let is_sel = bs == current_batch;
-                                    let cb = on_sel_batch.clone();
-                                    let mut btn = Button::new(ElementId::Name(format!("bs_{}", bs).into()))
+                            .child(h_flex().gap_1().children(batch_sizes.iter().map(|&bs| {
+                                let is_sel = bs == current_batch;
+                                let cb = on_sel_batch.clone();
+                                let mut btn =
+                                    Button::new(ElementId::Name(format!("bs_{}", bs).into()))
                                         .text_size(px(12.0));
-                                    if is_sel {
-                                        btn = btn.primary();
-                                    } else {
-                                        btn = btn.outline();
+                                if is_sel {
+                                    btn = btn.primary();
+                                } else {
+                                    btn = btn.outline();
+                                }
+                                btn.child(format!("{}", bs)).on_click(move |_, window, cx| {
+                                    if let Some(ref handler) = cb {
+                                        handler(bs, window, cx);
                                     }
-                                    btn.child(format!("{}", bs))
-                                        .on_click(move |_, window, cx| {
-                                            if let Some(ref handler) = cb {
-                                                handler(bs, window, cx);
-                                            }
-                                        })
-                                })),
-                            ),
+                                })
+                            }))),
                     ),
             )
             .child(
@@ -528,43 +532,52 @@ impl MockDataModal {
                 let gen_clone = col.generator.clone();
                 let cb = on_change_gen.clone();
 
-                let generator_menu_btn = Button::new(ElementId::Name(format!("col_gen_{}", idx).into()))
-                    .outline()
-                    .text_size(px(12.0))
-                    .child(gen_clone.display_name())
-                    .dropdown_menu_with_anchor(Anchor::BottomLeft, move |mut menu, _, _| {
-                        let options = [
-                            MockGeneratorType::AutoIncrement { start: 1, step: 1 },
-                            MockGeneratorType::PersonName,
-                            MockGeneratorType::Email,
-                            MockGeneratorType::PhoneNumber,
-                            MockGeneratorType::UuidV4,
-                            MockGeneratorType::RandomInt { min: 1, max: 1000 },
-                            MockGeneratorType::RandomFloat { min: 10.0, max: 1000.0, decimals: 2 },
-                            MockGeneratorType::DateTime { past_days: 30 },
-                            MockGeneratorType::Date { past_days: 365 },
-                            MockGeneratorType::Boolean { true_ratio: 0.8 },
-                            MockGeneratorType::EnumChoices {
-                                options: vec!["active".into(), "pending".into(), "inactive".into()],
-                            },
-                            MockGeneratorType::LoremIpsum { words: 6 },
-                            MockGeneratorType::Null,
-                            MockGeneratorType::Ignored,
-                        ];
+                let generator_menu_btn =
+                    Button::new(ElementId::Name(format!("col_gen_{}", idx).into()))
+                        .outline()
+                        .text_size(px(12.0))
+                        .child(gen_clone.display_name())
+                        .dropdown_menu_with_anchor(Anchor::BottomLeft, move |mut menu, _, _| {
+                            let options = [
+                                MockGeneratorType::AutoIncrement { start: 1, step: 1 },
+                                MockGeneratorType::PersonName,
+                                MockGeneratorType::Email,
+                                MockGeneratorType::PhoneNumber,
+                                MockGeneratorType::UuidV4,
+                                MockGeneratorType::RandomInt { min: 1, max: 1000 },
+                                MockGeneratorType::RandomFloat {
+                                    min: 10.0,
+                                    max: 1000.0,
+                                    decimals: 2,
+                                },
+                                MockGeneratorType::DateTime { past_days: 30 },
+                                MockGeneratorType::Date { past_days: 365 },
+                                MockGeneratorType::Boolean { true_ratio: 0.8 },
+                                MockGeneratorType::EnumChoices {
+                                    options: vec![
+                                        "active".into(),
+                                        "pending".into(),
+                                        "inactive".into(),
+                                    ],
+                                },
+                                MockGeneratorType::LoremIpsum { words: 6 },
+                                MockGeneratorType::Null,
+                                MockGeneratorType::Ignored,
+                            ];
 
-                        for opt in options {
-                            let opt_type = opt.clone();
-                            let opt_cb = cb.clone();
-                            menu = menu.item(
-                                PopupMenuItem::new(opt.display_name()).on_click(move |_, window, cx| {
-                                    if let Some(ref handler) = opt_cb {
-                                        handler(idx, opt_type.clone(), window, cx);
-                                    }
-                                }),
-                            );
-                        }
-                        menu
-                    });
+                            for opt in options {
+                                let opt_type = opt.clone();
+                                let opt_cb = cb.clone();
+                                menu = menu.item(PopupMenuItem::new(opt.display_name()).on_click(
+                                    move |_, window, cx| {
+                                        if let Some(ref handler) = opt_cb {
+                                            handler(idx, opt_type.clone(), window, cx);
+                                        }
+                                    },
+                                ));
+                            }
+                            menu
+                        });
 
                 h_flex()
                     .items_center()
@@ -605,23 +618,18 @@ impl MockDataModal {
                             .child(col_type),
                     )
                     .child(div().flex_1().child(generator_menu_btn))
-                    .child(
+                    .child(div().w(px(80.0)).text_right().child(if is_ignored {
                         div()
-                            .w(px(80.0))
-                            .text_right()
-                            .child(if is_ignored {
-                                div()
-                                    .text_size(px(11.0))
-                                    .text_color(ThemeColors::TEXT_MUTED)
-                                    .child("Ignored")
-                            } else {
-                                div()
-                                    .text_size(px(11.0))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(ThemeColors::SUCCESS)
-                                    .child("Active")
-                            }),
-                    )
+                            .text_size(px(11.0))
+                            .text_color(ThemeColors::TEXT_MUTED)
+                            .child("Ignored")
+                    } else {
+                        div()
+                            .text_size(px(11.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(ThemeColors::SUCCESS)
+                            .child("Active")
+                    }))
             }))
     }
 
@@ -669,16 +677,12 @@ impl MockDataModal {
                     .overflow_y_scroll()
                     .when(is_loading, |d| {
                         d.flex().items_center().justify_center().child(
-                            h_flex()
-                                .gap_2()
-                                .items_center()
-                                .child(Spinner::new())
-                                .child(
-                                    div()
-                                        .text_size(px(13.0))
-                                        .text_color(ThemeColors::TEXT_MUTED)
-                                        .child("Generating sample rows..."),
-                                ),
+                            h_flex().gap_2().items_center().child(Spinner::new()).child(
+                                div()
+                                    .text_size(px(13.0))
+                                    .text_color(ThemeColors::TEXT_MUTED)
+                                    .child("Generating sample rows..."),
+                            ),
                         )
                     })
                     .when(!is_loading && self.preview_rows.is_empty(), |d| {
@@ -709,22 +713,24 @@ impl MockDataModal {
                                                 .child(h.clone())
                                         })),
                                 )
-                                .children(self.preview_rows.iter().enumerate().map(|(idx, row)| {
-                                    h_flex()
-                                        .p_2()
-                                        .border_b_1()
-                                        .border_color(ThemeColors::BORDER_LIGHT)
-                                        .when(idx % 2 == 1, |d| d.bg(ThemeColors::BG_APP))
-                                        .children(row.iter().map(|val| {
-                                            div()
-                                                .w(px(150.0))
-                                                .text_size(px(12.0))
-                                                .font_weight(FontWeight::NORMAL)
-                                                .text_color(ThemeColors::TEXT_PRIMARY)
-                                                .overflow_hidden()
-                                                .child(val.clone())
-                                        }))
-                                })),
+                                .children(self.preview_rows.iter().enumerate().map(
+                                    |(idx, row)| {
+                                        h_flex()
+                                            .p_2()
+                                            .border_b_1()
+                                            .border_color(ThemeColors::BORDER_LIGHT)
+                                            .when(idx % 2 == 1, |d| d.bg(ThemeColors::BG_APP))
+                                            .children(row.iter().map(|val| {
+                                                div()
+                                                    .w(px(150.0))
+                                                    .text_size(px(12.0))
+                                                    .font_weight(FontWeight::NORMAL)
+                                                    .text_color(ThemeColors::TEXT_PRIMARY)
+                                                    .overflow_hidden()
+                                                    .child(val.clone())
+                                            }))
+                                    },
+                                )),
                         )
                     }),
             )
@@ -951,7 +957,10 @@ impl MockDataModal {
                                                 .text_size(px(18.0))
                                                 .font_weight(FontWeight::BOLD)
                                                 .text_color(ThemeColors::TEXT_PRIMARY)
-                                                .child(format!("{:.2}s", res.elapsed_ms as f64 / 1000.0)),
+                                                .child(format!(
+                                                    "{:.2}s",
+                                                    res.elapsed_ms as f64 / 1000.0
+                                                )),
                                         ),
                                 ),
                         )
@@ -1079,13 +1088,17 @@ impl RenderOnce for MockDataModal {
                     )
                     .child(
                         // Body view depending on active wizard step
-                        div()
-                            .p_5()
-                            .child(match self.step {
-                                MockWizardStep::Step1Config => self.render_step1_config().into_any_element(),
-                                MockWizardStep::Step2Preview => self.render_step2_preview().into_any_element(),
-                                MockWizardStep::Step3Progress => self.render_step3_progress().into_any_element(),
-                            }),
+                        div().p_5().child(match self.step {
+                            MockWizardStep::Step1Config => {
+                                self.render_step1_config().into_any_element()
+                            }
+                            MockWizardStep::Step2Preview => {
+                                self.render_step2_preview().into_any_element()
+                            }
+                            MockWizardStep::Step3Progress => {
+                                self.render_step3_progress().into_any_element()
+                            }
+                        }),
                     ),
             )
     }

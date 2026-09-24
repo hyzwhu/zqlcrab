@@ -394,13 +394,13 @@ impl ImportModal {
             .dropdown_menu_with_anchor(Anchor::BottomLeft, move |mut menu, _, _| {
                 for &delim in CsvDelimiter::all() {
                     let sel = on_sel_delim.clone();
-                    menu = menu.item(
-                        PopupMenuItem::new(delim.display_name()).on_click(move |_, window, cx| {
+                    menu = menu.item(PopupMenuItem::new(delim.display_name()).on_click(
+                        move |_, window, cx| {
                             if let Some(ref handler) = sel {
                                 handler(delim, window, cx);
                             }
-                        }),
-                    );
+                        },
+                    ));
                 }
                 menu
             });
@@ -413,13 +413,13 @@ impl ImportModal {
             .dropdown_menu_with_anchor(Anchor::BottomLeft, move |mut menu, _, _| {
                 for &enc in FileEncoding::all() {
                     let sel = on_sel_enc.clone();
-                    menu = menu.item(
-                        PopupMenuItem::new(enc.display_name()).on_click(move |_, window, cx| {
+                    menu = menu.item(PopupMenuItem::new(enc.display_name()).on_click(
+                        move |_, window, cx| {
                             if let Some(ref handler) = sel {
                                 handler(enc, window, cx);
                             }
-                        }),
-                    );
+                        },
+                    ));
                 }
                 menu
             });
@@ -484,7 +484,11 @@ impl ImportModal {
                     .child(
                         h_flex()
                             .gap_2()
-                            .child(div().flex_1().child(Input::new(&self.file_path_input).small().w_full()))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .child(Input::new(&self.file_path_input).small().w_full()),
+                            )
                             .child(browse_btn)
                             .child(parse_btn),
                     )
@@ -782,9 +786,10 @@ impl ImportModal {
                                             for col in &table_cols_clone {
                                                 let upd_col = on_upd.clone();
                                                 let col_name = col.name.clone();
-                                                let label = format!("{} ({})", col.name, col.data_type);
-                                                menu = menu.item(
-                                                    PopupMenuItem::new(label).on_click(
+                                                let label =
+                                                    format!("{} ({})", col.name, col.data_type);
+                                                menu =
+                                                    menu.item(PopupMenuItem::new(label).on_click(
                                                         move |_, window, cx| {
                                                             if let Some(ref handler) = upd_col {
                                                                 handler(
@@ -795,8 +800,7 @@ impl ImportModal {
                                                                 );
                                                             }
                                                         },
-                                                    ),
-                                                );
+                                                    ));
                                             }
                                             menu
                                         },
@@ -861,15 +865,13 @@ impl ImportModal {
             .dropdown_menu_with_anchor(Anchor::BottomLeft, move |mut menu, _, _| {
                 for &size in &[100, 500, 1000, 2000] {
                     let sel = on_sel_batch.clone();
-                    menu = menu.item(
-                        PopupMenuItem::new(format!("{size} rows / batch")).on_click(
-                            move |_, window, cx| {
-                                if let Some(ref handler) = sel {
-                                    handler(size, window, cx);
-                                }
-                            },
-                        ),
-                    );
+                    menu = menu.item(PopupMenuItem::new(format!("{size} rows / batch")).on_click(
+                        move |_, window, cx| {
+                            if let Some(ref handler) = sel {
+                                handler(size, window, cx);
+                            }
+                        },
+                    ));
                 }
                 menu
             });
@@ -882,13 +884,13 @@ impl ImportModal {
             .dropdown_menu_with_anchor(Anchor::BottomLeft, move |mut menu, _, _| {
                 for &pol in &[ErrorPolicy::Skip, ErrorPolicy::Abort] {
                     let sel = on_sel_policy.clone();
-                    menu = menu.item(
-                        PopupMenuItem::new(pol.display_name()).on_click(move |_, window, cx| {
+                    menu = menu.item(PopupMenuItem::new(pol.display_name()).on_click(
+                        move |_, window, cx| {
                             if let Some(ref handler) = sel {
                                 handler(pol, window, cx);
                             }
-                        }),
-                    );
+                        },
+                    ));
                 }
                 menu
             });
@@ -991,7 +993,8 @@ impl ImportModal {
                     // Progress bar & metrics
                     .when_some(self.progress.as_ref(), |this, prog| {
                         let pct = if prog.total_estimated_rows > 0 {
-                            ((prog.processed_rows as f32 / prog.total_estimated_rows as f32) * 100.0)
+                            ((prog.processed_rows as f32 / prog.total_estimated_rows as f32)
+                                * 100.0)
                                 .min(100.0)
                         } else {
                             100.0
@@ -1037,8 +1040,7 @@ impl ImportModal {
                                                 .text_color(ThemeColors::SUCCESS)
                                                 .child(format!(
                                                     "Throughput: {} rows/s (Elapsed: {:.1}s)",
-                                                    prog.throughput_rows_per_sec,
-                                                    prog.elapsed_secs
+                                                    prog.throughput_rows_per_sec, prog.elapsed_secs
                                                 )),
                                         ),
                                 ),
@@ -1071,7 +1073,12 @@ impl ImportModal {
 
         let err_log_text = error_rows
             .iter()
-            .map(|e| format!("Line {}: {}\nReason: {}", e.line_number, e.raw_data, e.reason))
+            .map(|e| {
+                format!(
+                    "Line {}: {}\nReason: {}",
+                    e.line_number, e.raw_data, e.reason
+                )
+            })
             .collect::<Vec<_>>()
             .join("\n\n");
 
@@ -1238,7 +1245,10 @@ impl RenderOnce for ImportModal {
             });
         }
 
-        let mut cancel_btn = Button::new("cancel_import_btn").outline().small().label("Cancel");
+        let mut cancel_btn = Button::new("cancel_import_btn")
+            .outline()
+            .small()
+            .label("Cancel");
         if let Some(ref on_close) = on_close_action {
             let on_close = on_close.clone();
             cancel_btn = cancel_btn.on_click(move |_, window, cx| {

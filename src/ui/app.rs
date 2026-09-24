@@ -31,10 +31,10 @@ use crate::db::types::{
 use crate::settings::{SettingsManager, ThemePreference};
 use crate::ui::components::{
     ActivityBar, ActivityNav, AppStatusBar, ConfirmActionKind, ConfirmDialog, ConnectionDialog,
-    ConsoleBottomTab, DataGrid, ExplainViewMode, ExportDestination, ExportModal,
-    ExportSuccessInfo, ExportWizardStep, ImportModal, ImportWizardStep, MockDataModal,
-    MockWizardStep, QueryConsole, QueryHistoryView, QueryTabHeader, SchemaViewer, SettingsTab,
-    SettingsView, Sidebar, SqlReviewModal,
+    ConsoleBottomTab, DataGrid, ExplainViewMode, ExportDestination, ExportModal, ExportSuccessInfo,
+    ExportWizardStep, ImportModal, ImportWizardStep, MockDataModal, MockWizardStep, QueryConsole,
+    QueryHistoryView, QueryTabHeader, SchemaViewer, SettingsTab, SettingsView, Sidebar,
+    SqlReviewModal,
     create_table_modal::{CreateTableColumnState, CreateTableIndexState, CreateTableModal},
     data_grid::GridCellCoord,
     schema_viewer::SchemaEditColumnState,
@@ -481,17 +481,21 @@ impl CrabStudioApp {
 
         let grid_cell_edit_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Edit cell value..."));
-        let grid_filter_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Filter rows (text, num, col:val)..."));
+        let grid_filter_input = cx.new(|cx| {
+            InputState::new(window, cx).placeholder("Filter rows (text, num, col:val)...")
+        });
 
-        cx.subscribe(&grid_filter_input, |this, input_handle, event: &InputEvent, cx| {
-            if matches!(event, InputEvent::Change) {
-                let val = input_handle.read(cx).value().to_string();
-                this.grid_filter = val;
-                this.grid_page = 0;
-                cx.notify();
-            }
-        })
+        cx.subscribe(
+            &grid_filter_input,
+            |this, input_handle, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    let val = input_handle.read(cx).value().to_string();
+                    this.grid_filter = val;
+                    this.grid_page = 0;
+                    cx.notify();
+                }
+            },
+        )
         .detach();
 
         let create_table_name_input =
@@ -2580,19 +2584,11 @@ impl CrabStudioApp {
             let data_type = col.data_type.read(cx).value().trim().to_string();
             let def_val = {
                 let s = col.default_val.read(cx).value().trim().to_string();
-                if s.is_empty() {
-                    None
-                } else {
-                    Some(s)
-                }
+                if s.is_empty() { None } else { Some(s) }
             };
             let comment = {
                 let s = col.comment.read(cx).value().trim().to_string();
-                if s.is_empty() {
-                    None
-                } else {
-                    Some(s)
-                }
+                if s.is_empty() { None } else { Some(s) }
             };
 
             let def = ColumnDef::new(name, data_type)
@@ -2741,10 +2737,30 @@ impl CrabStudioApp {
         self.create_table_indexes.clear();
 
         for col in &self.create_table_columns {
-            cx.subscribe(&col.name, |_, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { cx.notify(); }).detach();
-            cx.subscribe(&col.data_type, |_, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { cx.notify(); }).detach();
-            cx.subscribe(&col.default_val, |_, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { cx.notify(); }).detach();
-            cx.subscribe(&col.comment, |_, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { cx.notify(); }).detach();
+            cx.subscribe(&col.name, |_, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    cx.notify();
+                }
+            })
+            .detach();
+            cx.subscribe(&col.data_type, |_, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    cx.notify();
+                }
+            })
+            .detach();
+            cx.subscribe(&col.default_val, |_, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    cx.notify();
+                }
+            })
+            .detach();
+            cx.subscribe(&col.comment, |_, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    cx.notify();
+                }
+            })
+            .detach();
         }
 
         let (initial_sql, _) = self.get_create_table_preview_sql(cx);
@@ -2788,10 +2804,30 @@ impl CrabStudioApp {
         let def_inp = cx.new(|cx| InputState::new(window, cx).default_value(""));
         let comm_inp = cx.new(|cx| InputState::new(window, cx).default_value(""));
 
-        cx.subscribe(&name_inp, |_, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { cx.notify(); }).detach();
-        cx.subscribe(&type_inp, |_, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { cx.notify(); }).detach();
-        cx.subscribe(&def_inp, |_, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { cx.notify(); }).detach();
-        cx.subscribe(&comm_inp, |_, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { cx.notify(); }).detach();
+        cx.subscribe(&name_inp, |_, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
+        })
+        .detach();
+        cx.subscribe(&type_inp, |_, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
+        })
+        .detach();
+        cx.subscribe(&def_inp, |_, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
+        })
+        .detach();
+        cx.subscribe(&comm_inp, |_, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
+        })
+        .detach();
 
         self.create_table_columns.push(CreateTableColumnState {
             name: name_inp,
@@ -3087,17 +3123,41 @@ impl CrabStudioApp {
                 // Sync Columns
                 self.create_table_columns.clear();
                 for col in def.columns {
-                    let name_inp = cx.new(|cx| InputState::new(window, cx).default_value(&col.name));
-                    let type_inp = cx.new(|cx| InputState::new(window, cx).default_value(&col.data_type));
+                    let name_inp =
+                        cx.new(|cx| InputState::new(window, cx).default_value(&col.name));
+                    let type_inp =
+                        cx.new(|cx| InputState::new(window, cx).default_value(&col.data_type));
                     let def_val_str = col.default_value.unwrap_or_default();
-                    let def_inp = cx.new(|cx| InputState::new(window, cx).default_value(&def_val_str));
+                    let def_inp =
+                        cx.new(|cx| InputState::new(window, cx).default_value(&def_val_str));
                     let comm_str = col.comment.unwrap_or_default();
-                    let comm_inp = cx.new(|cx| InputState::new(window, cx).default_value(&comm_str));
+                    let comm_inp =
+                        cx.new(|cx| InputState::new(window, cx).default_value(&comm_str));
 
-                    cx.subscribe(&name_inp, |_, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { cx.notify(); }).detach();
-                    cx.subscribe(&type_inp, |_, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { cx.notify(); }).detach();
-                    cx.subscribe(&def_inp, |_, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { cx.notify(); }).detach();
-                    cx.subscribe(&comm_inp, |_, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { cx.notify(); }).detach();
+                    cx.subscribe(&name_inp, |_, _, event: &InputEvent, cx| {
+                        if matches!(event, InputEvent::Change) {
+                            cx.notify();
+                        }
+                    })
+                    .detach();
+                    cx.subscribe(&type_inp, |_, _, event: &InputEvent, cx| {
+                        if matches!(event, InputEvent::Change) {
+                            cx.notify();
+                        }
+                    })
+                    .detach();
+                    cx.subscribe(&def_inp, |_, _, event: &InputEvent, cx| {
+                        if matches!(event, InputEvent::Change) {
+                            cx.notify();
+                        }
+                    })
+                    .detach();
+                    cx.subscribe(&comm_inp, |_, _, event: &InputEvent, cx| {
+                        if matches!(event, InputEvent::Change) {
+                            cx.notify();
+                        }
+                    })
+                    .detach();
 
                     self.create_table_columns.push(CreateTableColumnState {
                         name: name_inp,
@@ -3113,12 +3173,24 @@ impl CrabStudioApp {
                 // Sync Indexes
                 self.create_table_indexes.clear();
                 for idx in def.indexes {
-                    let name_inp = cx.new(|cx| InputState::new(window, cx).default_value(&idx.name));
+                    let name_inp =
+                        cx.new(|cx| InputState::new(window, cx).default_value(&idx.name));
                     let cols_str = idx.columns.join(", ");
-                    let cols_inp = cx.new(|cx| InputState::new(window, cx).default_value(&cols_str));
+                    let cols_inp =
+                        cx.new(|cx| InputState::new(window, cx).default_value(&cols_str));
 
-                    cx.subscribe(&name_inp, |_, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { cx.notify(); }).detach();
-                    cx.subscribe(&cols_inp, |_, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { cx.notify(); }).detach();
+                    cx.subscribe(&name_inp, |_, _, event: &InputEvent, cx| {
+                        if matches!(event, InputEvent::Change) {
+                            cx.notify();
+                        }
+                    })
+                    .detach();
+                    cx.subscribe(&cols_inp, |_, _, event: &InputEvent, cx| {
+                        if matches!(event, InputEvent::Change) {
+                            cx.notify();
+                        }
+                    })
+                    .detach();
 
                     self.create_table_indexes.push(CreateTableIndexState {
                         name: name_inp,
@@ -3238,12 +3310,13 @@ impl CrabStudioApp {
         let family = conn.config.db_type.family();
         let tbl_name = table.name.clone();
 
-        let ddl = if self.selected_table.as_deref() == Some(&tbl_name) && self.schema_ddl.is_some() {
+        let ddl = if self.selected_table.as_deref() == Some(&tbl_name) && self.schema_ddl.is_some()
+        {
             self.schema_ddl.clone().unwrap()
         } else if let Ok(cache) = self.sql_metadata_cache.read() {
             if let Some(cols) = cache.get_columns_for_table(&tbl_name) {
-                let mut def = crate::db::sql_gen::CreateTableDef::new(&tbl_name)
-                    .schema(table.schema.clone());
+                let mut def =
+                    crate::db::sql_gen::CreateTableDef::new(&tbl_name).schema(table.schema.clone());
                 for col in cols {
                     let mut cdef = crate::db::sql_gen::ColumnDef::new(&col.name, &col.data_type)
                         .primary_key(col.is_primary_key)
@@ -3258,7 +3331,10 @@ impl CrabStudioApp {
                 crate::db::sql_gen::generate_create_table_sql(&def, family)
                     .unwrap_or_else(|_| format!("-- Table: {}\n", tbl_name))
             } else {
-                format!("-- DDL for {}\n-- Note: Select table in sidebar to inspect live schema", tbl_name)
+                format!(
+                    "-- DDL for {}\n-- Note: Select table in sidebar to inspect live schema",
+                    tbl_name
+                )
             }
         } else {
             format!("-- Table: {}\n", tbl_name)
@@ -3280,7 +3356,9 @@ impl CrabStudioApp {
         let schema = table.schema.clone();
         let tbl_name = table.name.clone();
 
-        let cached_cols = if self.selected_table.as_deref() == Some(&tbl_name) && !self.schema_columns.is_empty() {
+        let cached_cols = if self.selected_table.as_deref() == Some(&tbl_name)
+            && !self.schema_columns.is_empty()
+        {
             Some(self.schema_columns.clone())
         } else if let Ok(cache) = self.sql_metadata_cache.read() {
             cache.get_columns_for_table(&tbl_name).cloned()
@@ -3917,11 +3995,7 @@ impl CrabStudioApp {
         self.export_progress_rows = 0;
         self.export_preview_content = None;
 
-        self.export_available_tables = self
-            .active_tables
-            .iter()
-            .map(|t| t.name.clone())
-            .collect();
+        self.export_available_tables = self.active_tables.iter().map(|t| t.name.clone()).collect();
 
         let table = target_table
             .or_else(|| self.selected_table.clone())
@@ -4092,12 +4166,8 @@ impl CrabStudioApp {
                 if let Some(ref d) = ddl {
                     app.export_ddl_cache = Some(d.clone());
                 }
-                let preview = generate_export_preview(
-                    ddl.as_deref(),
-                    data_res.as_ref(),
-                    &config,
-                    20,
-                );
+                let preview =
+                    generate_export_preview(ddl.as_deref(), data_res.as_ref(), &config, 20);
                 app.export_preview_content = Some(preview);
                 app.export_is_loading_preview = false;
                 cx.notify();
@@ -4153,7 +4223,12 @@ impl CrabStudioApp {
 
         let destination = self.export_destination;
         let file_path = if destination == ExportDestination::File {
-            let raw_path = self.export_file_path_input.read(cx).value().trim().to_string();
+            let raw_path = self
+                .export_file_path_input
+                .read(cx)
+                .value()
+                .trim()
+                .to_string();
             if raw_path.is_empty() {
                 self.export_is_executing = false;
                 self.export_error = Some("Please specify an output file path".to_string());
@@ -4197,11 +4272,7 @@ impl CrabStudioApp {
             match data_res {
                 Ok(data) => {
                     let total_rows = data.rows.len();
-                    let dump_output = generate_table_dump(
-                        ddl.as_deref(),
-                        Some(&data),
-                        &config,
-                    );
+                    let dump_output = generate_table_dump(ddl.as_deref(), Some(&data), &config);
                     let bytes = dump_output.as_bytes().len();
 
                     match destination {
@@ -4226,7 +4297,8 @@ impl CrabStudioApp {
                                         cx.notify();
                                     }
                                     Err(e) => {
-                                        app.export_error = Some(format!("Failed to write file: {e}"));
+                                        app.export_error =
+                                            Some(format!("Failed to write file: {e}"));
                                         cx.notify();
                                     }
                                 }
@@ -4244,9 +4316,8 @@ impl CrabStudioApp {
                                     file_path: None,
                                     copied_to_clipboard: true,
                                 });
-                                app.status_message = Some(format!(
-                                    "Exported {total_rows} rows copied to clipboard"
-                                ));
+                                app.status_message =
+                                    Some(format!("Exported {total_rows} rows copied to clipboard"));
                                 cx.notify();
                             })
                             .ok();
@@ -4272,11 +4343,16 @@ impl CrabStudioApp {
     pub fn reveal_exported_file(&self, path: &str) {
         #[cfg(target_os = "macos")]
         {
-            let _ = std::process::Command::new("open").arg("-R").arg(path).spawn();
+            let _ = std::process::Command::new("open")
+                .arg("-R")
+                .arg(path)
+                .spawn();
         }
         #[cfg(target_os = "windows")]
         {
-            let _ = std::process::Command::new("explorer").arg(format!("/select,\"{path}\"")).spawn();
+            let _ = std::process::Command::new("explorer")
+                .arg(format!("/select,\"{path}\""))
+                .spawn();
         }
         #[cfg(all(unix, not(target_os = "macos")))]
         {
@@ -4287,11 +4363,7 @@ impl CrabStudioApp {
     }
 
     /// Open Visual Mock Data Generator Wizard Modal
-    pub fn open_mock_modal(
-        &mut self,
-        target_table: Option<String>,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn open_mock_modal(&mut self, target_table: Option<String>, cx: &mut Context<Self>) {
         self.mock_modal_open = true;
         self.mock_step = MockWizardStep::Step1Config;
         self.mock_error = None;
@@ -4429,8 +4501,7 @@ impl CrabStudioApp {
         });
         cx.notify();
 
-        let (progress_tx, mut progress_rx) =
-            tokio::sync::mpsc::unbounded_channel::<MockProgress>();
+        let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<MockProgress>();
 
         let tbl_name = target_table.clone();
         cx.spawn(async move |this, cx: &mut AsyncApp| {
@@ -4472,7 +4543,12 @@ impl CrabStudioApp {
                         ));
                         // Auto-refresh table grid if current table is open
                         if app.selected_table.as_deref() == Some(&tbl_name) {
-                            if let Some(t) = app.active_tables.iter().find(|t| t.name == tbl_name).cloned() {
+                            if let Some(t) = app
+                                .active_tables
+                                .iter()
+                                .find(|t| t.name == tbl_name)
+                                .cloned()
+                            {
                                 app.select_table(t, cx);
                             }
                         }
@@ -6725,7 +6801,10 @@ impl Render for CrabStudioApp {
                     self.export_is_executing,
                     self.settings_manager.settings().language,
                 )
-                .preview(self.export_preview_content.clone(), self.export_is_loading_preview)
+                .preview(
+                    self.export_preview_content.clone(),
+                    self.export_is_loading_preview,
+                )
                 .progress(self.export_progress_rows)
                 .success(self.export_success_info.clone())
                 .error(self.export_error.clone())
@@ -6832,7 +6911,8 @@ impl Render for CrabStudioApp {
                         this.close_mock_modal(cx);
                         this.active_nav = ActivityNav::Databases;
                         this.active_tab = WorkspaceTab::DataGrid;
-                        if let Some(t) = this.active_tables.iter().find(|t| t.name == tbl).cloned() {
+                        if let Some(t) = this.active_tables.iter().find(|t| t.name == tbl).cloned()
+                        {
                             this.select_table(t, cx);
                         }
                         cx.notify();

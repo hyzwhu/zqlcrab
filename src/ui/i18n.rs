@@ -236,7 +236,9 @@ fn translate_en(key: &'static str) -> &'static str {
         "mock_modal.preview_btn" => "Preview Sample...",
         "mock_modal.refresh_preview" => "Regenerate Preview",
         "mock_modal.start_seeding" => "Start Seeding Now",
-        "mock_modal.seeding_in_progress" => "Generating and seeding mock data in atomic transaction...",
+        "mock_modal.seeding_in_progress" => {
+            "Generating and seeding mock data in atomic transaction..."
+        }
         "mock_modal.success_title" => "Mock Data Seeded Successfully!",
         "mock_modal.success_desc" => "Inserted realistic mock rows into table with zero conflicts.",
         "mock_modal.rows_inserted" => "Total Rows Seeded",
@@ -496,11 +498,29 @@ mod tests {
         assert_eq!(t("settings.title", AppLanguage::En), "Settings");
         assert_eq!(t("settings.title", AppLanguage::ZhCn), "设置");
         assert_eq!(t("appearance.check_now", AppLanguage::ZhCn), "立即检查");
-        assert_eq!(t("export_modal.title", AppLanguage::ZhCn), "数据导出与表转储向导");
-        assert_eq!(t("export_modal.title", AppLanguage::En), "Export Table & Dump Wizard");
-        assert_eq!(t("table_menu.export_data", AppLanguage::ZhCn), "导出数据与转储...");
-        assert_eq!(t("mock_modal.title", AppLanguage::ZhCn), "可视化模拟测试数据生成器");
-        assert_eq!(t("mock_modal.title", AppLanguage::En), "Visual Mock Data Generator & Seeder");
-        assert_eq!(t("table_menu.generate_mock_data", AppLanguage::ZhCn), "生成模拟测试数据...");
+        assert_eq!(
+            t("export_modal.title", AppLanguage::ZhCn),
+            "数据导出与表转储向导"
+        );
+        assert_eq!(
+            t("export_modal.title", AppLanguage::En),
+            "Export Table & Dump Wizard"
+        );
+        assert_eq!(
+            t("table_menu.export_data", AppLanguage::ZhCn),
+            "导出数据与转储..."
+        );
+        assert_eq!(
+            t("mock_modal.title", AppLanguage::ZhCn),
+            "可视化模拟测试数据生成器"
+        );
+        assert_eq!(
+            t("mock_modal.title", AppLanguage::En),
+            "Visual Mock Data Generator & Seeder"
+        );
+        assert_eq!(
+            t("table_menu.generate_mock_data", AppLanguage::ZhCn),
+            "生成模拟测试数据..."
+        );
     }
 }

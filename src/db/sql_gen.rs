@@ -571,7 +571,11 @@ pub fn split_sql_statements(sql: &str) -> Vec<String> {
 
     while i < len {
         let ch = chars[i];
-        let next_ch = if i + 1 < len { Some(chars[i + 1]) } else { None };
+        let next_ch = if i + 1 < len {
+            Some(chars[i + 1])
+        } else {
+            None
+        };
 
         match &mut state {
             State::Normal => {
@@ -775,14 +779,7 @@ pub fn dialect_data_types(family: DatabaseFamily) -> &'static [&'static str] {
             "BOOLEAN",
             "BLOB",
         ],
-        DatabaseFamily::Sqlite => &[
-            "INTEGER",
-            "TEXT",
-            "REAL",
-            "BLOB",
-            "NUMERIC",
-            "BOOLEAN",
-        ],
+        DatabaseFamily::Sqlite => &["INTEGER", "TEXT", "REAL", "BLOB", "NUMERIC", "BOOLEAN"],
     }
 }
 
@@ -797,20 +794,8 @@ pub fn dialect_presets(family: DatabaseFamily) -> &'static [&'static str] {
             "TEXT",
             "JSONB",
         ],
-        DatabaseFamily::MySql => &[
-            "INT",
-            "BIGINT",
-            "VARCHAR(255)",
-            "DATETIME",
-            "TEXT",
-            "JSON",
-        ],
-        DatabaseFamily::Sqlite => &[
-            "INTEGER",
-            "TEXT",
-            "REAL",
-            "BLOB",
-        ],
+        DatabaseFamily::MySql => &["INT", "BIGINT", "VARCHAR(255)", "DATETIME", "TEXT", "JSON"],
+        DatabaseFamily::Sqlite => &["INTEGER", "TEXT", "REAL", "BLOB"],
     }
 }
 
@@ -1359,7 +1344,10 @@ pub fn parse_create_table_sql(
 
     for stmt in statements {
         let upper = stmt.trim().to_ascii_uppercase();
-        if upper.starts_with("CREATE TABLE") || upper.starts_with("CREATE TEMPORARY TABLE") || upper.starts_with("CREATE TEMP TABLE") {
+        if upper.starts_with("CREATE TABLE")
+            || upper.starts_with("CREATE TEMPORARY TABLE")
+            || upper.starts_with("CREATE TEMP TABLE")
+        {
             if main_stmt.is_none() {
                 main_stmt = Some(stmt);
             } else {
@@ -1399,7 +1387,11 @@ pub fn parse_create_table_sql(
                     let sub_parts: Vec<&str> = target_part.split('.').collect();
                     if let Some(last_col) = sub_parts.last() {
                         let clean_col = strip_identifier_quotes(last_col);
-                        if let Some(col) = def.columns.iter_mut().find(|c| c.name.eq_ignore_ascii_case(&clean_col)) {
+                        if let Some(col) = def
+                            .columns
+                            .iter_mut()
+                            .find(|c| c.name.eq_ignore_ascii_case(&clean_col))
+                        {
                             col.comment = Some(c);
                         }
                     }
@@ -1408,7 +1400,12 @@ pub fn parse_create_table_sql(
         } else if upper.starts_with("CREATE INDEX") || upper.starts_with("CREATE UNIQUE INDEX") {
             // CREATE [UNIQUE] INDEX [name] ON [table] (col1, col2)
             let is_unique = upper.starts_with("CREATE UNIQUE INDEX");
-            let after_idx = if is_unique { &trimmed[19..] } else { &trimmed[12..] }.trim();
+            let after_idx = if is_unique {
+                &trimmed[19..]
+            } else {
+                &trimmed[12..]
+            }
+            .trim();
 
             if let Some(on_idx) = after_idx.to_ascii_uppercase().find(" ON ") {
                 let idx_name_raw = after_idx[..on_idx].trim();
@@ -1457,7 +1454,10 @@ fn parse_single_create_table_statement(sql: &str) -> Result<CreateTableDef, Stri
     .trim();
 
     // Skip optional IF NOT EXISTS
-    let after_if_not_exists = if after_create.to_ascii_uppercase().starts_with("IF NOT EXISTS") {
+    let after_if_not_exists = if after_create
+        .to_ascii_uppercase()
+        .starts_with("IF NOT EXISTS")
+    {
         after_create[13..].trim()
     } else {
         after_create
@@ -1531,7 +1531,9 @@ fn parse_single_create_table_statement(sql: &str) -> Result<CreateTableDef, Stri
         let item_upper = trimmed_item.to_ascii_uppercase();
 
         // 1. Table-level PRIMARY KEY constraint: PRIMARY KEY (col1, col2)
-        if item_upper.starts_with("PRIMARY KEY") || item_upper.starts_with("CONSTRAINT") && item_upper.contains("PRIMARY KEY") {
+        if item_upper.starts_with("PRIMARY KEY")
+            || item_upper.starts_with("CONSTRAINT") && item_upper.contains("PRIMARY KEY")
+        {
             if let Some(open) = trimmed_item.find('(') {
                 if let Some(close) = trimmed_item.rfind(')') {
                     let cols_str = &trimmed_item[open + 1..close];
@@ -1563,7 +1565,8 @@ fn parse_single_create_table_statement(sql: &str) -> Result<CreateTableDef, Stri
         // 3. Skip standalone FOREIGN KEY or CHECK table constraints
         if item_upper.starts_with("FOREIGN KEY")
             || item_upper.starts_with("CHECK")
-            || (item_upper.starts_with("CONSTRAINT") && (item_upper.contains("FOREIGN KEY") || item_upper.contains("CHECK")))
+            || (item_upper.starts_with("CONSTRAINT")
+                && (item_upper.contains("FOREIGN KEY") || item_upper.contains("CHECK")))
         {
             continue;
         }
@@ -1577,7 +1580,10 @@ fn parse_single_create_table_statement(sql: &str) -> Result<CreateTableDef, Stri
     // Apply any table-level PRIMARY KEY annotations to matching columns
     if !table_pks.is_empty() {
         for col in &mut def.columns {
-            if table_pks.iter().any(|pk| pk.eq_ignore_ascii_case(&col.name)) {
+            if table_pks
+                .iter()
+                .any(|pk| pk.eq_ignore_ascii_case(&col.name))
+            {
                 col.is_primary_key = true;
                 col.is_nullable = false;
             }
@@ -1749,7 +1755,8 @@ fn parse_column_def_item(item: &str) -> Option<ColumnDef> {
         } else if tok_upper == "COMMENT" {
             if idx + 1 < token_count {
                 let comment_token = &tokens[idx + 1];
-                comment = extract_quoted_literal(comment_token).or_else(|| Some(comment_token.clone()));
+                comment =
+                    extract_quoted_literal(comment_token).or_else(|| Some(comment_token.clone()));
                 idx += 2;
                 continue;
             }
@@ -1886,7 +1893,11 @@ fn extract_mysql_table_comment(options: &str) -> Option<String> {
     let upper = options.to_ascii_uppercase();
     let comment_pos = upper.find("COMMENT")?;
     let rem = options[comment_pos + 7..].trim();
-    let after_eq = if rem.starts_with('=') { rem[1..].trim() } else { rem };
+    let after_eq = if rem.starts_with('=') {
+        rem[1..].trim()
+    } else {
+        rem
+    };
     extract_quoted_literal(after_eq)
 }
 
@@ -2057,7 +2068,11 @@ pub fn generate_alter_table_plan(
 
     let qualified_table = match schema_name {
         Some(s) if !s.trim().is_empty() && !s.eq_ignore_ascii_case("main") => {
-            format!("{}.{}", quote_ident(s, family), quote_ident(table_name, family))
+            format!(
+                "{}.{}",
+                quote_ident(s, family),
+                quote_ident(table_name, family)
+            )
         }
         _ => quote_ident(table_name, family),
     };
@@ -2114,7 +2129,12 @@ pub fn generate_alter_table_plan(
                             new_name: col_name.to_string(),
                             new_column: col.clone(),
                         });
-                    } else if type_changed || null_changed || def_changed || comment_changed || pk_changed {
+                    } else if type_changed
+                        || null_changed
+                        || def_changed
+                        || comment_changed
+                        || pk_changed
+                    {
                         alterations.push(ColumnAlteration::ModifyColumn {
                             old_column: orig.clone(),
                             new_column: col.clone(),
@@ -2295,7 +2315,10 @@ pub fn generate_alter_table_plan(
                         // Check if type also needs alteration
                         let old_opt = original_cols.iter().find(|c| c.name == *old_name);
                         if let Some(old) = old_opt {
-                            if !old.data_type.eq_ignore_ascii_case(new_column.data_type.trim()) {
+                            if !old
+                                .data_type
+                                .eq_ignore_ascii_case(new_column.data_type.trim())
+                            {
                                 statements.push(format!(
                                     "ALTER TABLE {qualified_table} ALTER COLUMN {} TYPE {};",
                                     quote_ident(new_name, family),
@@ -2311,7 +2334,10 @@ pub fn generate_alter_table_plan(
                         let quoted_col = quote_ident(&new_column.name, family);
 
                         // 1. Data type change
-                        if !old_column.data_type.eq_ignore_ascii_case(new_column.data_type.trim()) {
+                        if !old_column
+                            .data_type
+                            .eq_ignore_ascii_case(new_column.data_type.trim())
+                        {
                             statements.push(format!(
                                 "ALTER TABLE {qualified_table} ALTER COLUMN {quoted_col} TYPE {};",
                                 new_column.data_type.trim()
@@ -2363,7 +2389,9 @@ pub fn generate_alter_table_plan(
 
         DatabaseFamily::Sqlite => {
             // Check if changes only contain AddColumn
-            let only_add_columns = alterations.iter().all(|a| matches!(a, ColumnAlteration::AddColumn { .. }));
+            let only_add_columns = alterations
+                .iter()
+                .all(|a| matches!(a, ColumnAlteration::AddColumn { .. }));
 
             if only_add_columns {
                 for alt in &alterations {
@@ -2407,11 +2435,18 @@ pub fn generate_alter_table_plan(
                     let mut clause = format!(
                         "    {} {}",
                         quote_ident(&col.name, family),
-                        if col.data_type.trim().is_empty() { "TEXT" } else { col.data_type.trim() }
+                        if col.data_type.trim().is_empty() {
+                            "TEXT"
+                        } else {
+                            col.data_type.trim()
+                        }
                     );
                     if col.is_primary_key {
                         if col.is_auto_increment {
-                            clause = format!("    {} INTEGER PRIMARY KEY AUTOINCREMENT", quote_ident(&col.name, family));
+                            clause = format!(
+                                "    {} INTEGER PRIMARY KEY AUTOINCREMENT",
+                                quote_ident(&col.name, family)
+                            );
                         } else {
                             clause.push_str(" PRIMARY KEY");
                         }
@@ -2431,7 +2466,10 @@ pub fn generate_alter_table_plan(
                 let mut select_pairs = Vec::new();
                 for target in target_cols {
                     if let Some(ref orig_name) = target.original_name {
-                        if original_cols.iter().any(|c| c.name.eq_ignore_ascii_case(orig_name)) {
+                        if original_cols
+                            .iter()
+                            .any(|c| c.name.eq_ignore_ascii_case(orig_name))
+                        {
                             select_pairs.push((
                                 quote_ident(&target.definition.name, family),
                                 quote_ident(orig_name, family),
@@ -3199,10 +3237,16 @@ mod tests {
 
         let stmts = split_sql_statements(sql);
         assert_eq!(stmts.len(), 3);
-        assert!(stmts[0].starts_with("-- First comment with a semicolon;\n        CREATE TABLE \"users\""));
+        assert!(
+            stmts[0]
+                .starts_with("-- First comment with a semicolon;\n        CREATE TABLE \"users\"")
+        );
         assert!(stmts[0].ends_with("DEFAULT 'Hello; world!'\n        )"));
         assert!(stmts[1].contains("COMMENT ON COLUMN \"users\".\"bio\" IS 'User''s bio; info'"));
-        assert_eq!(stmts[2], "CREATE UNIQUE INDEX \"uk_name\" ON \"users\" (\"name\")");
+        assert_eq!(
+            stmts[2],
+            "CREATE UNIQUE INDEX \"uk_name\" ON \"users\" (\"name\")"
+        );
     }
 
     #[test]
@@ -3359,14 +3403,20 @@ CREATE UNIQUE INDEX "uk_name_title" ON "public"."lato_report" ("name", "title");
         assert_eq!(def.columns[0].name, "id");
         assert!(def.columns[0].is_primary_key);
         assert!(def.columns[0].is_auto_increment);
-        assert_eq!(def.columns[0].comment.as_deref(), Some("Auto-increment primary key"));
+        assert_eq!(
+            def.columns[0].comment.as_deref(),
+            Some("Auto-increment primary key")
+        );
 
         assert_eq!(def.columns[1].name, "username");
         assert_eq!(def.columns[1].comment.as_deref(), Some("Unique login name"));
 
         assert_eq!(def.columns[3].name, "created_at");
         assert_eq!(def.columns[3].data_type, "TIMESTAMPTZ");
-        assert_eq!(def.columns[3].default_value.as_deref(), Some("CURRENT_TIMESTAMP"));
+        assert_eq!(
+            def.columns[3].default_value.as_deref(),
+            Some("CURRENT_TIMESTAMP")
+        );
 
         assert_eq!(def.indexes.len(), 1);
         assert_eq!(def.indexes[0].name, "uk_username");
@@ -3397,7 +3447,10 @@ CREATE UNIQUE INDEX "uk_name_title" ON "public"."lato_report" ("name", "title");
     fn test_parse_create_table_invalid_inputs() {
         assert!(parse_create_table_sql("", DatabaseFamily::Sqlite).is_err());
         assert!(parse_create_table_sql("SELECT * FROM users;", DatabaseFamily::Sqlite).is_err());
-        assert!(parse_create_table_sql("CREATE TABLE missing_parenthesis", DatabaseFamily::Sqlite).is_err());
+        assert!(
+            parse_create_table_sql("CREATE TABLE missing_parenthesis", DatabaseFamily::Sqlite)
+                .is_err()
+        );
     }
 
     #[test]
@@ -3464,7 +3517,9 @@ CREATE UNIQUE INDEX "uk_name_title" ON "public"."lato_report" ("name", "title");
         let target_cols = vec![
             AlterColumnTarget::new(
                 Some("id".into()),
-                ColumnDef::new("id", "INT").primary_key(true).auto_increment(true),
+                ColumnDef::new("id", "INT")
+                    .primary_key(true)
+                    .auto_increment(true),
             ),
             AlterColumnTarget::new(
                 Some("title".into()),
@@ -3489,9 +3544,19 @@ CREATE UNIQUE INDEX "uk_name_title" ON "public"."lato_report" ("name", "title");
         );
 
         assert_eq!(plan.alterations.len(), 3);
-        assert!(plan.statements.iter().any(|s| s.contains("DROP COLUMN `obsolete`")));
-        assert!(plan.statements.iter().any(|s| s.contains("MODIFY COLUMN `title` VARCHAR(255) COMMENT 'Updated title'")));
-        assert!(plan.statements.iter().any(|s| s.contains("ADD COLUMN `status` VARCHAR(20) NOT NULL DEFAULT 'active' AFTER `title`")));
+        assert!(
+            plan.statements
+                .iter()
+                .any(|s| s.contains("DROP COLUMN `obsolete`"))
+        );
+        assert!(
+            plan.statements
+                .iter()
+                .any(|s| s.contains("MODIFY COLUMN `title` VARCHAR(255) COMMENT 'Updated title'"))
+        );
+        assert!(plan.statements.iter().any(|s| {
+            s.contains("ADD COLUMN `status` VARCHAR(20) NOT NULL DEFAULT 'active' AFTER `title`")
+        }));
         assert!(plan.full_script.starts_with("START TRANSACTION;"));
         assert!(plan.full_script.ends_with("COMMIT;"));
 
@@ -3528,7 +3593,9 @@ CREATE UNIQUE INDEX "uk_name_title" ON "public"."lato_report" ("name", "title");
         let target_cols = vec![
             AlterColumnTarget::new(
                 Some("id".into()),
-                ColumnDef::new("id", "BIGSERIAL").primary_key(true).auto_increment(true),
+                ColumnDef::new("id", "BIGSERIAL")
+                    .primary_key(true)
+                    .auto_increment(true),
             ),
             AlterColumnTarget::new(
                 Some("nickname".into()),
@@ -3544,8 +3611,16 @@ CREATE UNIQUE INDEX "uk_name_title" ON "public"."lato_report" ("name", "title");
             &target_cols,
         );
 
-        assert!(plan.statements.iter().any(|s| s.contains("RENAME COLUMN \"nickname\" TO \"display_name\"")));
-        assert!(plan.statements.iter().any(|s| s.contains("ALTER COLUMN \"display_name\" TYPE VARCHAR(100)")));
+        assert!(
+            plan.statements
+                .iter()
+                .any(|s| s.contains("RENAME COLUMN \"nickname\" TO \"display_name\""))
+        );
+        assert!(
+            plan.statements
+                .iter()
+                .any(|s| s.contains("ALTER COLUMN \"display_name\" TYPE VARCHAR(100)"))
+        );
         assert!(plan.full_script.starts_with("BEGIN;"));
         assert!(plan.full_script.ends_with("COMMIT;"));
     }
@@ -3577,7 +3652,9 @@ CREATE UNIQUE INDEX "uk_name_title" ON "public"."lato_report" ("name", "title");
         let add_only_target = vec![
             AlterColumnTarget::new(
                 Some("id".into()),
-                ColumnDef::new("id", "INTEGER").primary_key(true).auto_increment(true),
+                ColumnDef::new("id", "INTEGER")
+                    .primary_key(true)
+                    .auto_increment(true),
             ),
             AlterColumnTarget::new(
                 Some("score".into()),
@@ -3596,13 +3673,20 @@ CREATE UNIQUE INDEX "uk_name_title" ON "public"."lato_report" ("name", "title");
             &orig_cols,
             &add_only_target,
         );
-        assert!(plan_add.statements.iter().any(|s| s.contains("ALTER TABLE \"games\" ADD COLUMN \"extra\" TEXT DEFAULT ''")));
+        assert!(
+            plan_add
+                .statements
+                .iter()
+                .any(|s| s.contains("ALTER TABLE \"games\" ADD COLUMN \"extra\" TEXT DEFAULT ''"))
+        );
 
         // Case 2: Dropping or modifying columns in SQLite -> safe table recreation migration
         let modify_target = vec![
             AlterColumnTarget::new(
                 Some("id".into()),
-                ColumnDef::new("id", "INTEGER").primary_key(true).auto_increment(true),
+                ColumnDef::new("id", "INTEGER")
+                    .primary_key(true)
+                    .auto_increment(true),
             ),
             // Dropped score, added points
             AlterColumnTarget::new(
@@ -3621,12 +3705,41 @@ CREATE UNIQUE INDEX "uk_name_title" ON "public"."lato_report" ("name", "title");
 
         assert!(!plan_recreate.warnings.is_empty());
         assert!(plan_recreate.warnings[0].contains("recreating table 'games'"));
-        assert!(plan_recreate.statements.iter().any(|s| s.contains("PRAGMA foreign_keys = OFF;")));
-        assert!(plan_recreate.statements.iter().any(|s| s.contains("CREATE TABLE \"games_new_migration\"")));
-        assert!(plan_recreate.statements.iter().any(|s| s.contains("INSERT INTO \"games_new_migration\" (\"id\")")));
-        assert!(plan_recreate.statements.iter().any(|s| s.contains("DROP TABLE \"games\";")));
-        assert!(plan_recreate.statements.iter().any(|s| s.contains("ALTER TABLE \"games_new_migration\" RENAME TO \"games\";")));
-        assert!(plan_recreate.statements.iter().any(|s| s.contains("PRAGMA foreign_keys = ON;")));
+        assert!(
+            plan_recreate
+                .statements
+                .iter()
+                .any(|s| s.contains("PRAGMA foreign_keys = OFF;"))
+        );
+        assert!(
+            plan_recreate
+                .statements
+                .iter()
+                .any(|s| s.contains("CREATE TABLE \"games_new_migration\""))
+        );
+        assert!(
+            plan_recreate
+                .statements
+                .iter()
+                .any(|s| s.contains("INSERT INTO \"games_new_migration\" (\"id\")"))
+        );
+        assert!(
+            plan_recreate
+                .statements
+                .iter()
+                .any(|s| s.contains("DROP TABLE \"games\";"))
+        );
+        assert!(
+            plan_recreate
+                .statements
+                .iter()
+                .any(|s| s.contains("ALTER TABLE \"games_new_migration\" RENAME TO \"games\";"))
+        );
+        assert!(
+            plan_recreate
+                .statements
+                .iter()
+                .any(|s| s.contains("PRAGMA foreign_keys = ON;"))
+        );
     }
 }
-

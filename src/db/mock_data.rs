@@ -183,7 +183,9 @@ pub fn infer_mock_generator(
     }
 
     if lower_name.contains("birth") || lower_name.contains("date") {
-        return MockGeneratorType::Date { past_days: 365 * 20 };
+        return MockGeneratorType::Date {
+            past_days: 365 * 20,
+        };
     }
 
     if lower_name.contains("desc")
@@ -249,7 +251,8 @@ pub fn initialize_column_configs(columns: &[ColumnInfo]) -> Vec<MockColumnConfig
     columns
         .iter()
         .map(|c| {
-            let strategy = infer_mock_generator(&c.name, &c.data_type, c.is_primary_key, c.is_auto_increment);
+            let strategy =
+                infer_mock_generator(&c.name, &c.data_type, c.is_primary_key, c.is_auto_increment);
             MockColumnConfig {
                 column_name: c.name.clone(),
                 data_type: c.data_type.clone(),
@@ -313,37 +316,197 @@ impl FastRng {
 }
 
 const FIRST_NAMES: &[&str] = &[
-    "James", "Mary", "Robert", "Patricia", "John", "Jennifer", "Michael", "Linda",
-    "David", "Elizabeth", "William", "Barbara", "Richard", "Susan", "Joseph", "Jessica",
-    "Thomas", "Sarah", "Charles", "Karen", "Christopher", "Nancy", "Daniel", "Lisa",
-    "Matthew", "Betty", "Anthony", "Margaret", "Mark", "Sandra", "Donald", "Ashley",
-    "Steven", "Kimberly", "Paul", "Emily", "Andrew", "Donna", "Joshua", "Michelle",
-    "Lucas", "Emma", "Liam", "Olivia", "Noah", "Ava", "Oliver", "Sophia", "Elijah", "Isabella",
+    "James",
+    "Mary",
+    "Robert",
+    "Patricia",
+    "John",
+    "Jennifer",
+    "Michael",
+    "Linda",
+    "David",
+    "Elizabeth",
+    "William",
+    "Barbara",
+    "Richard",
+    "Susan",
+    "Joseph",
+    "Jessica",
+    "Thomas",
+    "Sarah",
+    "Charles",
+    "Karen",
+    "Christopher",
+    "Nancy",
+    "Daniel",
+    "Lisa",
+    "Matthew",
+    "Betty",
+    "Anthony",
+    "Margaret",
+    "Mark",
+    "Sandra",
+    "Donald",
+    "Ashley",
+    "Steven",
+    "Kimberly",
+    "Paul",
+    "Emily",
+    "Andrew",
+    "Donna",
+    "Joshua",
+    "Michelle",
+    "Lucas",
+    "Emma",
+    "Liam",
+    "Olivia",
+    "Noah",
+    "Ava",
+    "Oliver",
+    "Sophia",
+    "Elijah",
+    "Isabella",
 ];
 
 const LAST_NAMES: &[&str] = &[
-    "Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis",
-    "Rodriguez", "Martinez", "Hernandez", "Lopez", "Gonzalez", "Wilson", "Anderson", "Thomas",
-    "Taylor", "Moore", "Jackson", "Martin", "Lee", "Perez", "Thompson", "White",
-    "Harris", "Sanchez", "Clark", "Ramirez", "Lewis", "Robinson", "Walker", "Young",
-    "Allen", "King", "Wright", "Scott", "Torres", "Nguyen", "Hill", "Flores",
-    "Green", "Adams", "Nelson", "Baker", "Hall", "Rivera", "Campbell", "Mitchell", "Carter", "Roberts",
+    "Smith",
+    "Johnson",
+    "Williams",
+    "Brown",
+    "Jones",
+    "Garcia",
+    "Miller",
+    "Davis",
+    "Rodriguez",
+    "Martinez",
+    "Hernandez",
+    "Lopez",
+    "Gonzalez",
+    "Wilson",
+    "Anderson",
+    "Thomas",
+    "Taylor",
+    "Moore",
+    "Jackson",
+    "Martin",
+    "Lee",
+    "Perez",
+    "Thompson",
+    "White",
+    "Harris",
+    "Sanchez",
+    "Clark",
+    "Ramirez",
+    "Lewis",
+    "Robinson",
+    "Walker",
+    "Young",
+    "Allen",
+    "King",
+    "Wright",
+    "Scott",
+    "Torres",
+    "Nguyen",
+    "Hill",
+    "Flores",
+    "Green",
+    "Adams",
+    "Nelson",
+    "Baker",
+    "Hall",
+    "Rivera",
+    "Campbell",
+    "Mitchell",
+    "Carter",
+    "Roberts",
 ];
 
 const EMAIL_DOMAINS: &[&str] = &[
-    "gmail.com", "outlook.com", "yahoo.com", "icloud.com", "proton.me", "company.io", "tech.org", "example.com",
+    "gmail.com",
+    "outlook.com",
+    "yahoo.com",
+    "icloud.com",
+    "proton.me",
+    "company.io",
+    "tech.org",
+    "example.com",
 ];
 
 const LOREM_WORDS: &[&str] = &[
-    "lorem", "ipsum", "dolor", "sit", "amet", "consectetur", "adipiscing", "elit",
-    "sed", "do", "eiusmod", "tempor", "incididunt", "ut", "labore", "et", "dolore",
-    "magna", "aliqua", "enim", "ad", "minim", "veniam", "quis", "nostrud",
-    "exercitation", "ullamco", "laboris", "nisi", "aliquip", "ex", "ea", "commodo",
-    "consequat", "duis", "aute", "irure", "in", "reprehenderit", "voluptate", "velit",
-    "esse", "cillum", "fugiat", "nulla", "pariatur", "excepteur", "sint", "occaecat",
-    "cupidatat", "non", "proident", "sunt", "culpa", "qui", "officia", "deserunt",
-    "mollit", "anim", "id", "est", "laborum", "database", "query", "index", "performance",
-    "rust", "crab", "engine", "scale", "record", "transaction", "cluster", "service",
+    "lorem",
+    "ipsum",
+    "dolor",
+    "sit",
+    "amet",
+    "consectetur",
+    "adipiscing",
+    "elit",
+    "sed",
+    "do",
+    "eiusmod",
+    "tempor",
+    "incididunt",
+    "ut",
+    "labore",
+    "et",
+    "dolore",
+    "magna",
+    "aliqua",
+    "enim",
+    "ad",
+    "minim",
+    "veniam",
+    "quis",
+    "nostrud",
+    "exercitation",
+    "ullamco",
+    "laboris",
+    "nisi",
+    "aliquip",
+    "ex",
+    "ea",
+    "commodo",
+    "consequat",
+    "duis",
+    "aute",
+    "irure",
+    "in",
+    "reprehenderit",
+    "voluptate",
+    "velit",
+    "esse",
+    "cillum",
+    "fugiat",
+    "nulla",
+    "pariatur",
+    "excepteur",
+    "sint",
+    "occaecat",
+    "cupidatat",
+    "non",
+    "proident",
+    "sunt",
+    "culpa",
+    "qui",
+    "officia",
+    "deserunt",
+    "mollit",
+    "anim",
+    "id",
+    "est",
+    "laborum",
+    "database",
+    "query",
+    "index",
+    "performance",
+    "rust",
+    "crab",
+    "engine",
+    "scale",
+    "record",
+    "transaction",
+    "cluster",
+    "service",
 ];
 
 /// Formatted mock value ready for SQL interpolation or UI preview.
@@ -361,8 +524,20 @@ impl MockSqlValue {
             Self::Null => "NULL".to_string(),
             Self::Numeric(n) => n.clone(),
             Self::Boolean(b) => match dialect {
-                DatabaseFamily::Postgres => if *b { "TRUE".to_string() } else { "FALSE".to_string() },
-                DatabaseFamily::MySql | DatabaseFamily::Sqlite => if *b { "1".to_string() } else { "0".to_string() },
+                DatabaseFamily::Postgres => {
+                    if *b {
+                        "TRUE".to_string()
+                    } else {
+                        "FALSE".to_string()
+                    }
+                }
+                DatabaseFamily::MySql | DatabaseFamily::Sqlite => {
+                    if *b {
+                        "1".to_string()
+                    } else {
+                        "0".to_string()
+                    }
+                }
             },
             Self::Text(s) => {
                 let escaped = s.replace('\'', "''");
@@ -406,8 +581,16 @@ pub fn generate_column_value(
             MockSqlValue::Text(format!("{} {}", first, last))
         }
         MockGeneratorType::Email => {
-            let first = rng.choose(FIRST_NAMES).copied().unwrap_or("john").to_ascii_lowercase();
-            let last = rng.choose(LAST_NAMES).copied().unwrap_or("doe").to_ascii_lowercase();
+            let first = rng
+                .choose(FIRST_NAMES)
+                .copied()
+                .unwrap_or("john")
+                .to_ascii_lowercase();
+            let last = rng
+                .choose(LAST_NAMES)
+                .copied()
+                .unwrap_or("doe")
+                .to_ascii_lowercase();
             let num = rng.gen_range_i64(10, 999);
             let domain = rng.choose(EMAIL_DOMAINS).copied().unwrap_or("example.com");
             MockSqlValue::Text(format!("{}.{}{}@{}", first, last, num, domain))
@@ -442,7 +625,10 @@ pub fn generate_column_value(
             if options.is_empty() {
                 MockSqlValue::Text("default".to_string())
             } else {
-                let chosen = rng.choose(options).cloned().unwrap_or_else(|| "default".to_string());
+                let chosen = rng
+                    .choose(options)
+                    .cloned()
+                    .unwrap_or_else(|| "default".to_string());
                 MockSqlValue::Text(chosen)
             }
         }
@@ -454,7 +640,10 @@ pub fn generate_column_value(
             }
             let mut sentence = result.join(" ");
             if let Some(first_char) = sentence.chars().next() {
-                sentence.replace_range(..first_char.len_utf8(), &first_char.to_uppercase().to_string());
+                sentence.replace_range(
+                    ..first_char.len_utf8(),
+                    &first_char.to_uppercase().to_string(),
+                );
             }
             MockSqlValue::Text(sentence)
         }
@@ -602,7 +791,10 @@ where
         DatabaseFamily::Postgres => "BEGIN;",
         DatabaseFamily::MySql => "START TRANSACTION;",
     };
-    handle.execute_batch(begin_sql).await.map_err(|e| DbError::query(e.to_string()))?;
+    handle
+        .execute_batch(begin_sql)
+        .await
+        .map_err(|e| DbError::query(e.to_string()))?;
 
     let mut inserted_so_far = 0;
     while inserted_so_far < total_rows {
@@ -640,7 +832,10 @@ where
     }
 
     // Commit transaction
-    handle.execute_batch("COMMIT;").await.map_err(|e| DbError::query(e.to_string()))?;
+    handle
+        .execute_batch("COMMIT;")
+        .await
+        .map_err(|e| DbError::query(e.to_string()))?;
 
     let elapsed_ms = start_time.elapsed().as_millis();
     Ok(MockResult {
@@ -792,7 +987,9 @@ mod tests {
 
         // PostgreSQL dialect
         let pg_sql = generate_batch_insert_sql(DatabaseFamily::Postgres, "users", &cols, &rows);
-        assert!(pg_sql.starts_with("INSERT INTO \"users\" (\"id\", \"is_active\", \"name\") VALUES"));
+        assert!(
+            pg_sql.starts_with("INSERT INTO \"users\" (\"id\", \"is_active\", \"name\") VALUES")
+        );
         assert!(pg_sql.contains("(1, TRUE, 'O''Reilly')"));
         assert!(pg_sql.contains("(2, FALSE, 'Alice')"));
 
@@ -803,7 +1000,10 @@ mod tests {
 
         // SQLite dialect
         let sqlite_sql = generate_batch_insert_sql(DatabaseFamily::Sqlite, "users", &cols, &rows);
-        assert!(sqlite_sql.starts_with("INSERT INTO \"users\" (\"id\", \"is_active\", \"name\") VALUES"));
+        assert!(
+            sqlite_sql
+                .starts_with("INSERT INTO \"users\" (\"id\", \"is_active\", \"name\") VALUES")
+        );
         assert!(sqlite_sql.contains("(1, 1, 'O''Reilly')"));
     }
 
@@ -817,7 +1017,10 @@ mod tests {
             data_type: "INT".to_string(),
             is_pk: true,
             is_nullable: false,
-            generator: MockGeneratorType::AutoIncrement { start: 100, step: 5 },
+            generator: MockGeneratorType::AutoIncrement {
+                start: 100,
+                step: 5,
+            },
         };
         let v0 = generate_column_value(&auto_cfg, 0, &mut rng);
         let v1 = generate_column_value(&auto_cfg, 1, &mut rng);
@@ -852,7 +1055,8 @@ mod tests {
         assert!(role == "admin" || role == "user");
 
         // Empty rows returns empty SQL
-        let empty_sql = generate_batch_insert_sql(DatabaseFamily::Sqlite, "users", &[auto_cfg], &[]);
+        let empty_sql =
+            generate_batch_insert_sql(DatabaseFamily::Sqlite, "users", &[auto_cfg], &[]);
         assert!(empty_sql.is_empty());
     }
 }

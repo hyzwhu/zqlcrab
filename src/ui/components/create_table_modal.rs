@@ -523,15 +523,13 @@ impl RenderOnce for CreateTableModal {
                                 .starts_with(&format!("{dtype}("));
                         let on_qt = on_quick_type.clone();
                         let dtype_str = dtype.to_string();
-                        menu = menu.item(
-                            PopupMenuItem::new(*dtype)
-                                .checked(is_selected)
-                                .on_click(move |_, window, cx| {
-                                    if let Some(ref handler) = on_qt {
-                                        handler(row_idx, dtype_str.clone(), window, cx);
-                                    }
-                                }),
-                        );
+                        menu = menu.item(PopupMenuItem::new(*dtype).checked(is_selected).on_click(
+                            move |_, window, cx| {
+                                if let Some(ref handler) = on_qt {
+                                    handler(row_idx, dtype_str.clone(), window, cx);
+                                }
+                            },
+                        ));
                     }
                     menu
                 });

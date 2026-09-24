@@ -370,10 +370,7 @@ impl RenderOnce for SchemaViewer {
                         .when_some(on_quick_exp, |btn, handler| {
                             btn.on_click(move |_, window, cx| {
                                 handler(
-                                    format!(
-                                        "EXPLAIN SELECT * FROM \"{}\" LIMIT 100;",
-                                        tbl_for_exp
-                                    ),
+                                    format!("EXPLAIN SELECT * FROM \"{}\" LIMIT 100;", tbl_for_exp),
                                     window,
                                     cx,
                                 );
@@ -529,62 +526,76 @@ impl RenderOnce for SchemaViewer {
                 let on_toggle_auto = self.on_toggle_auto_increment.clone();
                 let on_toggle_del = self.on_toggle_delete_column.clone();
 
-                let null_btn = Button::new(ElementId::NamedInteger("toggle_null".into(), col_idx as u64))
-                    .ghost()
-                    .xsmall()
-                    .child(if col_state.is_nullable { "YES" } else { "NOT NULL" })
-                    .text_color(if col_state.is_nullable {
-                        ThemeColors::TEXT_MUTED
-                    } else {
-                        ThemeColors::WARNING
+                let null_btn = Button::new(ElementId::NamedInteger(
+                    "toggle_null".into(),
+                    col_idx as u64,
+                ))
+                .ghost()
+                .xsmall()
+                .child(if col_state.is_nullable {
+                    "YES"
+                } else {
+                    "NOT NULL"
+                })
+                .text_color(if col_state.is_nullable {
+                    ThemeColors::TEXT_MUTED
+                } else {
+                    ThemeColors::WARNING
+                })
+                .when_some(on_toggle_null, move |btn, handler| {
+                    btn.on_click(move |_, window, cx| {
+                        handler(col_idx, window, cx);
                     })
-                    .when_some(on_toggle_null, move |btn, handler| {
-                        btn.on_click(move |_, window, cx| {
-                            handler(col_idx, window, cx);
-                        })
-                    });
+                });
 
-                let pk_btn = Button::new(ElementId::NamedInteger("toggle_pk".into(), col_idx as u64))
-                    .ghost()
-                    .xsmall()
-                    .child("PK")
-                    .text_color(if col_state.is_primary_key {
-                        ThemeColors::PRIMARY_BORDER
-                    } else {
-                        ThemeColors::TEXT_FAINT
-                    })
-                    .when_some(on_toggle_pk, move |btn, handler| {
-                        btn.on_click(move |_, window, cx| {
-                            handler(col_idx, window, cx);
-                        })
-                    });
-
-                let auto_btn = Button::new(ElementId::NamedInteger("toggle_auto".into(), col_idx as u64))
-                    .ghost()
-                    .xsmall()
-                    .child("AUTO")
-                    .text_color(if col_state.is_auto_increment {
-                        ThemeColors::SUCCESS
-                    } else {
-                        ThemeColors::TEXT_FAINT
-                    })
-                    .when_some(on_toggle_auto, move |btn, handler| {
-                        btn.on_click(move |_, window, cx| {
-                            handler(col_idx, window, cx);
-                        })
-                    });
-
-                let action_btn = if is_del {
-                    Button::new(ElementId::NamedInteger("restore_col".into(), col_idx as u64))
+                let pk_btn =
+                    Button::new(ElementId::NamedInteger("toggle_pk".into(), col_idx as u64))
                         .ghost()
                         .xsmall()
-                        .icon(IconName::RotateCcw)
-                        .tooltip("Restore Column")
-                        .when_some(on_toggle_del, move |btn, handler| {
+                        .child("PK")
+                        .text_color(if col_state.is_primary_key {
+                            ThemeColors::PRIMARY_BORDER
+                        } else {
+                            ThemeColors::TEXT_FAINT
+                        })
+                        .when_some(on_toggle_pk, move |btn, handler| {
                             btn.on_click(move |_, window, cx| {
                                 handler(col_idx, window, cx);
                             })
+                        });
+
+                let auto_btn = Button::new(ElementId::NamedInteger(
+                    "toggle_auto".into(),
+                    col_idx as u64,
+                ))
+                .ghost()
+                .xsmall()
+                .child("AUTO")
+                .text_color(if col_state.is_auto_increment {
+                    ThemeColors::SUCCESS
+                } else {
+                    ThemeColors::TEXT_FAINT
+                })
+                .when_some(on_toggle_auto, move |btn, handler| {
+                    btn.on_click(move |_, window, cx| {
+                        handler(col_idx, window, cx);
+                    })
+                });
+
+                let action_btn = if is_del {
+                    Button::new(ElementId::NamedInteger(
+                        "restore_col".into(),
+                        col_idx as u64,
+                    ))
+                    .ghost()
+                    .xsmall()
+                    .icon(IconName::RotateCcw)
+                    .tooltip("Restore Column")
+                    .when_some(on_toggle_del, move |btn, handler| {
+                        btn.on_click(move |_, window, cx| {
+                            handler(col_idx, window, cx);
                         })
+                    })
                 } else {
                     Button::new(ElementId::NamedInteger("drop_col".into(), col_idx as u64))
                         .ghost()
@@ -602,7 +613,12 @@ impl RenderOnce for SchemaViewer {
                 let row = TableRow::new()
                     .w_full()
                     .items_center()
-                    .child(TableCell::new().w(px(70.0)).flex_shrink_0().child(status_badge))
+                    .child(
+                        TableCell::new()
+                            .w(px(70.0))
+                            .flex_shrink_0()
+                            .child(status_badge),
+                    )
                     .child(
                         TableCell::new()
                             .w(px(180.0))
@@ -615,12 +631,7 @@ impl RenderOnce for SchemaViewer {
                             .flex_shrink_0()
                             .child(Input::new(&col_state.data_type).xsmall().w_full()),
                     )
-                    .child(
-                        TableCell::new()
-                            .w(px(90.0))
-                            .flex_shrink_0()
-                            .child(null_btn),
-                    )
+                    .child(TableCell::new().w(px(90.0)).flex_shrink_0().child(null_btn))
                     .child(
                         TableCell::new()
                             .w(px(110.0))
@@ -639,7 +650,12 @@ impl RenderOnce for SchemaViewer {
                             .min_w(px(180.0))
                             .child(Input::new(&col_state.comment).xsmall().w_full()),
                     )
-                    .child(TableCell::new().w(px(70.0)).flex_shrink_0().child(action_btn));
+                    .child(
+                        TableCell::new()
+                            .w(px(70.0))
+                            .flex_shrink_0()
+                            .child(action_btn),
+                    );
 
                 edit_body = edit_body.child(row);
             }

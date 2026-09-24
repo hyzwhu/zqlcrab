@@ -1483,18 +1483,15 @@ impl RenderOnce for DataGrid {
                     .min_w(px(130.0))
                     .flex_shrink(1.0)
                     .child(
-                        Input::new(filter_inp)
-                            .small()
-                            .w_full()
-                            .prefix(
-                                Icon::new(IconName::Search)
-                                    .size(px(13.0))
-                                    .text_color(if has_filter {
-                                        ThemeColors::PRIMARY_LIGHT
-                                    } else {
-                                        ThemeColors::TEXT_FAINT
-                                    }),
-                            ),
+                        Input::new(filter_inp).small().w_full().prefix(
+                            Icon::new(IconName::Search)
+                                .size(px(13.0))
+                                .text_color(if has_filter {
+                                    ThemeColors::PRIMARY_LIGHT
+                                } else {
+                                    ThemeColors::TEXT_FAINT
+                                }),
+                        ),
                     )
                     .children(clear_btn)
                     .children(match_pill),
@@ -2144,7 +2141,9 @@ impl RenderOnce for DataGrid {
                     let eff_row_vals: Vec<QueryValue> = (0..result.columns.len())
                         .map(|c| {
                             let orig = row_data.get(c).unwrap_or(&QueryValue::Null);
-                            self.changeset.get_effective_cell_value(orig_row_idx, c, orig).clone()
+                            self.changeset
+                                .get_effective_cell_value(orig_row_idx, c, orig)
+                                .clone()
                         })
                         .collect();
                     let orig_row_json = row_to_json(&result.columns, &eff_row_vals);
@@ -3190,7 +3189,8 @@ impl RenderOnce for DataGrid {
 
                     let on_tog_modal = self.on_toggle_modal.clone();
                     let on_tog_pretty = self.on_toggle_json_pretty.clone();
-                    let is_cell_dirty = !is_inserted && self.changeset.is_cell_dirty(sel_row, sel_col);
+                    let is_cell_dirty =
+                        !is_inserted && self.changeset.is_cell_dirty(sel_row, sel_col);
                     let cell_edit_inp = self.cell_edit_input.clone();
                     let on_apply_edit = self.on_apply_cell_edit.clone();
                     let on_null_edit = self.on_set_cell_null.clone();
@@ -3740,11 +3740,31 @@ mod tests {
 
     #[test]
     fn test_filter_rows_by_keyword_multi_types() {
-        let cols = vec!["id".to_string(), "user".to_string(), "active".to_string(), "score".to_string()];
+        let cols = vec![
+            "id".to_string(),
+            "user".to_string(),
+            "active".to_string(),
+            "score".to_string(),
+        ];
         let rows = vec![
-            vec![QueryValue::Int(1), QueryValue::String("Alice".into()), QueryValue::Bool(true), QueryValue::Float(95.5)],
-            vec![QueryValue::Int(2), QueryValue::String("Bob".into()), QueryValue::Bool(false), QueryValue::Float(80.0)],
-            vec![QueryValue::Int(3), QueryValue::String("Charlie".into()), QueryValue::Bool(true), QueryValue::Null],
+            vec![
+                QueryValue::Int(1),
+                QueryValue::String("Alice".into()),
+                QueryValue::Bool(true),
+                QueryValue::Float(95.5),
+            ],
+            vec![
+                QueryValue::Int(2),
+                QueryValue::String("Bob".into()),
+                QueryValue::Bool(false),
+                QueryValue::Float(80.0),
+            ],
+            vec![
+                QueryValue::Int(3),
+                QueryValue::String("Charlie".into()),
+                QueryValue::Bool(true),
+                QueryValue::Null,
+            ],
         ];
 
         // 1. General search: "ali" -> matches row 0
@@ -3768,4 +3788,3 @@ mod tests {
         assert_eq!(matches_null, vec![2]);
     }
 }
-

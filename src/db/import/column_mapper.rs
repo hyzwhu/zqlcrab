@@ -21,7 +21,10 @@ fn normalize_ident(s: &str) -> String {
 }
 
 /// Automatically maps source CSV headers to target table columns using fuzzy and exact heuristics.
-pub fn auto_map_columns(csv_headers: &[String], table_columns: &[ColumnInfo]) -> Vec<ColumnMapping> {
+pub fn auto_map_columns(
+    csv_headers: &[String],
+    table_columns: &[ColumnInfo],
+) -> Vec<ColumnMapping> {
     let mut used_targets = std::collections::HashSet::new();
 
     csv_headers
