@@ -32,6 +32,7 @@ struct TableActionCallbacks {
     on_copy_name: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
     on_copy_insert: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_import: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
+    on_export: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_truncate: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_drop: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
 }
@@ -61,6 +62,7 @@ pub struct Sidebar {
     on_duplicate_connection: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
     on_delete_connection: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
     on_import_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
+    on_export_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_truncate_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_drop_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_create_table: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
@@ -99,6 +101,7 @@ impl Sidebar {
             on_duplicate_connection: None,
             on_delete_connection: None,
             on_import_table: None,
+            on_export_table: None,
             on_truncate_table: None,
             on_drop_table: None,
             on_create_table: None,
@@ -160,6 +163,14 @@ impl Sidebar {
         F: Fn(TableInfo, &mut Window, &mut App) + 'static,
     {
         self.on_import_table = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_export_table<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(TableInfo, &mut Window, &mut App) + 'static,
+    {
+        self.on_export_table = Some(Rc::new(handler));
         self
     }
 
@@ -431,6 +442,19 @@ impl Sidebar {
                     }),
             );
         }
+
+        // Export Data & Dump... / 导出数据与转储...
+        let export_handler = actions.on_export.clone();
+        let tbl_export = info.clone();
+        menu = menu.item(
+            PopupMenuItem::new(t("table_menu.export_data", lang))
+                .icon(IconName::Download)
+                .on_click(move |_, window, cx| {
+                    if let Some(ref handler) = export_handler {
+                        handler(tbl_export.clone(), window, cx);
+                    }
+                }),
+        );
 
         menu = menu.separator();
 
@@ -1012,6 +1036,7 @@ impl RenderOnce for Sidebar {
                         on_copy_name: self.on_copy_table_name.clone(),
                         on_copy_insert: self.on_copy_insert_template.clone(),
                         on_import: self.on_import_table.clone(),
+                        on_export: self.on_export_table.clone(),
                         on_truncate: self.on_truncate_table.clone(),
                         on_drop: self.on_drop_table.clone(),
                     };

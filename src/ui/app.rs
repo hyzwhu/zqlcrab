@@ -2,7 +2,10 @@
 
 use crate::db::changeset::GridChangeset;
 use crate::db::explain::{ExplainPlan, parse_explain_result, wrap_explain_sql};
-use crate::db::export::{ExportFormat, ExportOptions, export_result};
+use crate::db::export::{
+    ExportFormat, ExportOptions, ExportScope, TableDumpConfig, export_result,
+    generate_export_preview, generate_table_dump, suggested_file_name,
+};
 use crate::db::handle::ActiveConnection;
 use crate::db::history::{QueryHistoryItem, QueryHistoryManager, QueryHistoryStatus};
 use crate::db::import::{
@@ -24,7 +27,8 @@ use crate::db::types::{
 use crate::settings::{SettingsManager, ThemePreference};
 use crate::ui::components::{
     ActivityBar, ActivityNav, AppStatusBar, ConfirmActionKind, ConfirmDialog, ConnectionDialog,
-    ConsoleBottomTab, DataGrid, ExplainViewMode, ImportModal, ImportWizardStep, QueryConsole,
+    ConsoleBottomTab, DataGrid, ExplainViewMode, ExportDestination, ExportModal,
+    ExportSuccessInfo, ExportWizardStep, ImportModal, ImportWizardStep, QueryConsole,
     QueryHistoryView, QueryTabHeader, SchemaViewer, SettingsTab, SettingsView, Sidebar,
     SqlReviewModal,
     create_table_modal::{CreateTableColumnState, CreateTableIndexState, CreateTableModal},
@@ -302,6 +306,25 @@ pub struct CrabStudioApp {
     import_result: Option<ImportResult>,
     import_error: Option<String>,
 
+    // Data & Schema Export Wizard state
+    export_modal_open: bool,
+    export_step: ExportWizardStep,
+    export_target_table: String,
+    export_available_tables: Vec<String>,
+    export_config: TableDumpConfig,
+    export_destination: ExportDestination,
+    export_file_path_input: Entity<InputState>,
+    export_file_path: Option<std::path::PathBuf>,
+    export_where_input: Entity<InputState>,
+    export_limit_input: Entity<InputState>,
+    export_preview_content: Option<String>,
+    export_is_loading_preview: bool,
+    export_is_executing: bool,
+    export_progress_rows: usize,
+    export_success_info: Option<ExportSuccessInfo>,
+    export_error: Option<String>,
+    export_ddl_cache: Option<String>,
+
     // Settings state
     settings_manager: SettingsManager,
     active_nav: ActivityNav,
@@ -502,6 +525,9 @@ impl CrabStudioApp {
         .detach();
 
         let import_file_path_input = cx.new(|cx| InputState::new(window, cx));
+        let export_file_path_input = cx.new(|cx| InputState::new(window, cx));
+        let export_where_input = cx.new(|cx| InputState::new(window, cx));
+        let export_limit_input = cx.new(|cx| InputState::new(window, cx));
 
         let mut history_manager = QueryHistoryManager::new();
         history_manager.set_max_entries(settings_manager.settings().query.history_limit);
@@ -597,6 +623,23 @@ impl CrabStudioApp {
             import_progress: None,
             import_result: None,
             import_error: None,
+            export_modal_open: false,
+            export_step: ExportWizardStep::Step1Config,
+            export_target_table: String::new(),
+            export_available_tables: Vec::new(),
+            export_config: TableDumpConfig::default(),
+            export_destination: ExportDestination::File,
+            export_file_path_input,
+            export_file_path: None,
+            export_where_input,
+            export_limit_input,
+            export_preview_content: None,
+            export_is_loading_preview: false,
+            export_is_executing: false,
+            export_progress_rows: 0,
+            export_success_info: None,
+            export_error: None,
+            export_ddl_cache: None,
             settings_manager,
             active_nav: ActivityNav::Databases,
             active_settings_tab: SettingsTab::Appearance,
@@ -3825,6 +3868,390 @@ impl CrabStudioApp {
         cx.notify();
     }
 
+    /// Open Data & Schema Export Wizard Modal
+    pub fn open_export_modal(
+        &mut self,
+        target_table: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.export_modal_open = true;
+        self.export_step = ExportWizardStep::Step1Config;
+        self.export_error = None;
+        self.export_success_info = None;
+        self.export_is_executing = false;
+        self.export_progress_rows = 0;
+        self.export_preview_content = None;
+
+        self.export_available_tables = self
+            .active_tables
+            .iter()
+            .map(|t| t.name.clone())
+            .collect();
+
+        let table = target_table
+            .or_else(|| self.selected_table.clone())
+            .or_else(|| self.export_available_tables.first().cloned())
+            .unwrap_or_else(|| "exported_table".to_string());
+
+        let family = self
+            .active_connection
+            .as_ref()
+            .map(|c| c.config.db_type.family())
+            .unwrap_or(DatabaseFamily::Sqlite);
+
+        self.export_target_table = table.clone();
+        self.export_config.table_name = table.clone();
+        self.export_config.family = family;
+
+        // Populate default file path
+        let def_filename = suggested_file_name(&table, self.export_config.format);
+        let base_dir = dirs::download_dir()
+            .or_else(dirs::home_dir)
+            .unwrap_or_else(std::env::temp_dir);
+        let full_path = base_dir.join(&def_filename);
+        let path_str = full_path.display().to_string();
+        self.export_file_path = Some(full_path);
+        self.export_file_path_input.update(cx, |inp, cx| {
+            inp.set_value(&path_str, window, cx);
+        });
+
+        // Trigger DDL fetch & preview load
+        self.load_export_preview(cx);
+        cx.notify();
+    }
+
+    /// Close Export Wizard Modal
+    pub fn close_export_modal(&mut self, cx: &mut Context<Self>) {
+        self.export_modal_open = false;
+        self.export_is_executing = false;
+        self.export_error = None;
+        cx.notify();
+    }
+
+    /// Select export target table
+    pub fn select_export_table(
+        &mut self,
+        table_name: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.export_target_table = table_name.clone();
+        self.export_config.table_name = table_name.clone();
+        self.export_ddl_cache = None;
+
+        let def_filename = suggested_file_name(&table_name, self.export_config.format);
+        let base_dir = dirs::download_dir()
+            .or_else(dirs::home_dir)
+            .unwrap_or_else(std::env::temp_dir);
+        let full_path = base_dir.join(&def_filename);
+        let path_str = full_path.display().to_string();
+        self.export_file_path = Some(full_path);
+        self.export_file_path_input.update(cx, |inp, cx| {
+            inp.set_value(&path_str, window, cx);
+        });
+
+        self.load_export_preview(cx);
+        cx.notify();
+    }
+
+    /// Update export format
+    pub fn update_export_format(
+        &mut self,
+        format: ExportFormat,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.export_config.format = format;
+        if format != ExportFormat::SqlDump && format != ExportFormat::SqlInsert {
+            self.export_config.scope = ExportScope::DataOnly;
+        }
+
+        // Update default file extension in file path
+        let def_filename = suggested_file_name(&self.export_target_table, format);
+        let base_dir = dirs::download_dir()
+            .or_else(dirs::home_dir)
+            .unwrap_or_else(std::env::temp_dir);
+        let full_path = base_dir.join(&def_filename);
+        let path_str = full_path.display().to_string();
+        self.export_file_path = Some(full_path);
+        self.export_file_path_input.update(cx, |inp, cx| {
+            inp.set_value(&path_str, window, cx);
+        });
+
+        self.load_export_preview(cx);
+        cx.notify();
+    }
+
+    /// Browse for save destination file path
+    pub fn browse_export_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let def_name = suggested_file_name(&self.export_target_table, self.export_config.format);
+        let ext = self.export_config.format.extension();
+        let picked = rfd::FileDialog::new()
+            .set_file_name(&def_name)
+            .add_filter(self.export_config.format.display_name(), &[ext])
+            .add_filter("All Files (*.*)", &["*"])
+            .save_file();
+
+        if let Some(path) = picked {
+            let path_str = path.display().to_string();
+            self.export_file_path = Some(path);
+            self.export_file_path_input.update(cx, |inp, cx| {
+                inp.set_value(&path_str, window, cx);
+            });
+            cx.notify();
+        }
+    }
+
+    /// Load or regenerate live preview
+    pub fn load_export_preview(&mut self, cx: &mut Context<Self>) {
+        let Some(conn) = self.active_connection.clone() else {
+            return;
+        };
+
+        let table_name = self.export_target_table.clone();
+        if table_name.is_empty() {
+            return;
+        }
+
+        let family = self.export_config.family;
+        let where_clause = self.export_where_input.read(cx).value().trim().to_string();
+        let limit_clause = self.export_limit_input.read(cx).value().trim().to_string();
+        let limit_num: usize = limit_clause.parse().unwrap_or(20).clamp(1, 50);
+
+        let mut query_sql = format!(
+            "SELECT * FROM {}",
+            crate::db::types::quote_ident(&table_name, family)
+        );
+        if !where_clause.is_empty() {
+            if where_clause.to_uppercase().starts_with("WHERE") {
+                query_sql.push_str(&format!(" {where_clause}"));
+            } else {
+                query_sql.push_str(&format!(" WHERE {where_clause}"));
+            }
+        }
+        query_sql.push_str(&format!(" LIMIT {limit_num};"));
+
+        self.export_is_loading_preview = true;
+        let config = self.export_config.clone();
+        let ddl_cache = self.export_ddl_cache.clone();
+        let schema = self
+            .active_tables
+            .iter()
+            .find(|t| t.name == table_name)
+            .and_then(|t| t.schema.clone());
+
+        cx.spawn(async move |this, cx: &mut AsyncApp| {
+            let ddl = if let Some(cached) = ddl_cache {
+                Some(cached)
+            } else {
+                let tbl = table_name.clone();
+                conn.get_table_ddl(None, schema.as_deref(), &tbl)
+                    .await
+                    .ok()
+                    .flatten()
+            };
+
+            let data_res = conn.execute_query(&query_sql).await.ok();
+
+            this.update(cx, |app, cx| {
+                if let Some(ref d) = ddl {
+                    app.export_ddl_cache = Some(d.clone());
+                }
+                let preview = generate_export_preview(
+                    ddl.as_deref(),
+                    data_res.as_ref(),
+                    &config,
+                    20,
+                );
+                app.export_preview_content = Some(preview);
+                app.export_is_loading_preview = false;
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+
+        cx.notify();
+    }
+
+    /// Execute the full export operation (to file or to clipboard)
+    pub fn start_export_execution(&mut self, cx: &mut Context<Self>) {
+        let Some(conn) = self.active_connection.clone() else {
+            self.export_error = Some("No active database connection".to_string());
+            cx.notify();
+            return;
+        };
+
+        let table_name = self.export_target_table.clone();
+        if table_name.is_empty() {
+            self.export_error = Some("Target table cannot be empty".to_string());
+            cx.notify();
+            return;
+        }
+
+        self.export_step = ExportWizardStep::Step3Progress;
+        self.export_is_executing = true;
+        self.export_error = None;
+        self.export_success_info = None;
+
+        let family = self.export_config.family;
+        let where_clause = self.export_where_input.read(cx).value().trim().to_string();
+        let limit_clause = self.export_limit_input.read(cx).value().trim().to_string();
+
+        let mut query_sql = format!(
+            "SELECT * FROM {}",
+            crate::db::types::quote_ident(&table_name, family)
+        );
+        if !where_clause.is_empty() {
+            if where_clause.to_uppercase().starts_with("WHERE") {
+                query_sql.push_str(&format!(" {where_clause}"));
+            } else {
+                query_sql.push_str(&format!(" WHERE {where_clause}"));
+            }
+        }
+        if let Ok(limit_val) = limit_clause.parse::<usize>() {
+            if limit_val > 0 {
+                query_sql.push_str(&format!(" LIMIT {limit_val}"));
+            }
+        }
+        query_sql.push(';');
+
+        let destination = self.export_destination;
+        let file_path = if destination == ExportDestination::File {
+            let raw_path = self.export_file_path_input.read(cx).value().trim().to_string();
+            if raw_path.is_empty() {
+                self.export_is_executing = false;
+                self.export_error = Some("Please specify an output file path".to_string());
+                cx.notify();
+                return;
+            }
+            Some(std::path::PathBuf::from(raw_path))
+        } else {
+            None
+        };
+
+        let config = self.export_config.clone();
+        let ddl_cache = self.export_ddl_cache.clone();
+        let schema = self
+            .active_tables
+            .iter()
+            .find(|t| t.name == table_name)
+            .and_then(|t| t.schema.clone());
+
+        cx.spawn(async move |this, cx: &mut AsyncApp| {
+            let start_time = std::time::Instant::now();
+
+            let ddl = if let Some(cached) = ddl_cache {
+                Some(cached)
+            } else {
+                let tbl = table_name.clone();
+                conn.get_table_ddl(None, schema.as_deref(), &tbl)
+                    .await
+                    .ok()
+                    .flatten()
+            };
+
+            let data_res = if config.scope != ExportScope::SchemaOnly {
+                conn.execute_query(&query_sql).await
+            } else {
+                Ok(QueryResult::default())
+            };
+
+            let elapsed_ms = start_time.elapsed().as_millis() as u64;
+
+            match data_res {
+                Ok(data) => {
+                    let total_rows = data.rows.len();
+                    let dump_output = generate_table_dump(
+                        ddl.as_deref(),
+                        Some(&data),
+                        &config,
+                    );
+                    let bytes = dump_output.as_bytes().len();
+
+                    match destination {
+                        ExportDestination::File => {
+                            let path = file_path.clone().unwrap();
+                            let write_res = std::fs::write(&path, dump_output);
+                            this.update(cx, |app, cx| {
+                                app.export_is_executing = false;
+                                match write_res {
+                                    Ok(_) => {
+                                        app.export_success_info = Some(ExportSuccessInfo {
+                                            rows_count: total_rows,
+                                            bytes_written: bytes,
+                                            elapsed_millis: elapsed_ms,
+                                            file_path: Some(path.display().to_string()),
+                                            copied_to_clipboard: false,
+                                        });
+                                        app.status_message = Some(format!(
+                                            "Successfully exported {total_rows} rows to {}",
+                                            path.display()
+                                        ));
+                                        cx.notify();
+                                    }
+                                    Err(e) => {
+                                        app.export_error = Some(format!("Failed to write file: {e}"));
+                                        cx.notify();
+                                    }
+                                }
+                            })
+                            .ok();
+                        }
+                        ExportDestination::Clipboard => {
+                            this.update(cx, |app, cx| {
+                                app.export_is_executing = false;
+                                cx.write_to_clipboard(ClipboardItem::new_string(dump_output));
+                                app.export_success_info = Some(ExportSuccessInfo {
+                                    rows_count: total_rows,
+                                    bytes_written: bytes,
+                                    elapsed_millis: elapsed_ms,
+                                    file_path: None,
+                                    copied_to_clipboard: true,
+                                });
+                                app.status_message = Some(format!(
+                                    "Exported {total_rows} rows copied to clipboard"
+                                ));
+                                cx.notify();
+                            })
+                            .ok();
+                        }
+                    }
+                }
+                Err(err) => {
+                    this.update(cx, |app, cx| {
+                        app.export_is_executing = false;
+                        app.export_error = Some(err.to_string());
+                        cx.notify();
+                    })
+                    .ok();
+                }
+            }
+        })
+        .detach();
+
+        cx.notify();
+    }
+
+    /// Reveal exported file in system file manager (Finder / Explorer / File Manager)
+    pub fn reveal_exported_file(&self, path: &str) {
+        #[cfg(target_os = "macos")]
+        {
+            let _ = std::process::Command::new("open").arg("-R").arg(path).spawn();
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let _ = std::process::Command::new("explorer").arg(format!("/select,\"{path}\"")).spawn();
+        }
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            if let Some(parent) = std::path::Path::new(path).parent() {
+                let _ = std::process::Command::new("xdg-open").arg(parent).spawn();
+            }
+        }
+    }
+
     /// Open new connection dialog
     pub fn open_connection_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.dialog_open = true;
@@ -4589,6 +5016,14 @@ impl Render for CrabStudioApp {
             move |table, _, cx| {
                 handle.update(cx, |this, cx| {
                     this.open_import_modal(Some(table.name), cx);
+                });
+            }
+        })
+        .on_export_table({
+            let handle = app_handle.clone();
+            move |table, window, cx| {
+                handle.update(cx, |this, cx| {
+                    this.open_export_modal(Some(table.name), window, cx);
                 });
             }
         })
@@ -5871,6 +6306,206 @@ impl Render for CrabStudioApp {
             None
         };
 
+        // Data & Schema Export Wizard Modal overlay if open
+        let export_overlay = if self.export_modal_open {
+            let on_close = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.close_export_modal(cx);
+                    });
+                }
+            };
+            let on_step = {
+                let handle = app_handle.clone();
+                move |step, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.export_step = step;
+                        if step == ExportWizardStep::Step2Preview {
+                            this.load_export_preview(cx);
+                        }
+                        cx.notify();
+                    });
+                }
+            };
+            let on_sel_table = {
+                let handle = app_handle.clone();
+                move |tbl: String, window: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.select_export_table(tbl, window, cx);
+                    });
+                }
+            };
+            let on_sel_fmt = {
+                let handle = app_handle.clone();
+                move |fmt, window: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.update_export_format(fmt, window, cx);
+                    });
+                }
+            };
+            let on_sel_scope = {
+                let handle = app_handle.clone();
+                move |scope, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.export_config.scope = scope;
+                        this.load_export_preview(cx);
+                        cx.notify();
+                    });
+                }
+            };
+            let on_sel_dest = {
+                let handle = app_handle.clone();
+                move |dest, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.export_destination = dest;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_browse = {
+                let handle = app_handle.clone();
+                move |window: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.browse_export_file(window, cx);
+                    });
+                }
+            };
+            let on_drop = {
+                let handle = app_handle.clone();
+                move |drop_tbl, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.export_config.sql_options.drop_table_if_exists = drop_tbl;
+                        this.load_export_preview(cx);
+                        cx.notify();
+                    });
+                }
+            };
+            let on_tx = {
+                let handle = app_handle.clone();
+                move |wrap_tx, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.export_config.sql_options.wrap_in_transaction = wrap_tx;
+                        this.load_export_preview(cx);
+                        cx.notify();
+                    });
+                }
+            };
+            let on_batch = {
+                let handle = app_handle.clone();
+                move |batch_sz, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.export_config.sql_options.batch_size = batch_sz;
+                        this.load_export_preview(cx);
+                        cx.notify();
+                    });
+                }
+            };
+            let on_hdr = {
+                let handle = app_handle.clone();
+                move |hdr, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.export_config.csv_options.include_headers = hdr;
+                        this.load_export_preview(cx);
+                        cx.notify();
+                    });
+                }
+            };
+            let on_delim = {
+                let handle = app_handle.clone();
+                move |delim, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.export_config.csv_options.delimiter = delim;
+                        this.load_export_preview(cx);
+                        cx.notify();
+                    });
+                }
+            };
+            let on_null = {
+                let handle = app_handle.clone();
+                move |null_rep, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.export_config.csv_options.null_representation = null_rep;
+                        this.load_export_preview(cx);
+                        cx.notify();
+                    });
+                }
+            };
+            let on_pretty = {
+                let handle = app_handle.clone();
+                move |pretty, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.export_config.json_options.pretty = pretty;
+                        this.load_export_preview(cx);
+                        cx.notify();
+                    });
+                }
+            };
+            let on_refresh = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.load_export_preview(cx);
+                    });
+                }
+            };
+            let on_start = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.start_export_execution(cx);
+                    });
+                }
+            };
+            let on_reveal = {
+                let handle = app_handle.clone();
+                move |path: String, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, _cx| {
+                        this.reveal_exported_file(&path);
+                    });
+                }
+            };
+
+            Some(
+                ExportModal::new(
+                    self.export_step,
+                    self.export_target_table.clone(),
+                    self.export_available_tables.clone(),
+                    self.export_config.family,
+                    self.export_config.clone(),
+                    self.export_destination,
+                    &self.export_file_path_input,
+                    &self.export_where_input,
+                    &self.export_limit_input,
+                    self.export_is_executing,
+                    self.settings_manager.settings().language,
+                )
+                .preview(self.export_preview_content.clone(), self.export_is_loading_preview)
+                .progress(self.export_progress_rows)
+                .success(self.export_success_info.clone())
+                .error(self.export_error.clone())
+                .on_close(on_close)
+                .on_select_step(on_step)
+                .on_select_table(on_sel_table)
+                .on_select_format(on_sel_fmt)
+                .on_select_scope(on_sel_scope)
+                .on_select_destination(on_sel_dest)
+                .on_browse_file(on_browse)
+                .on_toggle_drop_table(on_drop)
+                .on_toggle_transaction(on_tx)
+                .on_select_batch_size(on_batch)
+                .on_toggle_headers(on_hdr)
+                .on_select_delimiter(on_delim)
+                .on_select_null_rep(on_null)
+                .on_toggle_pretty_json(on_pretty)
+                .on_refresh_preview(on_refresh)
+                .on_start_export(on_start)
+                .on_reveal_file(on_reveal),
+            )
+        } else {
+            None
+        };
+
         // Left rail Activity Bar
         let activity_bar =
             ActivityBar::new(self.active_nav, self.settings_manager.settings().language)
@@ -6044,7 +6679,9 @@ impl Render for CrabStudioApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &CloseDialog, _, cx| {
-                if this.import_modal_open {
+                if this.export_modal_open {
+                    this.close_export_modal(cx);
+                } else if this.import_modal_open {
                     this.close_import_modal(cx);
                 } else if this.connection_error_modal.is_some() {
                     this.close_connection_error_modal(cx);
@@ -6067,7 +6704,9 @@ impl Render for CrabStudioApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
-                if this.import_modal_open {
+                if this.export_modal_open {
+                    this.close_export_modal(cx);
+                } else if this.import_modal_open {
                     this.close_import_modal(cx);
                 } else if this.connection_error_modal.is_some() {
                     this.close_connection_error_modal(cx);
@@ -6230,5 +6869,6 @@ impl Render for CrabStudioApp {
             .children(table_confirm_overlay)
             .children(conn_error_overlay)
             .children(import_overlay)
+            .children(export_overlay)
     }
 }

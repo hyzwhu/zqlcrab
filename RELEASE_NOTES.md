@@ -5,6 +5,13 @@ Fast, lightweight, GPU-accelerated database desktop client built with Rust & GPU
 ### 📋 Changelog
 
 #### v0.1.3 Release Highlights:
+- 🚀 **Visual Data & Schema Export Wizard & Table Dump (数据导出向导与全量转储引擎)**:
+  - **Multi-Format Serialization**: Seamlessly export tables and query slices into SQL Script (Full Dump / DDL / Inserts), CSV, TSV, JSON Array, NDJSON (stream), and GitHub Flavored Markdown (GFM).
+  - **Comprehensive Dump Options**: Multi-dialect SQL dumps support `DROP TABLE IF EXISTS` (`CASCADE` for PG), dialect-aware transaction boundaries (`BEGIN TRANSACTION` / `START TRANSACTION`), configurable batch multi-row `INSERT` sizes, and engine identifier quoting.
+  - **Granular Filter & Scope**: Choose between Structure & Data, Data Only, or Structure Only (DDL); apply arbitrary `WHERE` conditions and row limits directly in the export wizard.
+  - **Live Dynamic Preview**: Instant 20-row preview panel renders real-time serialization results with truncation indicators without memory overhead.
+  - **Flexible Destinations**: Export directly to local disk with timestamped filenames (`rfd::FileDialog` / native file manager reveal) or copy formatted content straight to the system clipboard.
+  - **Seamless Context Navigation**: Launch the wizard directly via the table right-click context menu in the sidebar (`Export Data / Dump...`).
 - 🛠️ **Visual Schema Evolution & Online ALTER TABLE (表结构在线可视化重构与 DDL 迁移)**:
   - **Interactive Structure Editor**: Toggle inline structure editing directly inside `SchemaViewer` with live status indicators (`+ ADD`, `DROP`, `KEEP`), field renaming, data type adjustments, primary key / auto-increment toggling, nullability, default values, and comments.
   - **Multi-Dialect DDL Diff Engine**: Built-in `generate_alter_table_plan` intelligently analyzes baseline versus edited schema to synthesize atomic migration scripts across MySQL (`ADD/MODIFY/CHANGE/DROP`), PostgreSQL (`ADD/TYPE/SET NOT NULL/COMMENT`), and SQLite (native `ADD COLUMN` or safe 12-step table recreation migration).
