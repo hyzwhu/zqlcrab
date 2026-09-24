@@ -135,6 +135,7 @@ fn translate_en(key: &'static str) -> &'static str {
         "table_menu.show_ddl" => "Show CREATE TABLE (DDL)",
         "table_menu.import_data" => "Import Data...",
         "table_menu.export_data" => "Export Data / Dump...",
+        "table_menu.generate_mock_data" => "Generate Mock Data...",
         "table_menu.copy_name" => "Copy Table Name",
         "table_menu.copy_select" => "Copy SELECT Statement",
         "table_menu.copy_insert" => "Copy INSERT Template",
@@ -216,6 +217,34 @@ fn translate_en(key: &'static str) -> &'static str {
         "export_modal.copied_notice" => "Content has been copied to your system clipboard.",
         "export_modal.reveal_file" => "Reveal in File Manager",
         "export_modal.done_btn" => "Done",
+
+        // Mock data generator modal wizard
+        "mock_modal.title" => "Visual Mock Data Generator & Seeder",
+        "mock_modal.subtitle" => "Generate realistic test data and batch seed into database table.",
+        "mock_modal.step_config" => "Rules & Config",
+        "mock_modal.step_preview" => "Live Preview",
+        "mock_modal.step_execute" => "Seeding Progress",
+        "mock_modal.target_table" => "Target Table",
+        "mock_modal.rows_to_generate" => "Rows to Seed",
+        "mock_modal.batch_size" => "Batch Size",
+        "mock_modal.column_rules" => "Column Generation Rules",
+        "mock_modal.col_name" => "Column Name",
+        "mock_modal.col_type" => "Data Type",
+        "mock_modal.col_generator" => "Generator Strategy",
+        "mock_modal.col_config" => "Configuration / Parameters",
+        "mock_modal.col_skip" => "Skip",
+        "mock_modal.preview_btn" => "Preview Sample...",
+        "mock_modal.refresh_preview" => "Regenerate Preview",
+        "mock_modal.start_seeding" => "Start Seeding Now",
+        "mock_modal.seeding_in_progress" => "Generating and seeding mock data in atomic transaction...",
+        "mock_modal.success_title" => "Mock Data Seeded Successfully!",
+        "mock_modal.success_desc" => "Inserted realistic mock rows into table with zero conflicts.",
+        "mock_modal.rows_inserted" => "Total Rows Seeded",
+        "mock_modal.time_elapsed" => "Elapsed Time",
+        "mock_modal.view_in_grid" => "View in Data Grid",
+        "mock_modal.close" => "Close",
+        "mock_modal.failed" => "Seeding Failed",
+        "mock_modal.back" => "Back",
 
         // Other tabs
         "about.desc" => "A modern, high-performance database IDE built with Rust & GPUI",
@@ -341,6 +370,7 @@ fn translate_zh(key: &'static str) -> &'static str {
         "table_menu.show_ddl" => "查看建表语句 (DDL)",
         "table_menu.import_data" => "导入数据...",
         "table_menu.export_data" => "导出数据与转储...",
+        "table_menu.generate_mock_data" => "生成模拟测试数据...",
         "table_menu.copy_name" => "复制表名",
         "table_menu.copy_select" => "复制 SELECT 语句",
         "table_menu.copy_insert" => "复制 INSERT 插入模板",
@@ -421,6 +451,34 @@ fn translate_zh(key: &'static str) -> &'static str {
         "export_modal.reveal_file" => "在文件管理器中显示",
         "export_modal.done_btn" => "完成",
 
+        // Mock data generator modal wizard
+        "mock_modal.title" => "可视化模拟测试数据生成器",
+        "mock_modal.subtitle" => "为数据表智能生成拟真业务测试数据并批量填充至数据库",
+        "mock_modal.step_config" => "规则与配置",
+        "mock_modal.step_preview" => "实时预览",
+        "mock_modal.step_execute" => "填充进度",
+        "mock_modal.target_table" => "目标表",
+        "mock_modal.rows_to_generate" => "生成总行数",
+        "mock_modal.batch_size" => "每批事务大小",
+        "mock_modal.column_rules" => "字段生成规则配置",
+        "mock_modal.col_name" => "字段名称",
+        "mock_modal.col_type" => "数据类型",
+        "mock_modal.col_generator" => "生成策略",
+        "mock_modal.col_config" => "参数与选项",
+        "mock_modal.col_skip" => "跳过",
+        "mock_modal.preview_btn" => "预览模拟数据...",
+        "mock_modal.refresh_preview" => "重新生成预览",
+        "mock_modal.start_seeding" => "立即开始批量填充",
+        "mock_modal.seeding_in_progress" => "正在原子事务中分批生成并填充模拟数据...",
+        "mock_modal.success_title" => "模拟数据填充成功！",
+        "mock_modal.success_desc" => "已将拟真测试数据安全插入目标数据表，无任何约束冲突。",
+        "mock_modal.rows_inserted" => "成功写入总行数",
+        "mock_modal.time_elapsed" => "总耗时",
+        "mock_modal.view_in_grid" => "在数据网格中查看",
+        "mock_modal.close" => "关闭",
+        "mock_modal.failed" => "数据填充失败",
+        "mock_modal.back" => "返回上一步",
+
         // Other tabs
         "about.desc" => "基于 Rust 与 GPUI 打造的高性能现代化桌面数据库客户端",
 
@@ -441,5 +499,8 @@ mod tests {
         assert_eq!(t("export_modal.title", AppLanguage::ZhCn), "数据导出与表转储向导");
         assert_eq!(t("export_modal.title", AppLanguage::En), "Export Table & Dump Wizard");
         assert_eq!(t("table_menu.export_data", AppLanguage::ZhCn), "导出数据与转储...");
+        assert_eq!(t("mock_modal.title", AppLanguage::ZhCn), "可视化模拟测试数据生成器");
+        assert_eq!(t("mock_modal.title", AppLanguage::En), "Visual Mock Data Generator & Seeder");
+        assert_eq!(t("table_menu.generate_mock_data", AppLanguage::ZhCn), "生成模拟测试数据...");
     }
 }

@@ -14,6 +14,10 @@ use crate::db::import::{
     auto_map_columns,
 };
 use crate::db::manager::ConnectionManager;
+use crate::db::mock_data::{
+    MockColumnConfig, MockGeneratorType, MockProgress, MockResult, execute_mock_seeding,
+    generate_mock_preview, initialize_column_configs,
+};
 use crate::db::sql_format::format_sql_with_indent;
 use crate::db::sql_gen::{
     AlterColumnTarget, ColumnDef, CreateTableDef, SqlReviewPlan, TableIndexDef, TableIndexType,
@@ -28,9 +32,9 @@ use crate::settings::{SettingsManager, ThemePreference};
 use crate::ui::components::{
     ActivityBar, ActivityNav, AppStatusBar, ConfirmActionKind, ConfirmDialog, ConnectionDialog,
     ConsoleBottomTab, DataGrid, ExplainViewMode, ExportDestination, ExportModal,
-    ExportSuccessInfo, ExportWizardStep, ImportModal, ImportWizardStep, QueryConsole,
-    QueryHistoryView, QueryTabHeader, SchemaViewer, SettingsTab, SettingsView, Sidebar,
-    SqlReviewModal,
+    ExportSuccessInfo, ExportWizardStep, ImportModal, ImportWizardStep, MockDataModal,
+    MockWizardStep, QueryConsole, QueryHistoryView, QueryTabHeader, SchemaViewer, SettingsTab,
+    SettingsView, Sidebar, SqlReviewModal,
     create_table_modal::{CreateTableColumnState, CreateTableIndexState, CreateTableModal},
     data_grid::GridCellCoord,
     schema_viewer::SchemaEditColumnState,
@@ -324,6 +328,22 @@ pub struct CrabStudioApp {
     export_success_info: Option<ExportSuccessInfo>,
     export_error: Option<String>,
     export_ddl_cache: Option<String>,
+
+    // Visual Mock Data Generator Wizard state
+    mock_modal_open: bool,
+    mock_step: MockWizardStep,
+    mock_target_table: String,
+    mock_available_tables: Vec<String>,
+    mock_columns: Vec<MockColumnConfig>,
+    mock_row_count: usize,
+    mock_batch_size: usize,
+    mock_preview_headers: Vec<String>,
+    mock_preview_rows: Vec<Vec<String>>,
+    mock_is_loading_preview: bool,
+    mock_is_executing: bool,
+    mock_progress: Option<MockProgress>,
+    mock_result: Option<MockResult>,
+    mock_error: Option<String>,
 
     // Settings state
     settings_manager: SettingsManager,
@@ -640,6 +660,20 @@ impl CrabStudioApp {
             export_success_info: None,
             export_error: None,
             export_ddl_cache: None,
+            mock_modal_open: false,
+            mock_step: MockWizardStep::Step1Config,
+            mock_target_table: String::new(),
+            mock_available_tables: Vec::new(),
+            mock_columns: Vec::new(),
+            mock_row_count: 500,
+            mock_batch_size: 200,
+            mock_preview_headers: Vec::new(),
+            mock_preview_rows: Vec::new(),
+            mock_is_loading_preview: false,
+            mock_is_executing: false,
+            mock_progress: None,
+            mock_result: None,
+            mock_error: None,
             settings_manager,
             active_nav: ActivityNav::Databases,
             active_settings_tab: SettingsTab::Appearance,
@@ -4252,6 +4286,209 @@ impl CrabStudioApp {
         }
     }
 
+    /// Open Visual Mock Data Generator Wizard Modal
+    pub fn open_mock_modal(
+        &mut self,
+        target_table: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.mock_modal_open = true;
+        self.mock_step = MockWizardStep::Step1Config;
+        self.mock_error = None;
+        self.mock_result = None;
+        self.mock_progress = None;
+        self.mock_is_executing = false;
+        self.mock_is_loading_preview = false;
+        self.mock_row_count = 500;
+        self.mock_batch_size = 200;
+
+        self.mock_available_tables = self
+            .active_tables
+            .iter()
+            .filter(|t| !t.is_view())
+            .map(|t| t.name.clone())
+            .collect();
+
+        let target = target_table
+            .or_else(|| self.selected_table.clone())
+            .or_else(|| self.mock_available_tables.first().cloned())
+            .unwrap_or_default();
+
+        if !target.is_empty() {
+            self.select_mock_table(target, cx);
+        } else {
+            self.mock_target_table = String::new();
+            self.mock_columns.clear();
+            self.mock_preview_headers.clear();
+            self.mock_preview_rows.clear();
+        }
+
+        cx.notify();
+    }
+
+    /// Close Visual Mock Data Generator Wizard Modal
+    pub fn close_mock_modal(&mut self, cx: &mut Context<Self>) {
+        self.mock_modal_open = false;
+        self.mock_is_executing = false;
+        self.mock_error = None;
+        cx.notify();
+    }
+
+    /// Select target table in mock data wizard and initialize column rules
+    pub fn select_mock_table(&mut self, table_name: String, cx: &mut Context<Self>) {
+        self.mock_target_table = table_name.clone();
+
+        let table_info = self
+            .active_tables
+            .iter()
+            .find(|t| t.name == table_name)
+            .cloned();
+
+        let mut found_cols = false;
+        if let Ok(cache) = self.sql_metadata_cache.read() {
+            if let Some(cols) = cache.get_columns_for_table(&table_name) {
+                if !cols.is_empty() {
+                    self.mock_columns = initialize_column_configs(cols);
+                    found_cols = true;
+                }
+            }
+        }
+
+        if !found_cols
+            && self.selected_table.as_deref() == Some(&table_name)
+            && !self.schema_columns.is_empty()
+        {
+            self.mock_columns = initialize_column_configs(&self.schema_columns);
+        }
+
+        self.refresh_mock_preview(cx);
+
+        // Async fetch if connection available to ensure freshest column definitions
+        let schema = table_info.as_ref().and_then(|t| t.schema.clone());
+        if let Some(conn) = self.active_connection.clone() {
+            let tbl = table_name.clone();
+            cx.spawn(async move |this, cx: &mut AsyncApp| {
+                let cols = conn
+                    .list_columns(None, schema.as_deref(), &tbl)
+                    .await
+                    .unwrap_or_default();
+                this.update(cx, |app, cx| {
+                    if app.mock_target_table == tbl && !cols.is_empty() {
+                        app.mock_columns = initialize_column_configs(&cols);
+                        app.refresh_mock_preview(cx);
+                        cx.notify();
+                    }
+                })
+                .ok();
+            })
+            .detach();
+        }
+
+        cx.notify();
+    }
+
+    /// Generate or refresh preview rows using current column rules
+    pub fn refresh_mock_preview(&mut self, cx: &mut Context<Self>) {
+        let (headers, rows) = generate_mock_preview(&self.mock_columns, 8);
+        self.mock_preview_headers = headers;
+        self.mock_preview_rows = rows;
+        self.mock_is_loading_preview = false;
+        cx.notify();
+    }
+
+    /// Start generating and batch inserting mock data into the database
+    pub fn start_mock_execution(&mut self, cx: &mut Context<Self>) {
+        let conn = match self.active_connection.clone() {
+            Some(c) => c,
+            None => {
+                self.mock_error = Some("No active database connection".to_string());
+                cx.notify();
+                return;
+            }
+        };
+
+        let target_table = self.mock_target_table.clone();
+        if target_table.is_empty() {
+            self.mock_error = Some("Please select a target table".to_string());
+            cx.notify();
+            return;
+        }
+
+        let total_rows = self.mock_row_count;
+        let batch_size = self.mock_batch_size;
+        let columns = self.mock_columns.clone();
+
+        self.mock_step = MockWizardStep::Step3Progress;
+        self.mock_is_executing = true;
+        self.mock_error = None;
+        self.mock_result = None;
+        self.mock_progress = Some(MockProgress {
+            inserted: 0,
+            total: total_rows,
+            percent: 0.0,
+        });
+        cx.notify();
+
+        let (progress_tx, mut progress_rx) =
+            tokio::sync::mpsc::unbounded_channel::<MockProgress>();
+
+        let tbl_name = target_table.clone();
+        cx.spawn(async move |this, cx: &mut AsyncApp| {
+            let this_prog = this.clone();
+            cx.spawn(async move |cx: &mut AsyncApp| {
+                while let Some(prog) = progress_rx.recv().await {
+                    let res = this_prog.update(cx, |app, cx| {
+                        app.mock_progress = Some(prog);
+                        cx.notify();
+                    });
+                    if res.is_err() {
+                        break;
+                    }
+                }
+            })
+            .detach();
+
+            let res = execute_mock_seeding(
+                &conn,
+                &target_table,
+                &columns,
+                total_rows,
+                batch_size,
+                move |prog| {
+                    let _ = progress_tx.send(prog);
+                },
+            )
+            .await;
+
+            this.update(cx, |app, cx| {
+                app.mock_is_executing = false;
+                match res {
+                    Ok(result) => {
+                        let inserted = result.total_inserted;
+                        let secs = result.elapsed_ms as f64 / 1000.0;
+                        app.mock_result = Some(result);
+                        app.status_message = Some(format!(
+                            "Mock data generation complete: {inserted} rows inserted in {secs:.2}s"
+                        ));
+                        // Auto-refresh table grid if current table is open
+                        if app.selected_table.as_deref() == Some(&tbl_name) {
+                            if let Some(t) = app.active_tables.iter().find(|t| t.name == tbl_name).cloned() {
+                                app.select_table(t, cx);
+                            }
+                        }
+                        cx.notify();
+                    }
+                    Err(err) => {
+                        app.mock_error = Some(err.to_string());
+                        cx.notify();
+                    }
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     /// Open new connection dialog
     pub fn open_connection_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.dialog_open = true;
@@ -5024,6 +5261,14 @@ impl Render for CrabStudioApp {
             move |table, window, cx| {
                 handle.update(cx, |this, cx| {
                     this.open_export_modal(Some(table.name), window, cx);
+                });
+            }
+        })
+        .on_mock_data_table({
+            let handle = app_handle.clone();
+            move |table, _, cx| {
+                handle.update(cx, |this, cx| {
+                    this.open_mock_modal(Some(table.name), cx);
                 });
             }
         })
@@ -6506,6 +6751,128 @@ impl Render for CrabStudioApp {
             None
         };
 
+        let mock_overlay = if self.mock_modal_open {
+            let on_close = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.close_mock_modal(cx);
+                    });
+                }
+            };
+            let on_step = {
+                let handle = app_handle.clone();
+                move |step, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.mock_step = step;
+                        if step == MockWizardStep::Step2Preview {
+                            this.refresh_mock_preview(cx);
+                        }
+                        cx.notify();
+                    });
+                }
+            };
+            let on_sel_table = {
+                let handle = app_handle.clone();
+                move |tbl: String, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.select_mock_table(tbl, cx);
+                    });
+                }
+            };
+            let on_sel_count = {
+                let handle = app_handle.clone();
+                move |cnt: usize, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.mock_row_count = cnt;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_sel_batch = {
+                let handle = app_handle.clone();
+                move |bs: usize, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.mock_batch_size = bs;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_col_gen = {
+                let handle = app_handle.clone();
+                move |idx: usize, gen_type: MockGeneratorType, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        if let Some(col) = this.mock_columns.get_mut(idx) {
+                            col.generator = gen_type;
+                            cx.notify();
+                        }
+                    });
+                }
+            };
+            let on_refresh = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.refresh_mock_preview(cx);
+                    });
+                }
+            };
+            let on_start = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.start_mock_execution(cx);
+                    });
+                }
+            };
+            let on_view_grid = {
+                let handle = app_handle.clone();
+                move |tbl: String, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.close_mock_modal(cx);
+                        this.active_nav = ActivityNav::Databases;
+                        this.active_tab = WorkspaceTab::DataGrid;
+                        if let Some(t) = this.active_tables.iter().find(|t| t.name == tbl).cloned() {
+                            this.select_table(t, cx);
+                        }
+                        cx.notify();
+                    });
+                }
+            };
+
+            Some(
+                MockDataModal::new(
+                    self.mock_step,
+                    self.mock_target_table.clone(),
+                    self.mock_available_tables.clone(),
+                    self.mock_columns.clone(),
+                    self.mock_row_count,
+                    self.mock_batch_size,
+                )
+                .preview(
+                    self.mock_preview_headers.clone(),
+                    self.mock_preview_rows.clone(),
+                    self.mock_is_loading_preview,
+                )
+                .progress(self.mock_progress)
+                .result(self.mock_result.clone())
+                .error(self.mock_error.clone())
+                .executing(self.mock_is_executing)
+                .language(self.settings_manager.settings().language)
+                .on_close(on_close)
+                .on_select_step(on_step)
+                .on_select_table(on_sel_table)
+                .on_select_row_count(on_sel_count)
+                .on_select_batch_size(on_sel_batch)
+                .on_change_column_generator(on_col_gen)
+                .on_refresh_preview(on_refresh)
+                .on_start_seeding(on_start)
+                .on_view_in_grid(on_view_grid),
+            )
+        } else {
+            None
+        };
+
         // Left rail Activity Bar
         let activity_bar =
             ActivityBar::new(self.active_nav, self.settings_manager.settings().language)
@@ -6679,7 +7046,9 @@ impl Render for CrabStudioApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &CloseDialog, _, cx| {
-                if this.export_modal_open {
+                if this.mock_modal_open {
+                    this.close_mock_modal(cx);
+                } else if this.export_modal_open {
                     this.close_export_modal(cx);
                 } else if this.import_modal_open {
                     this.close_import_modal(cx);
@@ -6704,7 +7073,9 @@ impl Render for CrabStudioApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
-                if this.export_modal_open {
+                if this.mock_modal_open {
+                    this.close_mock_modal(cx);
+                } else if this.export_modal_open {
                     this.close_export_modal(cx);
                 } else if this.import_modal_open {
                     this.close_import_modal(cx);
@@ -6870,5 +7241,6 @@ impl Render for CrabStudioApp {
             .children(conn_error_overlay)
             .children(import_overlay)
             .children(export_overlay)
+            .children(mock_overlay)
     }
 }

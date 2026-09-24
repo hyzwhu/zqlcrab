@@ -60,6 +60,13 @@
   - Insert new blank rows or clone existing rows as starting templates.
   - Contextual row deletion with visual strike-through tracking.
   - **Staged Changeset Review**: Review all pending INSERTs, UPDATEs, and DELETEs in an atomic transaction script before committing to disk.
+- ✨ **Visual Mock Data Generator & Seeder**:
+  - Heuristic semantic type inference (names, emails, phones, UUIDs, ranges, timestamps, enums).
+  - Multi-step interactive modal wizard with live preview of sample generated records.
+  - Multi-dialect atomic batch insertion engine with progress tracking and automatic grid refresh.
+- 🚀 **Comprehensive Data Export & Table Dump**:
+  - Multi-format dump engine supporting SQL Scripts (DDL + batch multi-row INSERTs), CSV, TSV, JSON, NDJSON, and Markdown tables.
+  - Dialect-aware options, WHERE filtering, row limits, file manager reveal, and clipboard export.
 - 💻 **SQL Console & Developer Ergonomics**:
   - Multi-line query editor with execution history tracking and search.
   - One-click query formatting via `sqlformat`.

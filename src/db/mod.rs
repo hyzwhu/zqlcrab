@@ -10,6 +10,7 @@ pub mod handle;
 pub mod history;
 pub mod import;
 pub mod manager;
+pub mod mock_data;
 pub mod mysql;
 pub mod postgres;
 pub mod remote_adapter;
@@ -28,6 +29,11 @@ pub use export::{ExportFormat, ExportOptions, export_result};
 pub use handle::ActiveConnection;
 pub use history::{QueryHistoryItem, QueryHistoryManager, QueryHistoryStatus};
 pub use manager::ConnectionManager;
+pub use mock_data::{
+    MockColumnConfig, MockGeneratorType, MockProgress, MockResult, execute_mock_seeding,
+    generate_batch_insert_sql, generate_mock_preview, infer_mock_generator,
+    initialize_column_configs,
+};
 pub use mysql::MysqlAdapter;
 pub use postgres::PostgresAdapter;
 pub use remote_adapter::RemoteHttpAdapter;

@@ -33,6 +33,7 @@ struct TableActionCallbacks {
     on_copy_insert: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_import: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_export: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
+    on_mock_data: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_truncate: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_drop: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
 }
@@ -63,6 +64,7 @@ pub struct Sidebar {
     on_delete_connection: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
     on_import_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_export_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
+    on_mock_data_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_truncate_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_drop_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_create_table: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
@@ -102,6 +104,7 @@ impl Sidebar {
             on_delete_connection: None,
             on_import_table: None,
             on_export_table: None,
+            on_mock_data_table: None,
             on_truncate_table: None,
             on_drop_table: None,
             on_create_table: None,
@@ -171,6 +174,14 @@ impl Sidebar {
         F: Fn(TableInfo, &mut Window, &mut App) + 'static,
     {
         self.on_export_table = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_mock_data_table<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(TableInfo, &mut Window, &mut App) + 'static,
+    {
+        self.on_mock_data_table = Some(Rc::new(handler));
         self
     }
 
@@ -455,6 +466,21 @@ impl Sidebar {
                     }
                 }),
         );
+
+        // Generate Mock Data... / 生成模拟测试数据...
+        if !is_view {
+            let mock_handler = actions.on_mock_data.clone();
+            let tbl_mock = info.clone();
+            menu = menu.item(
+                PopupMenuItem::new(t("table_menu.generate_mock_data", lang))
+                    .icon(IconName::Sparkles)
+                    .on_click(move |_, window, cx| {
+                        if let Some(ref handler) = mock_handler {
+                            handler(tbl_mock.clone(), window, cx);
+                        }
+                    }),
+            );
+        }
 
         menu = menu.separator();
 
@@ -1037,6 +1063,7 @@ impl RenderOnce for Sidebar {
                         on_copy_insert: self.on_copy_insert_template.clone(),
                         on_import: self.on_import_table.clone(),
                         on_export: self.on_export_table.clone(),
+                        on_mock_data: self.on_mock_data_table.clone(),
                         on_truncate: self.on_truncate_table.clone(),
                         on_drop: self.on_drop_table.clone(),
                     };
