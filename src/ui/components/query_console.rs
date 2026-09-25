@@ -68,6 +68,8 @@ pub struct QueryConsole {
     on_select_tab: Option<Rc<dyn Fn(Uuid, &mut Window, &mut App) + 'static>>,
     on_close_tab: Option<Rc<dyn Fn(Uuid, &mut Window, &mut App) + 'static>>,
     on_new_tab: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
+    on_snippets: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
+    on_save_as_snippet: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
 }
 
 impl QueryConsole {
@@ -98,6 +100,8 @@ impl QueryConsole {
             on_select_tab: None,
             on_close_tab: None,
             on_new_tab: None,
+            on_snippets: None,
+            on_save_as_snippet: None,
         }
     }
 
@@ -242,6 +246,22 @@ impl QueryConsole {
         self.on_new_tab = Some(Rc::new(handler));
         self
     }
+
+    pub fn on_snippets<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&mut Window, &mut App) + 'static,
+    {
+        self.on_snippets = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_save_as_snippet<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&mut Window, &mut App) + 'static,
+    {
+        self.on_save_as_snippet = Some(Rc::new(handler));
+        self
+    }
 }
 
 impl RenderOnce for QueryConsole {
@@ -334,6 +354,36 @@ impl RenderOnce for QueryConsole {
             });
         }
 
+        let mut snippets_button = Button::new("console_snippets")
+            .ghost()
+            .small()
+            .flex_shrink(1.0)
+            .min_w(px(28.0))
+            .overflow_hidden()
+            .icon(IconName::FileCode)
+            .label(t("console.snippets", lang))
+            .tooltip("Browse SQL Snippets & Script Library");
+        if let Some(on_snippets) = self.on_snippets {
+            snippets_button = snippets_button.on_click(move |_, window, cx| {
+                on_snippets(window, cx);
+            });
+        }
+
+        let mut save_snippet_button = Button::new("console_save_snippet")
+            .ghost()
+            .small()
+            .flex_shrink(1.0)
+            .min_w(px(28.0))
+            .overflow_hidden()
+            .icon(IconName::Bookmark)
+            .label(t("console.save_as_snippet", lang))
+            .tooltip("Save current query as a snippet");
+        if let Some(on_save_as_snippet) = self.on_save_as_snippet {
+            save_snippet_button = save_snippet_button.on_click(move |_, window, cx| {
+                on_save_as_snippet(window, cx);
+            });
+        }
+
         let toolbar = h_flex()
             .h(px(36.0))
             .w_full()
@@ -363,7 +413,17 @@ impl RenderOnce for QueryConsole {
                             .mx_1()
                             .flex_shrink_0(),
                     )
-                    .child(clear_button),
+                    .child(clear_button)
+                    .child(
+                        div()
+                            .h(px(16.0))
+                            .w(px(1.0))
+                            .bg(ThemeColors::BORDER)
+                            .mx_1()
+                            .flex_shrink_0(),
+                    )
+                    .child(snippets_button)
+                    .child(save_snippet_button),
             )
             .child(
                 h_flex()

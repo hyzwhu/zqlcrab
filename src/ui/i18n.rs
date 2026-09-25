@@ -251,6 +251,36 @@ fn translate_en(key: &'static str) -> &'static str {
         // Other tabs
         "about.desc" => "A modern, high-performance database IDE built with Rust & GPUI",
 
+        // Navigation & Console Snippets
+        "nav.snippets" => "SQL Snippets",
+        "console.snippets" => "Snippets",
+        "console.save_as_snippet" => "Save as Snippet",
+        "workspace.snippets" => "SQL Snippets",
+
+        // Snippets Catalog & View
+        "snippets.title" => "SQL Snippets & Script Library",
+        "snippets.new_snippet" => "New Snippet",
+        "snippets.search_placeholder" => "Search snippets by name, description or SQL...",
+        "snippets.no_matching" => "No matching snippets found",
+        "snippets.count_suffix" => "items",
+        "snippets.load_editor" => "Load",
+        "snippets.load_editor_tooltip" => "Load SQL into active query editor tab",
+        "snippets.run" => "Run",
+        "snippets.run_tooltip" => "Execute snippet immediately in query console",
+        "snippets.copy_sql" => "Copy SQL to clipboard",
+        "snippets.edit" => "Edit custom snippet",
+        "snippets.delete" => "Delete custom snippet",
+        "snippets.new_modal_title" => "New SQL Snippet",
+        "snippets.edit_modal_title" => "Edit SQL Snippet",
+        "snippets.field_title" => "Title",
+        "snippets.field_category" => "Category",
+        "snippets.field_dialect" => "Target Database Dialect",
+        "snippets.field_desc" => "Description",
+        "snippets.field_sql" => "SQL Statement",
+        "snippets.title_placeholder" => "e.g. Check Table Sizes",
+        "snippets.desc_placeholder" => "Describe what this query does...",
+        "snippets.sql_placeholder" => "SELECT ...;",
+
         // Fallback
         _ => key,
     }
@@ -484,6 +514,36 @@ fn translate_zh(key: &'static str) -> &'static str {
         // Other tabs
         "about.desc" => "基于 Rust 与 GPUI 打造的高性能现代化桌面数据库客户端",
 
+        // Navigation & Console Snippets
+        "nav.snippets" => "代码片段",
+        "console.snippets" => "常用片段",
+        "console.save_as_snippet" => "存为片段",
+        "workspace.snippets" => "代码片段",
+
+        // Snippets Catalog & View
+        "snippets.title" => "SQL 代码片段与常用脚本库",
+        "snippets.new_snippet" => "新建片段",
+        "snippets.search_placeholder" => "按名称、说明或 SQL 内容搜索代码片段...",
+        "snippets.no_matching" => "未找到匹配的 SQL 代码片段",
+        "snippets.count_suffix" => "项",
+        "snippets.load_editor" => "填入",
+        "snippets.load_editor_tooltip" => "填入当前活跃的 SQL 编辑器",
+        "snippets.run" => "执行",
+        "snippets.run_tooltip" => "立即在控制台中执行该片段",
+        "snippets.copy_sql" => "复制 SQL 到剪贴板",
+        "snippets.edit" => "编辑自定义片段",
+        "snippets.delete" => "删除自定义片段",
+        "snippets.new_modal_title" => "新建 SQL 代码片段",
+        "snippets.edit_modal_title" => "编辑 SQL 代码片段",
+        "snippets.field_title" => "片段名称",
+        "snippets.field_category" => "分类",
+        "snippets.field_dialect" => "适用数据库方言",
+        "snippets.field_desc" => "简要说明",
+        "snippets.field_sql" => "SQL 内容",
+        "snippets.title_placeholder" => "例如：查看各表体积大小",
+        "snippets.desc_placeholder" => "描述此 SQL 查询的作用...",
+        "snippets.sql_placeholder" => "SELECT ...;",
+
         // Fallback
         _ => translate_en(key),
     }
@@ -521,6 +581,14 @@ mod tests {
         assert_eq!(
             t("table_menu.generate_mock_data", AppLanguage::ZhCn),
             "生成模拟测试数据..."
+        );
+        assert_eq!(
+            t("snippets.title", AppLanguage::ZhCn),
+            "SQL 代码片段与常用脚本库"
+        );
+        assert_eq!(
+            t("snippets.title", AppLanguage::En),
+            "SQL Snippets & Script Library"
         );
     }
 }

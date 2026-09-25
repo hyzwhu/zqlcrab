@@ -16,12 +16,17 @@ pub enum ActivityNav {
     #[default]
     Databases,
     Console,
+    Snippets,
     Settings,
 }
 
 impl ActivityNav {
     pub fn is_settings(&self) -> bool {
         matches!(self, Self::Settings)
+    }
+
+    pub fn is_snippets(&self) -> bool {
+        matches!(self, Self::Snippets)
     }
 }
 
@@ -119,6 +124,12 @@ impl RenderOnce for ActivityBar {
             IconName::Code,
             "nav.console",
         );
+        let snippets_item = self.render_nav_item(
+            "act_nav_snippets",
+            ActivityNav::Snippets,
+            IconName::FileCode,
+            "nav.snippets",
+        );
         let settings_item = self.render_nav_item(
             "act_nav_settings",
             ActivityNav::Settings,
@@ -144,7 +155,8 @@ impl RenderOnce for ActivityBar {
                     .items_center()
                     .gap_1()
                     .child(db_item)
-                    .child(console_item),
+                    .child(console_item)
+                    .child(snippets_item),
             )
             .child(v_flex().w_full().items_center().child(settings_item))
     }

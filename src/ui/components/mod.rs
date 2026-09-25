@@ -13,6 +13,8 @@ pub mod query_history;
 pub mod schema_viewer;
 pub mod settings_view;
 pub mod sidebar;
+pub mod snippet_edit_modal;
+pub mod snippet_view;
 pub mod sql_review_modal;
 pub mod status_bar;
 
@@ -31,5 +33,7 @@ pub use query_history::QueryHistoryView;
 pub use schema_viewer::SchemaViewer;
 pub use settings_view::{SettingsTab, SettingsView};
 pub use sidebar::Sidebar;
+pub use snippet_edit_modal::SnippetEditModal;
+pub use snippet_view::SnippetView;
 pub use sql_review_modal::SqlReviewModal;
 pub use status_bar::AppStatusBar;

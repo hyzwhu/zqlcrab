@@ -14,6 +14,9 @@ pub enum DbError {
     #[error("Configuration error: {0}")]
     Configuration(String),
 
+    #[error("Not found: {0}")]
+    NotFound(String),
+
     #[error("Connection pool error: {0}")]
     PoolError(String),
 

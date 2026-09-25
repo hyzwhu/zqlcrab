@@ -16,6 +16,7 @@ pub mod postgres;
 pub mod remote_adapter;
 pub mod runtime;
 pub mod safety;
+pub mod snippets;
 pub mod sql_format;
 pub mod sql_gen;
 pub mod sqlite;
@@ -39,6 +40,7 @@ pub use postgres::PostgresAdapter;
 pub use remote_adapter::RemoteHttpAdapter;
 pub use runtime::{run_on_tokio, tokio_runtime};
 pub use safety::QuerySafetyValidator;
+pub use snippets::{SnippetCategory, SnippetManager, SqlSnippet};
 pub use sql_gen::{
     ColumnDef, CreateTableDef, SqlReviewPlan, dialect_data_types, dialect_presets,
     generate_create_table_sql, generate_review_plan, split_sql_statements, truncate_sql_snippet,

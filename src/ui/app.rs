@@ -18,6 +18,7 @@ use crate::db::mock_data::{
     MockColumnConfig, MockGeneratorType, MockProgress, MockResult, execute_mock_seeding,
     generate_mock_preview, initialize_column_configs,
 };
+use crate::db::snippets::{SnippetCategory, SnippetManager, SqlSnippet};
 use crate::db::sql_format::format_sql_with_indent;
 use crate::db::sql_gen::{
     AlterColumnTarget, ColumnDef, CreateTableDef, SqlReviewPlan, TableIndexDef, TableIndexType,
@@ -34,7 +35,7 @@ use crate::ui::components::{
     ConsoleBottomTab, DataGrid, ExplainViewMode, ExportDestination, ExportModal, ExportSuccessInfo,
     ExportWizardStep, ImportModal, ImportWizardStep, MockDataModal, MockWizardStep, QueryConsole,
     QueryHistoryView, QueryTabHeader, SchemaViewer, SettingsTab, SettingsView, Sidebar,
-    SqlReviewModal,
+    SnippetEditModal, SnippetView, SqlReviewModal,
     create_table_modal::{CreateTableColumnState, CreateTableIndexState, CreateTableModal},
     data_grid::GridCellCoord,
     schema_viewer::SchemaEditColumnState,
@@ -345,6 +346,20 @@ pub struct CrabStudioApp {
     mock_result: Option<MockResult>,
     mock_error: Option<String>,
 
+    // SQL Snippets & Script Library state
+    snippet_manager: SnippetManager,
+    snippets_search_input: Entity<InputState>,
+    snippets_selected_dialect: Option<DatabaseFamily>,
+    snippets_selected_category: Option<SnippetCategory>,
+    snippet_modal_open: bool,
+    snippet_modal_editing_id: Option<String>,
+    snippet_modal_title_input: Entity<InputState>,
+    snippet_modal_desc_input: Entity<InputState>,
+    snippet_modal_sql_input: Entity<InputState>,
+    snippet_modal_category: SnippetCategory,
+    snippet_modal_dialect: Option<DatabaseFamily>,
+    snippet_modal_error: Option<String>,
+
     // Settings state
     settings_manager: SettingsManager,
     active_nav: ActivityNav,
@@ -553,6 +568,29 @@ impl CrabStudioApp {
         let export_where_input = cx.new(|cx| InputState::new(window, cx));
         let export_limit_input = cx.new(|cx| InputState::new(window, cx));
 
+        let snippets_search_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Search snippets by name, description or SQL...")
+        });
+        cx.subscribe(
+            &snippets_search_input,
+            |_this, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    cx.notify();
+                }
+            },
+        )
+        .detach();
+
+        let snippet_modal_title_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("e.g. Check Table Sizes"));
+        let snippet_modal_desc_input = cx
+            .new(|cx| InputState::new(window, cx).placeholder("Describe what this query does..."));
+        let snippet_modal_sql_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("SELECT ...;"));
+
+        let snippet_manager = SnippetManager::new();
+
         let mut history_manager = QueryHistoryManager::new();
         history_manager.set_max_entries(settings_manager.settings().query.history_limit);
 
@@ -678,6 +716,18 @@ impl CrabStudioApp {
             mock_progress: None,
             mock_result: None,
             mock_error: None,
+            snippet_manager,
+            snippets_search_input,
+            snippets_selected_dialect: None,
+            snippets_selected_category: None,
+            snippet_modal_open: false,
+            snippet_modal_editing_id: None,
+            snippet_modal_title_input,
+            snippet_modal_desc_input,
+            snippet_modal_sql_input,
+            snippet_modal_category: SnippetCategory::Custom,
+            snippet_modal_dialect: None,
+            snippet_modal_error: None,
             settings_manager,
             active_nav: ActivityNav::Databases,
             active_settings_tab: SettingsTab::Appearance,
@@ -4565,6 +4615,148 @@ impl CrabStudioApp {
         .detach();
     }
 
+    /// Open modal to create a new SQL snippet
+    pub fn open_new_snippet_modal(
+        &mut self,
+        default_sql: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.snippet_modal_open = true;
+        self.snippet_modal_editing_id = None;
+        self.snippet_modal_error = None;
+        self.snippet_modal_category = SnippetCategory::Custom;
+        self.snippet_modal_dialect = self
+            .active_connection
+            .as_ref()
+            .map(|c| c.config.db_type.family());
+        let sql_text = default_sql.unwrap_or_default();
+        self.snippet_modal_title_input.update(cx, |inp, cx| {
+            inp.set_value("", window, cx);
+        });
+        self.snippet_modal_desc_input.update(cx, |inp, cx| {
+            inp.set_value("", window, cx);
+        });
+        self.snippet_modal_sql_input.update(cx, |inp, cx| {
+            inp.set_value(&sql_text, window, cx);
+        });
+        cx.notify();
+    }
+
+    /// Open modal to edit an existing custom SQL snippet
+    pub fn open_edit_snippet_modal(
+        &mut self,
+        snippet: &SqlSnippet,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.snippet_modal_open = true;
+        self.snippet_modal_editing_id = Some(snippet.id.clone());
+        self.snippet_modal_error = None;
+        self.snippet_modal_category = snippet.category;
+        self.snippet_modal_dialect = snippet.dialect;
+        let title = snippet.title.clone();
+        let desc = snippet.description.clone();
+        let sql = snippet.sql.clone();
+        self.snippet_modal_title_input.update(cx, |inp, cx| {
+            inp.set_value(&title, window, cx);
+        });
+        self.snippet_modal_desc_input.update(cx, |inp, cx| {
+            inp.set_value(&desc, window, cx);
+        });
+        self.snippet_modal_sql_input.update(cx, |inp, cx| {
+            inp.set_value(&sql, window, cx);
+        });
+        cx.notify();
+    }
+
+    /// Close the SQL snippet creation/edit modal
+    pub fn close_snippet_modal(&mut self, cx: &mut Context<Self>) {
+        self.snippet_modal_open = false;
+        self.snippet_modal_editing_id = None;
+        self.snippet_modal_error = None;
+        cx.notify();
+    }
+
+    /// Save the custom SQL snippet currently being created or edited
+    pub fn save_snippet_modal(&mut self, cx: &mut Context<Self>) {
+        let title = self
+            .snippet_modal_title_input
+            .read(cx)
+            .value()
+            .trim()
+            .to_string();
+        let desc = self
+            .snippet_modal_desc_input
+            .read(cx)
+            .value()
+            .trim()
+            .to_string();
+        let sql = self
+            .snippet_modal_sql_input
+            .read(cx)
+            .value()
+            .trim()
+            .to_string();
+
+        if title.is_empty() {
+            self.snippet_modal_error = Some("Title cannot be empty".to_string());
+            cx.notify();
+            return;
+        }
+        if sql.is_empty() {
+            self.snippet_modal_error = Some("SQL statement cannot be empty".to_string());
+            cx.notify();
+            return;
+        }
+
+        let res = if let Some(ref id) = self.snippet_modal_editing_id {
+            let updated = SqlSnippet {
+                id: id.clone(),
+                title,
+                description: desc,
+                sql,
+                dialect: self.snippet_modal_dialect,
+                category: self.snippet_modal_category,
+                is_built_in: false,
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+            };
+            self.snippet_manager.update_custom(updated)
+        } else {
+            self.snippet_manager.add_custom(
+                title,
+                desc,
+                sql,
+                self.snippet_modal_dialect,
+                self.snippet_modal_category,
+            );
+            Ok(())
+        };
+
+        match res {
+            Ok(_) => {
+                self.close_snippet_modal(cx);
+                self.status_message = Some("Snippet saved successfully".to_string());
+                cx.notify();
+            }
+            Err(err) => {
+                self.snippet_modal_error = Some(err.to_string());
+                cx.notify();
+            }
+        }
+    }
+
+    /// Delete a custom SQL snippet
+    pub fn delete_snippet(&mut self, id: &str, cx: &mut Context<Self>) {
+        if let Err(err) = self.snippet_manager.delete_custom(id) {
+            self.status_message = Some(format!("Failed to delete snippet: {}", err));
+        } else {
+            self.status_message = Some("Snippet deleted".to_string());
+        }
+        cx.notify();
+    }
+
     /// Open new connection dialog
     pub fn open_connection_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.dialog_open = true;
@@ -5780,7 +5972,27 @@ impl Render for CrabStudioApp {
                             .on_format(on_format)
                             .on_explain(on_explain)
                             .on_bottom_tab(on_bottom_tab)
-                            .on_explain_view(on_explain_view);
+                            .on_explain_view(on_explain_view)
+                            .on_snippets({
+                                let handle = app_handle.clone();
+                                move |_, cx| {
+                                    handle.update(cx, |this, cx| {
+                                        this.active_nav = ActivityNav::Snippets;
+                                        cx.notify();
+                                    });
+                                }
+                            })
+                            .on_save_as_snippet({
+                                let handle = app_handle.clone();
+                                move |window, cx| {
+                                    handle.update(cx, |this, cx| {
+                                        let current_sql = this
+                                            .active_query_tab()
+                                            .map(|t| t.editor.read(cx).value().to_string());
+                                        this.open_new_snippet_modal(current_sql, window, cx);
+                                    });
+                                }
+                            });
 
                     let quick_connect_banner = if !is_connected {
                         let mut conn_chips = h_flex().gap_2().items_center().flex_wrap().min_w_0();
@@ -6973,6 +7185,18 @@ impl Render for CrabStudioApp {
                                     this.active_nav = ActivityNav::Console;
                                     this.active_tab = WorkspaceTab::QueryConsole;
                                 }
+                                ActivityNav::Snippets => {
+                                    if this.active_nav == ActivityNav::Snippets {
+                                        this.active_nav =
+                                            if this.active_tab == WorkspaceTab::QueryConsole {
+                                                ActivityNav::Console
+                                            } else {
+                                                ActivityNav::Databases
+                                            };
+                                    } else {
+                                        this.active_nav = ActivityNav::Snippets;
+                                    }
+                                }
                                 ActivityNav::Settings => {
                                     if this.active_nav == ActivityNav::Settings {
                                         this.active_nav =
@@ -6990,6 +7214,153 @@ impl Render for CrabStudioApp {
                         });
                     }
                 });
+
+        // Snippets View component
+        let snippet_view = {
+            let on_load = {
+                let handle = app_handle.clone();
+                move |snip: SqlSnippet, window: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.active_nav = ActivityNav::Console;
+                        this.load_sql_into_editor(&snip.sql, window, cx);
+                    });
+                }
+            };
+            let on_run = {
+                let handle = app_handle.clone();
+                move |snip: SqlSnippet, window: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.active_nav = ActivityNav::Console;
+                        this.execute_custom_sql(&snip.sql, window, cx);
+                    });
+                }
+            };
+            let on_copy = {
+                let handle = app_handle.clone();
+                move |sql: String, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        cx.write_to_clipboard(gpui_kit::gpui::ClipboardItem::new_string(sql));
+                        this.status_message = Some("SQL copied to clipboard".to_string());
+                        cx.notify();
+                    });
+                }
+            };
+            let on_new = {
+                let handle = app_handle.clone();
+                move |window: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.open_new_snippet_modal(None, window, cx);
+                    });
+                }
+            };
+            let on_edit = {
+                let handle = app_handle.clone();
+                move |snip: SqlSnippet, window: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.open_edit_snippet_modal(&snip, window, cx);
+                    });
+                }
+            };
+            let on_del = {
+                let handle = app_handle.clone();
+                move |id: String, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.delete_snippet(&id, cx);
+                    });
+                }
+            };
+            let on_sel_dia = {
+                let handle = app_handle.clone();
+                move |dia: Option<DatabaseFamily>, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.snippets_selected_dialect = dia;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_sel_cat = {
+                let handle = app_handle.clone();
+                move |cat: Option<SnippetCategory>, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.snippets_selected_category = cat;
+                        cx.notify();
+                    });
+                }
+            };
+
+            SnippetView::new(
+                self.snippet_manager.list_all(),
+                &self.snippets_search_input,
+                self.snippets_selected_dialect,
+                self.snippets_selected_category,
+                self.settings_manager.settings().language,
+            )
+            .on_load_snippet(on_load)
+            .on_run_snippet(on_run)
+            .on_copy_sql(on_copy)
+            .on_new_snippet(on_new)
+            .on_edit_snippet(on_edit)
+            .on_delete_snippet(on_del)
+            .on_select_dialect(on_sel_dia)
+            .on_select_category(on_sel_cat)
+        };
+
+        // Snippet Modal Overlay
+        let snippet_modal_overlay = if self.snippet_modal_open {
+            let on_save = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.save_snippet_modal(cx);
+                    });
+                }
+            };
+            let on_cancel = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.close_snippet_modal(cx);
+                    });
+                }
+            };
+            let on_cat = {
+                let handle = app_handle.clone();
+                move |cat: SnippetCategory, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.snippet_modal_category = cat;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_dia = {
+                let handle = app_handle.clone();
+                move |dia: Option<DatabaseFamily>, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.snippet_modal_dialect = dia;
+                        cx.notify();
+                    });
+                }
+            };
+
+            Some(
+                SnippetEditModal::new(
+                    self.snippet_modal_editing_id.is_some(),
+                    &self.snippet_modal_title_input,
+                    &self.snippet_modal_desc_input,
+                    &self.snippet_modal_sql_input,
+                    self.snippet_modal_category,
+                    self.snippet_modal_dialect,
+                    self.snippet_modal_error.clone(),
+                    self.settings_manager.settings().language,
+                )
+                .on_save(on_save)
+                .on_cancel(on_cancel)
+                .on_select_category(on_cat)
+                .on_select_dialect(on_dia),
+            )
+        } else {
+            None
+        };
 
         // Settings View component
         let settings_view = SettingsView::new(
@@ -7126,7 +7497,9 @@ impl Render for CrabStudioApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &CloseDialog, _, cx| {
-                if this.mock_modal_open {
+                if this.snippet_modal_open {
+                    this.close_snippet_modal(cx);
+                } else if this.mock_modal_open {
                     this.close_mock_modal(cx);
                 } else if this.export_modal_open {
                     this.close_export_modal(cx);
@@ -7153,7 +7526,9 @@ impl Render for CrabStudioApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
-                if this.mock_modal_open {
+                if this.snippet_modal_open {
+                    this.close_snippet_modal(cx);
+                } else if this.mock_modal_open {
                     this.close_mock_modal(cx);
                 } else if this.export_modal_open {
                     this.close_export_modal(cx);
@@ -7178,6 +7553,9 @@ impl Render for CrabStudioApp {
                 } else if this.dialog_open {
                     this.close_connection_dialog(cx);
                 } else if this.active_nav == ActivityNav::Settings {
+                    this.active_nav = ActivityNav::Databases;
+                    cx.notify();
+                } else if this.active_nav == ActivityNav::Snippets {
                     this.active_nav = ActivityNav::Databases;
                     cx.notify();
                 } else if this.active_tab == WorkspaceTab::QueryConsole && this.query_tabs.len() > 1
@@ -7294,6 +7672,8 @@ impl Render for CrabStudioApp {
                     .child(v_flex().flex_1().h_full().min_w_0().min_h_0().child(
                         if self.active_nav == ActivityNav::Settings {
                             settings_view.into_any_element()
+                        } else if self.active_nav == ActivityNav::Snippets {
+                            snippet_view.into_any_element()
                         } else {
                             v_flex()
                                 .size_full()
@@ -7322,5 +7702,6 @@ impl Render for CrabStudioApp {
             .children(import_overlay)
             .children(export_overlay)
             .children(mock_overlay)
+            .children(snippet_modal_overlay)
     }
 }
