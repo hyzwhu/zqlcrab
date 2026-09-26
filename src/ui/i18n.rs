@@ -253,9 +253,37 @@ fn translate_en(key: &'static str) -> &'static str {
 
         // Navigation & Console Snippets
         "nav.snippets" => "SQL Snippets",
+        "nav.sessions" => "Active Sessions",
         "console.snippets" => "Snippets",
         "console.save_as_snippet" => "Save as Snippet",
         "workspace.snippets" => "SQL Snippets",
+        "workspace.sessions" => "Active Sessions & Process List",
+
+        // Sessions View & Process List
+        "sessions.title" => "Active Sessions & Process Monitor",
+        "sessions.refresh" => "Refresh",
+        "sessions.refreshing" => "Refreshing...",
+        "sessions.auto_refresh" => "Auto Refresh:",
+        "sessions.no_sessions_found" => "No active sessions found",
+        "sessions.no_matching_filter" => "No sessions matching the current filter",
+        "sessions.tooltip_copy_sql" => "Copy SQL to clipboard",
+        "sessions.tooltip_open_editor" => "Open query in SQL editor tab",
+        "sessions.btn_cancel_query" => "Cancel Query",
+        "sessions.btn_terminate_session" => "Terminate",
+        "sessions.cancel_modal_title" => "Confirm Query Cancellation",
+        "sessions.terminate_modal_title" => "Confirm Session Termination",
+        "sessions.cancel_modal_desc" => {
+            "Are you sure you want to cancel the active query running on this backend? The database connection will remain open."
+        }
+        "sessions.terminate_modal_desc" => {
+            "WARNING: This will forcefully disconnect the client backend process. Any active uncommitted transaction will be immediately rolled back."
+        }
+        "sessions.current_sql" => "Current SQL Statement",
+        "sessions.command_to_run" => "Command To Be Executed",
+        "sessions.btn_confirm_cancel" => "Cancel Query Now",
+        "sessions.btn_confirm_terminate" => "Force Terminate Connection",
+        "sessions.action_success" => "Session action executed successfully",
+        "sessions.action_failed" => "Failed to execute session action",
 
         // Snippets Catalog & View
         "snippets.title" => "SQL Snippets & Script Library",
@@ -516,9 +544,37 @@ fn translate_zh(key: &'static str) -> &'static str {
 
         // Navigation & Console Snippets
         "nav.snippets" => "代码片段",
+        "nav.sessions" => "会话监控",
         "console.snippets" => "常用片段",
         "console.save_as_snippet" => "存为片段",
         "workspace.snippets" => "代码片段",
+        "workspace.sessions" => "活跃会话与实时进程",
+
+        // Sessions View & Process List
+        "sessions.title" => "活跃会话与实时进程监控",
+        "sessions.refresh" => "刷新",
+        "sessions.refreshing" => "刷新中...",
+        "sessions.auto_refresh" => "自动刷新：",
+        "sessions.no_sessions_found" => "未检测到活跃会话",
+        "sessions.no_matching_filter" => "无匹配当前过滤条件的会话",
+        "sessions.tooltip_copy_sql" => "复制 SQL 到剪贴板",
+        "sessions.tooltip_open_editor" => "在 SQL 控制台中打开此查询",
+        "sessions.btn_cancel_query" => "取消查询",
+        "sessions.btn_terminate_session" => "终止连接",
+        "sessions.cancel_modal_title" => "确认取消正在执行的查询",
+        "sessions.terminate_modal_title" => "确认强制终止客户端会话连接",
+        "sessions.cancel_modal_desc" => {
+            "确定要取消此后端正在执行的查询吗？该数据库连接将保持开启，不会断开。"
+        }
+        "sessions.terminate_modal_desc" => {
+            "警告：此操作将强制切断该客户端的数据库连接。任何未提交的事务将被立即回滚！"
+        }
+        "sessions.current_sql" => "当前执行的 SQL 语句",
+        "sessions.command_to_run" => "即将执行的终止命令",
+        "sessions.btn_confirm_cancel" => "立即取消查询",
+        "sessions.btn_confirm_terminate" => "强制终止连接",
+        "sessions.action_success" => "会话管理操作执行成功",
+        "sessions.action_failed" => "会话管理操作执行失败",
 
         // Snippets Catalog & View
         "snippets.title" => "SQL 代码片段与常用脚本库",
@@ -590,5 +646,15 @@ mod tests {
             t("snippets.title", AppLanguage::En),
             "SQL Snippets & Script Library"
         );
+        assert_eq!(
+            t("sessions.title", AppLanguage::ZhCn),
+            "活跃会话与实时进程监控"
+        );
+        assert_eq!(
+            t("sessions.title", AppLanguage::En),
+            "Active Sessions & Process Monitor"
+        );
+        assert_eq!(t("nav.sessions", AppLanguage::ZhCn), "会话监控");
+        assert_eq!(t("nav.sessions", AppLanguage::En), "Active Sessions");
     }
 }

@@ -16,6 +16,7 @@ pub mod postgres;
 pub mod remote_adapter;
 pub mod runtime;
 pub mod safety;
+pub mod session_monitor;
 pub mod snippets;
 pub mod sql_format;
 pub mod sql_gen;
@@ -40,6 +41,10 @@ pub use postgres::PostgresAdapter;
 pub use remote_adapter::RemoteHttpAdapter;
 pub use runtime::{run_on_tokio, tokio_runtime};
 pub use safety::QuerySafetyValidator;
+pub use session_monitor::{
+    KillAction, SessionInfo, SessionLatencySeverity, build_kill_sql, build_session_list_sql,
+    parse_session_list,
+};
 pub use snippets::{SnippetCategory, SnippetManager, SqlSnippet};
 pub use sql_gen::{
     ColumnDef, CreateTableDef, SqlReviewPlan, dialect_data_types, dialect_presets,

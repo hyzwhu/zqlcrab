@@ -18,6 +18,9 @@ use crate::db::mock_data::{
     MockColumnConfig, MockGeneratorType, MockProgress, MockResult, execute_mock_seeding,
     generate_mock_preview, initialize_column_configs,
 };
+use crate::db::session_monitor::{
+    KillAction, SessionInfo, build_kill_sql, build_session_list_sql, parse_session_list,
+};
 use crate::db::snippets::{SnippetCategory, SnippetManager, SqlSnippet};
 use crate::db::sql_format::format_sql_with_indent;
 use crate::db::sql_gen::{
@@ -33,9 +36,9 @@ use crate::settings::{SettingsManager, ThemePreference};
 use crate::ui::components::{
     ActivityBar, ActivityNav, AppStatusBar, ConfirmActionKind, ConfirmDialog, ConnectionDialog,
     ConsoleBottomTab, DataGrid, ExplainViewMode, ExportDestination, ExportModal, ExportSuccessInfo,
-    ExportWizardStep, ImportModal, ImportWizardStep, MockDataModal, MockWizardStep, QueryConsole,
-    QueryHistoryView, QueryTabHeader, SchemaViewer, SettingsTab, SettingsView, Sidebar,
-    SnippetEditModal, SnippetView, SqlReviewModal,
+    ExportWizardStep, ImportModal, ImportWizardStep, KillConfirmModal, MockDataModal,
+    MockWizardStep, QueryConsole, QueryHistoryView, QueryTabHeader, SchemaViewer, SessionsView,
+    SettingsTab, SettingsView, Sidebar, SnippetEditModal, SnippetView, SqlReviewModal,
     create_table_modal::{CreateTableColumnState, CreateTableIndexState, CreateTableModal},
     data_grid::GridCellCoord,
     schema_viewer::SchemaEditColumnState,
@@ -360,6 +363,13 @@ pub struct CrabStudioApp {
     snippet_modal_dialect: Option<DatabaseFamily>,
     snippet_modal_error: Option<String>,
 
+    // Active Sessions & Process Monitor state
+    sessions: Vec<SessionInfo>,
+    sessions_search_input: Entity<InputState>,
+    sessions_auto_refresh_secs: u32,
+    sessions_is_refreshing: bool,
+    kill_confirm_modal: Option<(SessionInfo, KillAction, String)>,
+
     // Settings state
     settings_manager: SettingsManager,
     active_nav: ActivityNav,
@@ -591,6 +601,19 @@ impl CrabStudioApp {
 
         let snippet_manager = SnippetManager::new();
 
+        let sessions_search_input = cx.new(|cx| {
+            InputState::new(window, cx).placeholder("Search by PID, user, database or query...")
+        });
+        cx.subscribe(
+            &sessions_search_input,
+            |_this, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    cx.notify();
+                }
+            },
+        )
+        .detach();
+
         let mut history_manager = QueryHistoryManager::new();
         history_manager.set_max_entries(settings_manager.settings().query.history_limit);
 
@@ -728,6 +751,11 @@ impl CrabStudioApp {
             snippet_modal_category: SnippetCategory::Custom,
             snippet_modal_dialect: None,
             snippet_modal_error: None,
+            sessions: Vec::new(),
+            sessions_search_input,
+            sessions_auto_refresh_secs: 0,
+            sessions_is_refreshing: false,
+            kill_confirm_modal: None,
             settings_manager,
             active_nav: ActivityNav::Databases,
             active_settings_tab: SettingsTab::Appearance,
@@ -4757,6 +4785,168 @@ impl CrabStudioApp {
         cx.notify();
     }
 
+    /// Refresh active sessions and processlist from the connected database backend
+    pub fn refresh_sessions(&mut self, cx: &mut Context<Self>) {
+        let Some(conn) = self.active_connection.as_ref() else {
+            self.sessions.clear();
+            self.sessions_is_refreshing = false;
+            self.status_message = Some("No active database connection".to_string());
+            cx.notify();
+            return;
+        };
+
+        let conn_clone = conn.clone();
+        let dialect = conn.config.db_type.family();
+        let sql = build_session_list_sql(dialect);
+
+        self.sessions_is_refreshing = true;
+        cx.notify();
+
+        cx.spawn(async move |this, cx: &mut AsyncApp| {
+            let res = conn_clone.execute_query(sql).await;
+            this.update(cx, |app, cx| {
+                app.sessions_is_refreshing = false;
+                match res {
+                    Ok(query_res) => {
+                        app.sessions = parse_session_list(dialect, &query_res);
+                    }
+                    Err(err) => {
+                        app.status_message = Some(format!("Failed to fetch sessions: {err}"));
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Set auto-refresh interval for active session monitor
+    pub fn set_sessions_auto_refresh(&mut self, secs: u32, cx: &mut Context<Self>) {
+        self.sessions_auto_refresh_secs = secs;
+        cx.notify();
+
+        if secs > 0 {
+            let handle = cx.entity().clone();
+            cx.spawn(async move |_this, cx: &mut AsyncApp| {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(secs as u64)).await;
+                    let should_continue = handle.update(cx, |app, cx| {
+                        if app.sessions_auto_refresh_secs != secs
+                            || app.active_nav != ActivityNav::Sessions
+                        {
+                            return false;
+                        }
+                        if let Some(conn) = app.active_connection.as_ref() {
+                            let conn_clone = conn.clone();
+                            let dialect = conn.config.db_type.family();
+                            let sql = build_session_list_sql(dialect);
+                            cx.spawn(async move |this, cx: &mut AsyncApp| {
+                                let res = conn_clone.execute_query(sql).await;
+                                this.update(cx, |app, cx| {
+                                    if let Ok(query_res) = res {
+                                        app.sessions = parse_session_list(dialect, &query_res);
+                                        cx.notify();
+                                    }
+                                })
+                                .ok();
+                            })
+                            .detach();
+                        }
+                        true
+                    });
+
+                    if !should_continue {
+                        break;
+                    }
+                }
+            })
+            .detach();
+        }
+    }
+
+    /// Request kill action (cancel query or terminate session) with confirmation dialog
+    pub fn request_kill_session(
+        &mut self,
+        session: SessionInfo,
+        action: KillAction,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(conn) = self.active_connection.as_ref() else {
+            self.status_message = Some("No active database connection".to_string());
+            cx.notify();
+            return;
+        };
+
+        let dialect = conn.config.db_type.family();
+        match build_kill_sql(dialect, &session.id, action) {
+            Ok(sql) => {
+                self.kill_confirm_modal = Some((session, action, sql));
+                cx.notify();
+            }
+            Err(err) => {
+                self.status_message = Some(format!("{err}"));
+                cx.notify();
+            }
+        }
+    }
+
+    /// Execute confirmed kill action against the backend database
+    pub fn execute_kill_confirm(
+        &mut self,
+        _session: SessionInfo,
+        _action: KillAction,
+        sql: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.kill_confirm_modal = None;
+        let Some(conn) = self.active_connection.as_ref() else {
+            self.status_message = Some("No active database connection".to_string());
+            cx.notify();
+            return;
+        };
+
+        let conn_clone = conn.clone();
+        let dialect = conn.config.db_type.family();
+        let lang = self.settings_manager.settings().language;
+
+        self.status_message = Some(format!("Executing: {sql}"));
+        cx.notify();
+
+        cx.spawn(async move |this, cx: &mut AsyncApp| {
+            let res = conn_clone.execute_query(&sql).await;
+            this.update(cx, |app, cx| {
+                match res {
+                    Ok(_) => {
+                        app.status_message = Some(t("sessions.action_success", lang).to_string());
+                        if let Some(conn) = app.active_connection.as_ref() {
+                            let conn_c = conn.clone();
+                            let refresh_sql = build_session_list_sql(dialect);
+                            cx.spawn(async move |this2, cx2: &mut AsyncApp| {
+                                if let Ok(q_res) = conn_c.execute_query(refresh_sql).await {
+                                    this2
+                                        .update(cx2, |app2, cx2| {
+                                            app2.sessions = parse_session_list(dialect, &q_res);
+                                            cx2.notify();
+                                        })
+                                        .ok();
+                                }
+                            })
+                            .detach();
+                        }
+                    }
+                    Err(err) => {
+                        app.status_message =
+                            Some(format!("{}: {err}", t("sessions.action_failed", lang)));
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     /// Open new connection dialog
     pub fn open_connection_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.dialog_open = true;
@@ -7197,6 +7387,19 @@ impl Render for CrabStudioApp {
                                         this.active_nav = ActivityNav::Snippets;
                                     }
                                 }
+                                ActivityNav::Sessions => {
+                                    if this.active_nav == ActivityNav::Sessions {
+                                        this.active_nav =
+                                            if this.active_tab == WorkspaceTab::QueryConsole {
+                                                ActivityNav::Console
+                                            } else {
+                                                ActivityNav::Databases
+                                            };
+                                    } else {
+                                        this.active_nav = ActivityNav::Sessions;
+                                        this.refresh_sessions(cx);
+                                    }
+                                }
                                 ActivityNav::Settings => {
                                     if this.active_nav == ActivityNav::Settings {
                                         this.active_nav =
@@ -7362,6 +7565,124 @@ impl Render for CrabStudioApp {
             None
         };
 
+        // Sessions View component
+        let sessions_view = {
+            let on_refresh = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.refresh_sessions(cx);
+                    });
+                }
+            };
+            let on_auto_ref = {
+                let handle = app_handle.clone();
+                move |secs: u32, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.set_sessions_auto_refresh(secs, cx);
+                    });
+                }
+            };
+            let on_kill = {
+                let handle = app_handle.clone();
+                move |session: SessionInfo, action: KillAction, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.request_kill_session(session, action, cx);
+                    });
+                }
+            };
+            let on_copy_q = {
+                let handle = app_handle.clone();
+                move |sql: String, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        cx.write_to_clipboard(gpui_kit::gpui::ClipboardItem::new_string(sql));
+                        this.status_message = Some("Query copied to clipboard".to_string());
+                        cx.notify();
+                    });
+                }
+            };
+            let on_open_q = {
+                let handle = app_handle.clone();
+                move |sql: String, window: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.active_nav = ActivityNav::Console;
+                        this.load_sql_into_editor(&sql, window, cx);
+                    });
+                }
+            };
+
+            let dialect = self
+                .active_connection
+                .as_ref()
+                .map(|c| c.config.db_type.family());
+            let active_db = self.active_connection.as_ref().map(|c| {
+                if c.config.database.is_empty() {
+                    c.config.name.clone()
+                } else {
+                    c.config.database.clone()
+                }
+            });
+
+            SessionsView::new(
+                self.sessions.clone(),
+                active_db,
+                dialect,
+                self.sessions_search_input.clone(),
+                self.sessions_auto_refresh_secs,
+                self.sessions_is_refreshing,
+                self.settings_manager.settings().language,
+            )
+            .on_refresh(on_refresh)
+            .on_set_auto_refresh(on_auto_ref)
+            .on_kill_action(on_kill)
+            .on_copy_query(on_copy_q)
+            .on_open_query_in_editor(on_open_q)
+        };
+
+        // Kill Confirmation Modal overlay
+        let kill_confirm_overlay = if let Some((session, action, sql)) = &self.kill_confirm_modal {
+            let session_clone = session.clone();
+            let action_val = *action;
+            let sql_str = sql.clone();
+            let on_cancel = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.kill_confirm_modal = None;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_confirm = {
+                let handle = app_handle.clone();
+                let s_clone = session_clone.clone();
+                let sql_clone = sql_str.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.execute_kill_confirm(
+                            s_clone.clone(),
+                            action_val,
+                            sql_clone.clone(),
+                            cx,
+                        );
+                    });
+                }
+            };
+
+            Some(
+                KillConfirmModal::new(
+                    session_clone,
+                    action_val,
+                    sql_str,
+                    self.settings_manager.settings().language,
+                )
+                .on_cancel(on_cancel)
+                .on_confirm(on_confirm),
+            )
+        } else {
+            None
+        };
+
         // Settings View component
         let settings_view = SettingsView::new(
             self.settings_manager.settings().clone(),
@@ -7499,6 +7820,9 @@ impl Render for CrabStudioApp {
             .on_action(cx.listener(|this, _: &CloseDialog, _, cx| {
                 if this.snippet_modal_open {
                     this.close_snippet_modal(cx);
+                } else if this.kill_confirm_modal.is_some() {
+                    this.kill_confirm_modal = None;
+                    cx.notify();
                 } else if this.mock_modal_open {
                     this.close_mock_modal(cx);
                 } else if this.export_modal_open {
@@ -7528,6 +7852,9 @@ impl Render for CrabStudioApp {
             .on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
                 if this.snippet_modal_open {
                     this.close_snippet_modal(cx);
+                } else if this.kill_confirm_modal.is_some() {
+                    this.kill_confirm_modal = None;
+                    cx.notify();
                 } else if this.mock_modal_open {
                     this.close_mock_modal(cx);
                 } else if this.export_modal_open {
@@ -7556,6 +7883,9 @@ impl Render for CrabStudioApp {
                     this.active_nav = ActivityNav::Databases;
                     cx.notify();
                 } else if this.active_nav == ActivityNav::Snippets {
+                    this.active_nav = ActivityNav::Databases;
+                    cx.notify();
+                } else if this.active_nav == ActivityNav::Sessions {
                     this.active_nav = ActivityNav::Databases;
                     cx.notify();
                 } else if this.active_tab == WorkspaceTab::QueryConsole && this.query_tabs.len() > 1
@@ -7674,6 +8004,8 @@ impl Render for CrabStudioApp {
                             settings_view.into_any_element()
                         } else if self.active_nav == ActivityNav::Snippets {
                             snippet_view.into_any_element()
+                        } else if self.active_nav == ActivityNav::Sessions {
+                            sessions_view.into_any_element()
                         } else {
                             v_flex()
                                 .size_full()
@@ -7703,5 +8035,6 @@ impl Render for CrabStudioApp {
             .children(export_overlay)
             .children(mock_overlay)
             .children(snippet_modal_overlay)
+            .children(kill_confirm_overlay)
     }
 }

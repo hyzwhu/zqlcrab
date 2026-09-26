@@ -17,6 +17,9 @@ pub enum DbError {
     #[error("Not found: {0}")]
     NotFound(String),
 
+    #[error("Validation error: {0}")]
+    Validation(String),
+
     #[error("Connection pool error: {0}")]
     PoolError(String),
 

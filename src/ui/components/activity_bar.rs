@@ -17,6 +17,7 @@ pub enum ActivityNav {
     Databases,
     Console,
     Snippets,
+    Sessions,
     Settings,
 }
 
@@ -130,6 +131,12 @@ impl RenderOnce for ActivityBar {
             IconName::FileCode,
             "nav.snippets",
         );
+        let sessions_item = self.render_nav_item(
+            "act_nav_sessions",
+            ActivityNav::Sessions,
+            IconName::Activity,
+            "nav.sessions",
+        );
         let settings_item = self.render_nav_item(
             "act_nav_settings",
             ActivityNav::Settings,
@@ -156,7 +163,8 @@ impl RenderOnce for ActivityBar {
                     .gap_1()
                     .child(db_item)
                     .child(console_item)
-                    .child(snippets_item),
+                    .child(snippets_item)
+                    .child(sessions_item),
             )
             .child(v_flex().w_full().items_center().child(settings_item))
     }
@@ -173,5 +181,6 @@ mod tests {
         assert!(!default_nav.is_settings());
         assert!(ActivityNav::Settings.is_settings());
         assert_ne!(ActivityNav::Databases, ActivityNav::Console);
+        assert_ne!(ActivityNav::Databases, ActivityNav::Sessions);
     }
 }
