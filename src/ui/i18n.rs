@@ -137,6 +137,7 @@ fn translate_en(key: &'static str) -> &'static str {
         "table_menu.export_data" => "Export Data / Dump...",
         "table_menu.generate_mock_data" => "Generate Mock Data...",
         "table_menu.schema_diff" => "Compare Structure...",
+        "table_menu.data_diff" => "Compare Data...",
         "table_menu.copy_name" => "Copy Table Name",
         "table_menu.copy_select" => "Copy SELECT Statement",
         "table_menu.copy_insert" => "Copy INSERT Template",
@@ -336,6 +337,25 @@ fn translate_en(key: &'static str) -> &'static str {
             "Compare this table's schema against another table and generate migrations"
         }
 
+        // Data Diff & Synchronization Wizard
+        "data_diff.title" => "Table Data Diff & Synchronization Wizard",
+        "data_diff.subtitle" => {
+            "Compare row records, inspect cell-level discrepancies, and generate multi-dialect DML sync scripts"
+        }
+        "data_diff.source_table" => "Source",
+        "data_diff.target_table" => "Target",
+        "data_diff.no_keys" => "No primary key detected (using first column)",
+        "data_diff.added" => "Added",
+        "data_diff.modified" => "Modified",
+        "data_diff.deleted" => "Deleted",
+        "data_diff.identical" => "Identical",
+        "data_diff.sync_preview" => "DML Sync Script",
+        "data_diff.loading" => "Comparing table data rows...",
+        "data_diff.no_data" => "No rows available to compare in selected tables.",
+        "data_diff.no_differences_filtered" => "No differences match the selected filter.",
+        "data_diff.button" => "Data Diff",
+        "data_diff.tooltip" => "Compare data rows between tables and generate synchronization DML",
+
         // ER Diagram
         "workspace.er_diagram" => "ER Diagram",
         "er_diagram.title" => "Entity-Relationship (ER) Diagram",
@@ -470,6 +490,7 @@ fn translate_zh(key: &'static str) -> &'static str {
         "table_menu.export_data" => "导出数据与转储...",
         "table_menu.generate_mock_data" => "生成模拟测试数据...",
         "table_menu.schema_diff" => "结构对比与迁移向导...",
+        "table_menu.data_diff" => "数据对比与同步向导...",
         "table_menu.copy_name" => "复制表名",
         "table_menu.copy_select" => "复制 SELECT 语句",
         "table_menu.copy_insert" => "复制 INSERT 插入模板",
@@ -661,6 +682,25 @@ fn translate_zh(key: &'static str) -> &'static str {
         "schema_viewer.compare" => "结构对比",
         "schema_viewer.compare_tooltip" => "与另一张表对比结构差异并生成增量迁移脚本",
 
+        // Data Diff & Synchronization Wizard
+        "data_diff.title" => "表数据对比与同步向导",
+        "data_diff.subtitle" => {
+            "左右对比两表记录与单元格数值差异，自动生成方言适配的增量 DML 同步脚本"
+        }
+        "data_diff.source_table" => "源表",
+        "data_diff.target_table" => "目标表",
+        "data_diff.no_keys" => "未检测到主键约束 (默认使用首列作为主键标识)",
+        "data_diff.added" => "新增记录",
+        "data_diff.modified" => "变更记录",
+        "data_diff.deleted" => "缺失记录",
+        "data_diff.identical" => "完全一致",
+        "data_diff.sync_preview" => "DML 同步脚本预览",
+        "data_diff.loading" => "正在读取并对比表数据记录...",
+        "data_diff.no_data" => "所选表中暂无任何数据记录可供对比。",
+        "data_diff.no_differences_filtered" => "当前筛选条件下无差异记录。",
+        "data_diff.button" => "数据对比",
+        "data_diff.tooltip" => "对比两表数据记录差异并生成双向 DML 同步脚本",
+
         // ER Diagram
         "workspace.er_diagram" => "ER 关系图",
         "er_diagram.title" => "实体关系 (ER) 拓扑图谱",
@@ -743,6 +783,22 @@ mod tests {
         assert_eq!(
             t("table_menu.schema_diff", AppLanguage::En),
             "Compare Structure..."
+        );
+        assert_eq!(
+            t("data_diff.title", AppLanguage::ZhCn),
+            "表数据对比与同步向导"
+        );
+        assert_eq!(
+            t("data_diff.title", AppLanguage::En),
+            "Table Data Diff & Synchronization Wizard"
+        );
+        assert_eq!(
+            t("table_menu.data_diff", AppLanguage::ZhCn),
+            "数据对比与同步向导..."
+        );
+        assert_eq!(
+            t("table_menu.data_diff", AppLanguage::En),
+            "Compare Data..."
         );
     }
 }

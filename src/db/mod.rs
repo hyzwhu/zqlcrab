@@ -3,6 +3,7 @@
 pub mod adapter;
 pub mod autocomplete;
 pub mod changeset;
+pub mod data_diff;
 pub mod er_diagram;
 pub mod error;
 pub mod explain;
@@ -28,6 +29,10 @@ pub mod types;
 pub use adapter::DatabaseAdapter;
 pub use autocomplete::{SqlCompletionProvider, SqlMetadataCache};
 pub use changeset::{CellEdit, GridChangeset, RowDeletion};
+pub use data_diff::{
+    CellDiff, DataDiffOptions, DataDiffReport, DataDiffStatus, DataDiffSummary, DataSyncScript,
+    RowDiff, compare_table_data, generate_data_sync_sql,
+};
 pub use er_diagram::{ErDiagramGraph, RelationCardinality, RelationEdge, TableNode};
 pub use error::{DbError, DbResult};
 pub use export::{ExportFormat, ExportOptions, export_result};

@@ -249,6 +249,7 @@ pub struct DataGrid {
     on_page_change: Option<Rc<dyn Fn(usize, &mut Window, &mut App)>>,
     on_export: Option<Rc<dyn Fn(ExportFormat, &mut Window, &mut App)>>,
     on_import: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
+    on_data_diff: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
     on_select_cell: Option<Rc<dyn Fn(GridCellCoord, &mut Window, &mut App)>>,
     on_toggle_inspector: Option<Rc<dyn Fn(bool, &mut Window, &mut App)>>,
     on_toggle_modal: Option<Rc<dyn Fn(bool, &mut Window, &mut App)>>,
@@ -292,6 +293,7 @@ impl DataGrid {
             on_page_change: None,
             on_export: None,
             on_import: None,
+            on_data_diff: None,
             on_select_cell: None,
             on_toggle_inspector: None,
             on_toggle_modal: None,
@@ -405,6 +407,14 @@ impl DataGrid {
         F: Fn(&mut Window, &mut App) + 'static,
     {
         self.on_import = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_data_diff<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&mut Window, &mut App) + 'static,
+    {
+        self.on_data_diff = Some(Rc::new(handler));
         self
     }
 
@@ -987,6 +997,22 @@ impl RenderOnce for DataGrid {
                 .icon(IconName::Upload)
                 .child("Import")
                 .when_some(on_imp, |btn, handler| {
+                    btn.on_click(move |_, window, cx| handler(window, cx))
+                })
+        };
+
+        let data_diff_btn = {
+            let on_diff = self.on_data_diff.clone();
+            Button::new("grid_data_diff_btn")
+                .ghost()
+                .xsmall()
+                .flex_shrink(1.0)
+                .min_w(px(26.0))
+                .overflow_hidden()
+                .tooltip("Compare Table Data...")
+                .icon(IconName::ListOrdered)
+                .child("Diff")
+                .when_some(on_diff, |btn, handler| {
                     btn.on_click(move |_, window, cx| handler(window, cx))
                 })
         };
@@ -1589,7 +1615,8 @@ impl RenderOnce for DataGrid {
                             .child(export_json_btn)
                             .child(export_md_btn)
                             .child(export_sql_btn)
-                            .child(import_btn),
+                            .child(import_btn)
+                            .child(data_diff_btn),
                     )
                     .child(
                         div()

@@ -35,6 +35,7 @@ struct TableActionCallbacks {
     on_export: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_mock_data: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_schema_diff: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
+    on_data_diff: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_view_er: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_truncate: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_drop: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
@@ -68,6 +69,7 @@ pub struct Sidebar {
     on_export_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_mock_data_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_schema_diff_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
+    on_data_diff_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_view_er_diagram: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_truncate_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_drop_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
@@ -110,6 +112,7 @@ impl Sidebar {
             on_export_table: None,
             on_mock_data_table: None,
             on_schema_diff_table: None,
+            on_data_diff_table: None,
             on_view_er_diagram: None,
             on_truncate_table: None,
             on_drop_table: None,
@@ -196,6 +199,14 @@ impl Sidebar {
         F: Fn(TableInfo, &mut Window, &mut App) + 'static,
     {
         self.on_schema_diff_table = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_data_diff_table<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(TableInfo, &mut Window, &mut App) + 'static,
+    {
+        self.on_data_diff_table = Some(Rc::new(handler));
         self
     }
 
@@ -514,6 +525,19 @@ impl Sidebar {
                     .on_click(move |_, window, cx| {
                         if let Some(ref handler) = diff_handler {
                             handler(tbl_diff.clone(), window, cx);
+                        }
+                    }),
+            );
+
+            // Compare Data... / 数据对比与同步向导...
+            let data_diff_handler = actions.on_data_diff.clone();
+            let tbl_data_diff = info.clone();
+            menu = menu.item(
+                PopupMenuItem::new(t("table_menu.data_diff", lang))
+                    .icon(IconName::ListOrdered)
+                    .on_click(move |_, window, cx| {
+                        if let Some(ref handler) = data_diff_handler {
+                            handler(tbl_data_diff.clone(), window, cx);
                         }
                     }),
             );
@@ -1115,6 +1139,7 @@ impl RenderOnce for Sidebar {
                         on_export: self.on_export_table.clone(),
                         on_mock_data: self.on_mock_data_table.clone(),
                         on_schema_diff: self.on_schema_diff_table.clone(),
+                        on_data_diff: self.on_data_diff_table.clone(),
                         on_view_er: self.on_view_er_diagram.clone(),
                         on_truncate: self.on_truncate_table.clone(),
                         on_drop: self.on_drop_table.clone(),
