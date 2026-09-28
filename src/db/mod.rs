@@ -4,6 +4,7 @@ pub mod adapter;
 pub mod autocomplete;
 pub mod changeset;
 pub mod data_diff;
+pub mod dump;
 pub mod er_diagram;
 pub mod error;
 pub mod explain;
@@ -16,6 +17,7 @@ pub mod mock_data;
 pub mod mysql;
 pub mod postgres;
 pub mod remote_adapter;
+pub mod restore;
 pub mod runtime;
 pub mod safety;
 pub mod schema_diff;
@@ -33,6 +35,10 @@ pub use data_diff::{
     CellDiff, DataDiffOptions, DataDiffReport, DataDiffStatus, DataDiffSummary, DataSyncScript,
     RowDiff, compare_table_data, generate_data_sync_sql,
 };
+pub use dump::{
+    DatabaseDumpConfig, DumpDestination, DumpProgress, DumpSummary, TableDumpPayload,
+    generate_database_dump_sql,
+};
 pub use er_diagram::{ErDiagramGraph, RelationCardinality, RelationEdge, TableNode};
 pub use error::{DbError, DbResult};
 pub use export::{ExportFormat, ExportOptions, export_result};
@@ -47,6 +53,10 @@ pub use mock_data::{
 pub use mysql::MysqlAdapter;
 pub use postgres::PostgresAdapter;
 pub use remote_adapter::RemoteHttpAdapter;
+pub use restore::{
+    RestoreErrorPolicy, RestoreOptions, RestoreProgress, RestoreSummary, SqlScriptAnalysis,
+    StatementExecutionLog, analyze_sql_script, split_sql_script,
+};
 pub use runtime::{run_on_tokio, tokio_runtime};
 pub use safety::QuerySafetyValidator;
 pub use schema_diff::{

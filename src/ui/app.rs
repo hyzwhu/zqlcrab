@@ -4,6 +4,10 @@ use crate::db::changeset::GridChangeset;
 use crate::db::data_diff::{
     DataDiffOptions, DataDiffReport, DataSyncScript, compare_table_data, generate_data_sync_sql,
 };
+use crate::db::dump::{
+    DatabaseDumpConfig, DumpDestination, DumpProgress, DumpSummary, TableDumpPayload,
+    generate_database_dump_sql,
+};
 use crate::db::er_diagram::{ErDiagramGraph, TableNode};
 use crate::db::explain::{ExplainPlan, parse_explain_result, wrap_explain_sql};
 use crate::db::export::{
@@ -21,6 +25,10 @@ use crate::db::manager::ConnectionManager;
 use crate::db::mock_data::{
     MockColumnConfig, MockGeneratorType, MockProgress, MockResult, execute_mock_seeding,
     generate_mock_preview, initialize_column_configs,
+};
+use crate::db::restore::{
+    RestoreErrorPolicy, RestoreOptions, RestoreProgress, RestoreSummary, SqlScriptAnalysis,
+    StatementExecutionLog, analyze_sql_script, split_sql_script,
 };
 use crate::db::schema_diff::{
     MigrationDirection, MigrationScript, SchemaDiffOptions, SchemaDiffReport, compare_tables,
@@ -43,11 +51,12 @@ use crate::db::types::{
 use crate::settings::{SettingsManager, ThemePreference};
 use crate::ui::components::{
     ActivityBar, ActivityNav, AppStatusBar, ConfirmActionKind, ConfirmDialog, ConnectionDialog,
-    ConsoleBottomTab, DataDiffFilterTab, DataDiffModal, DataGrid, DiffFilterTab, ErDiagramView,
-    ExplainViewMode, ExportDestination, ExportModal, ExportSuccessInfo, ExportWizardStep,
-    ImportModal, ImportWizardStep, KillConfirmModal, MockDataModal, MockWizardStep, QueryConsole,
-    QueryHistoryView, QueryTabHeader, SchemaDiffModal, SchemaViewer, SessionsView, SettingsTab,
-    SettingsView, Sidebar, SnippetEditModal, SnippetView, SqlReviewModal,
+    ConsoleBottomTab, DataDiffFilterTab, DataDiffModal, DataGrid, DiffFilterTab, DumpModal,
+    DumpModalStep, ErDiagramView, ExplainViewMode, ExportDestination, ExportModal,
+    ExportSuccessInfo, ExportWizardStep, ImportModal, ImportWizardStep, KillConfirmModal,
+    MockDataModal, MockWizardStep, QueryConsole, QueryHistoryView, QueryTabHeader, RestoreModal,
+    RestoreModalStep, SchemaDiffModal, SchemaViewer, SessionsView, SettingsTab, SettingsView,
+    Sidebar, SnippetEditModal, SnippetView, SqlReviewModal,
     create_table_modal::{CreateTableColumnState, CreateTableIndexState, CreateTableModal},
     data_grid::GridCellCoord,
     schema_viewer::SchemaEditColumnState,
@@ -55,6 +64,7 @@ use crate::ui::components::{
 use crate::ui::i18n::t;
 use crate::ui::theme::ThemeColors;
 use chrono::Utc;
+use std::collections::HashSet;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::{h_flex, v_flex};
 use gpui_kit::component::{
@@ -418,6 +428,32 @@ pub struct CrabStudioApp {
     er_selected_table: Option<String>,
     er_zoom: f32,
     er_mermaid_copied: bool,
+
+    // Visual Database Dump & Multi-Table Backup Wizard state
+    dump_modal_open: bool,
+    dump_step: DumpModalStep,
+    dump_config: DatabaseDumpConfig,
+    dump_available_tables: Vec<String>,
+    dump_selected_tables: HashSet<String>,
+    dump_filter_query: String,
+    dump_file_path: Option<String>,
+    dump_is_exporting: bool,
+    dump_progress: Option<DumpProgress>,
+    dump_summary: Option<DumpSummary>,
+    dump_error_msg: Option<String>,
+    dump_copied: bool,
+
+    // SQL Script Restore & Batch Runner Wizard state
+    restore_modal_open: bool,
+    restore_step: RestoreModalStep,
+    restore_file_path: Option<String>,
+    restore_analysis: Option<SqlScriptAnalysis>,
+    restore_options: RestoreOptions,
+    restore_is_executing: bool,
+    restore_progress: Option<RestoreProgress>,
+    restore_logs: Vec<StatementExecutionLog>,
+    restore_summary: Option<RestoreSummary>,
+    restore_error_msg: Option<String>,
 
     // Settings state
     settings_manager: SettingsManager,
@@ -851,6 +887,28 @@ impl CrabStudioApp {
             er_selected_table: None,
             er_zoom: 1.0,
             er_mermaid_copied: false,
+            dump_modal_open: false,
+            dump_step: DumpModalStep::SelectTables,
+            dump_config: DatabaseDumpConfig::default(),
+            dump_available_tables: Vec::new(),
+            dump_selected_tables: HashSet::new(),
+            dump_filter_query: String::new(),
+            dump_file_path: None,
+            dump_is_exporting: false,
+            dump_progress: None,
+            dump_summary: None,
+            dump_error_msg: None,
+            dump_copied: false,
+            restore_modal_open: false,
+            restore_step: RestoreModalStep::SelectFile,
+            restore_file_path: None,
+            restore_analysis: None,
+            restore_options: RestoreOptions::default(),
+            restore_is_executing: false,
+            restore_progress: None,
+            restore_logs: Vec::new(),
+            restore_summary: None,
+            restore_error_msg: None,
             settings_manager,
             active_nav: ActivityNav::Databases,
             active_settings_tab: SettingsTab::Appearance,
@@ -4521,7 +4579,7 @@ impl CrabStudioApp {
                 Ok(data) => {
                     let total_rows = data.rows.len();
                     let dump_output = generate_table_dump(ddl.as_deref(), Some(&data), &config);
-                    let bytes = dump_output.as_bytes().len();
+                    let bytes = dump_output.len();
 
                     match destination {
                         ExportDestination::File => {
@@ -5214,6 +5272,473 @@ impl CrabStudioApp {
         self.create_query_tab(Some("data_sync.sql".to_string()), Some(&sql), window, cx);
         self.status_message = Some("Loaded Data Sync SQL into Query Tab".to_string());
         cx.notify();
+    }
+
+    /// Open the Database & Table Dump Wizard modal
+    pub fn open_dump_modal(&mut self, initial_table: Option<String>, cx: &mut Context<Self>) {
+        self.dump_modal_open = true;
+        self.dump_step = DumpModalStep::SelectTables;
+        self.dump_is_exporting = false;
+        self.dump_progress = None;
+        self.dump_summary = None;
+        self.dump_error_msg = None;
+        self.dump_copied = false;
+        self.dump_filter_query.clear();
+
+        self.dump_available_tables = self
+            .active_tables
+            .iter()
+            .filter(|t| !t.is_view())
+            .map(|t| t.name.clone())
+            .collect();
+
+        self.dump_selected_tables.clear();
+        if let Some(tbl) = initial_table {
+            if self.dump_available_tables.contains(&tbl) {
+                self.dump_selected_tables.insert(tbl);
+            }
+        } else {
+            for tbl in &self.dump_available_tables {
+                self.dump_selected_tables.insert(tbl.clone());
+            }
+        }
+
+        let family = self
+            .active_connection
+            .as_ref()
+            .map(|c| c.config.db_type.family())
+            .unwrap_or(DatabaseFamily::Sqlite);
+        let db_name = self
+            .active_connection
+            .as_ref()
+            .map(|c| c.config.database.clone())
+            .unwrap_or_default();
+
+        self.dump_config.family = family;
+        self.dump_config.database = db_name.clone();
+        self.dump_config.scope = ExportScope::SchemaAndData;
+        self.dump_config.disable_foreign_keys = true;
+        self.dump_config.options.wrap_in_transaction = true;
+        self.dump_config.options.drop_table_if_exists = true;
+        self.dump_config.options.batch_size = 200;
+        self.dump_config.destination = DumpDestination::File;
+
+        let def_filename = format!(
+            "{}_dump_{}.sql",
+            if db_name.is_empty() { "database" } else { &db_name },
+            chrono::Local::now().format("%Y%m%d_%H%M%S")
+        );
+        self.dump_file_path = dirs::document_dir()
+            .or_else(dirs::home_dir)
+            .map(|d| d.join(def_filename).display().to_string());
+
+        cx.notify();
+    }
+
+    /// Close the Database Dump modal
+    pub fn close_dump_modal(&mut self, cx: &mut Context<Self>) {
+        self.dump_modal_open = false;
+        self.dump_is_exporting = false;
+        cx.notify();
+    }
+
+    /// Browse target file path for Database Dump
+    pub fn browse_dump_file(&mut self, cx: &mut Context<Self>) {
+        let def_name = format!(
+            "{}_dump_{}.sql",
+            if self.dump_config.database.is_empty() {
+                "database"
+            } else {
+                &self.dump_config.database
+            },
+            chrono::Local::now().format("%Y%m%d_%H%M%S")
+        );
+        let picked = rfd::FileDialog::new()
+            .set_file_name(&def_name)
+            .add_filter("SQL Script (*.sql)", &["sql"])
+            .add_filter("All Files (*.*)", &["*"])
+            .save_file();
+
+        if let Some(path) = picked {
+            self.dump_file_path = Some(path.display().to_string());
+            cx.notify();
+        }
+    }
+
+    /// Start asynchronous database dump process
+    pub fn start_dump_process(&mut self, cx: &mut Context<Self>) {
+        let Some(conn) = self.active_connection.clone() else {
+            self.dump_error_msg = Some("No active database connection".to_string());
+            cx.notify();
+            return;
+        };
+
+        if self.dump_selected_tables.is_empty() {
+            self.dump_error_msg = Some("Please select at least 1 table to dump".to_string());
+            cx.notify();
+            return;
+        }
+
+        if self.dump_config.destination == DumpDestination::File && self.dump_file_path.is_none() {
+            self.dump_error_msg = Some("Please select a target file path".to_string());
+            cx.notify();
+            return;
+        }
+
+        self.dump_is_exporting = true;
+        self.dump_error_msg = None;
+        self.dump_summary = None;
+        self.dump_progress = Some(DumpProgress {
+            current_table_index: 0,
+            total_tables: self.dump_selected_tables.len(),
+            current_table_name: String::new(),
+            rows_exported_current_table: 0,
+            total_rows_exported: 0,
+            is_finished: false,
+        });
+
+        let config = self.dump_config.clone();
+        let target_tables: Vec<String> = self.dump_selected_tables.iter().cloned().collect();
+        let active_tables = self.active_tables.clone();
+        let destination = config.destination;
+        let file_path = self.dump_file_path.clone();
+
+        let _ = cx.spawn(async move |this, cx: &mut AsyncApp| {
+            let start = std::time::Instant::now();
+            let total_tables = target_tables.len();
+            let mut payloads = Vec::with_capacity(total_tables);
+            let mut total_rows_acc = 0;
+
+            for (idx, tbl_name) in target_tables.iter().enumerate() {
+                let schema = active_tables
+                    .iter()
+                    .find(|t| &t.name == tbl_name)
+                    .and_then(|t| t.schema.clone());
+
+                let current_tbl = tbl_name.clone();
+                let current_idx = idx + 1;
+                let cur_total = total_rows_acc;
+                let _ = this.update(cx, |app, cx| {
+                    app.dump_progress = Some(DumpProgress {
+                        current_table_index: current_idx,
+                        total_tables,
+                        current_table_name: current_tbl,
+                        rows_exported_current_table: 0,
+                        total_rows_exported: cur_total,
+                        is_finished: false,
+                    });
+                    cx.notify();
+                });
+
+                // 1. Fetch DDL if needed
+                let ddl = if config.scope == ExportScope::SchemaAndData
+                    || config.scope == ExportScope::SchemaOnly
+                {
+                    conn.get_table_ddl(None, schema.as_deref(), tbl_name)
+                        .await
+                        .ok()
+                        .flatten()
+                } else {
+                    None
+                };
+
+                // 2. Fetch Data if needed
+                let data = if config.scope == ExportScope::SchemaAndData
+                    || config.scope == ExportScope::DataOnly
+                {
+                    let quoted = if let Some(ref s) = schema {
+                        format!("\"{}\".\"{}\"", s, tbl_name)
+                    } else {
+                        format!("\"{}\"", tbl_name)
+                    };
+                    conn.execute_query(&format!("SELECT * FROM {quoted};"))
+                        .await
+                        .ok()
+                } else {
+                    None
+                };
+
+                let rows_count = data.as_ref().map(|d| d.rows.len()).unwrap_or(0);
+                total_rows_acc += rows_count;
+
+                payloads.push(TableDumpPayload {
+                    table_name: tbl_name.clone(),
+                    ddl,
+                    data,
+                });
+            }
+
+            let dump_sql = generate_database_dump_sql(&config, &payloads);
+            let total_bytes = dump_sql.len();
+            let duration_ms = start.elapsed().as_millis();
+
+            let dest_res = match destination {
+                DumpDestination::File => {
+                    if let Some(ref p) = file_path {
+                        std::fs::write(p, &dump_sql).map_err(|e| e.to_string())
+                    } else {
+                        Err("File path is missing".to_string())
+                    }
+                }
+                DumpDestination::Clipboard => Ok(()),
+                DumpDestination::QueryConsole => Ok(()),
+            };
+
+            let _ = this.update(cx, |app, cx| {
+                app.dump_is_exporting = false;
+                match dest_res {
+                    Ok(_) => {
+                        if destination == DumpDestination::Clipboard {
+                            cx.write_to_clipboard(gpui_kit::gpui::ClipboardItem::new_string(dump_sql.clone()));
+                            app.dump_copied = true;
+                        }
+
+                        app.dump_summary = Some(DumpSummary {
+                            tables_count: total_tables,
+                            total_rows: total_rows_acc,
+                            total_bytes,
+                            duration_ms,
+                        });
+                        app.status_message = Some(format!(
+                            "Dump completed: {} tables, {} rows ({} ms)",
+                            total_tables, total_rows_acc, duration_ms
+                        ));
+                    }
+                    Err(err) => {
+                        app.dump_error_msg = Some(format!("Failed to save dump: {err}"));
+                    }
+                }
+                cx.notify();
+            });
+        });
+    }
+
+    /// Open generated dump SQL in a query console tab
+    pub fn open_dump_sql_in_console(
+        &mut self,
+        sql: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.dump_modal_open = false;
+        self.create_query_tab(Some("database_dump.sql".to_string()), Some(&sql), window, cx);
+        self.status_message = Some("Opened database dump SQL in Query Console".to_string());
+        cx.notify();
+    }
+
+    /// Open SQL Script Restore & Batch Runner modal
+    pub fn open_restore_modal(&mut self, cx: &mut Context<Self>) {
+        self.restore_modal_open = true;
+        self.restore_step = RestoreModalStep::SelectFile;
+        self.restore_file_path = None;
+        self.restore_analysis = None;
+        self.restore_options = RestoreOptions::default();
+        self.restore_is_executing = false;
+        self.restore_progress = None;
+        self.restore_logs.clear();
+        self.restore_summary = None;
+        self.restore_error_msg = None;
+        cx.notify();
+    }
+
+    /// Close SQL Script Restore modal
+    pub fn close_restore_modal(&mut self, cx: &mut Context<Self>) {
+        self.restore_modal_open = false;
+        self.restore_is_executing = false;
+        cx.notify();
+    }
+
+    /// Browse for a SQL script file to inspect and restore
+    pub fn browse_restore_file(&mut self, cx: &mut Context<Self>) {
+        let picked = rfd::FileDialog::new()
+            .add_filter("SQL Script (*.sql)", &["sql"])
+            .add_filter("All Files (*.*)", &["*"])
+            .pick_file();
+
+        if let Some(path) = picked {
+            let path_str = path.display().to_string();
+            match std::fs::read_to_string(&path) {
+                Ok(content) => {
+                    let analysis = analyze_sql_script(&content, Some(path_str.clone()));
+                    self.restore_file_path = Some(path_str);
+                    self.restore_analysis = Some(analysis);
+                    self.restore_error_msg = None;
+                }
+                Err(err) => {
+                    self.restore_error_msg = Some(format!("Failed to read SQL script: {err}"));
+                }
+            }
+            cx.notify();
+        }
+    }
+
+    /// Start asynchronous SQL script restore & execution
+    pub fn start_restore_process(&mut self, cx: &mut Context<Self>) {
+        let Some(conn) = self.active_connection.clone() else {
+            self.restore_error_msg = Some("No active database connection".to_string());
+            cx.notify();
+            return;
+        };
+
+        let Some(ref file_path) = self.restore_file_path else {
+            self.restore_error_msg = Some("Please select a SQL script file first".to_string());
+            cx.notify();
+            return;
+        };
+
+        let content = match std::fs::read_to_string(file_path) {
+            Ok(c) => c,
+            Err(e) => {
+                self.restore_error_msg = Some(format!("Failed to read SQL script: {e}"));
+                cx.notify();
+                return;
+            }
+        };
+
+        let statements = split_sql_script(&content);
+        if statements.is_empty() {
+            self.restore_error_msg =
+                Some("The selected SQL script contains no executable statements".to_string());
+            cx.notify();
+            return;
+        }
+
+        self.restore_step = RestoreModalStep::Execution;
+        self.restore_is_executing = true;
+        self.restore_error_msg = None;
+        self.restore_logs.clear();
+        self.restore_summary = None;
+        self.restore_progress = Some(RestoreProgress {
+            current_statement: 0,
+            total_statements: statements.len(),
+            percent: 0.0,
+            current_sql_preview: String::new(),
+            succeeded_count: 0,
+            failed_count: 0,
+            is_finished: false,
+        });
+
+        let options = self.restore_options.clone();
+
+        let _ = cx.spawn(async move |this, cx: &mut AsyncApp| {
+            let start = std::time::Instant::now();
+            let total = statements.len();
+            let mut succeeded = 0;
+            let mut failed = 0;
+            let mut aborted = false;
+
+            if options.wrap_in_transaction {
+                let _ = conn.execute_query("BEGIN TRANSACTION;").await;
+            }
+
+            if options.disable_foreign_keys {
+                match conn.config.db_type.family() {
+                    DatabaseFamily::MySql => {
+                        let _ = conn.execute_query("SET FOREIGN_KEY_CHECKS = 0;").await;
+                    }
+                    DatabaseFamily::Sqlite => {
+                        let _ = conn.execute_query("PRAGMA foreign_keys = OFF;").await;
+                    }
+                    DatabaseFamily::Postgres => {
+                        let _ = conn.execute_query("SET CONSTRAINTS ALL DEFERRED;").await;
+                    }
+                }
+            }
+
+            for (idx, sql) in statements.iter().enumerate() {
+                let stmt_start = std::time::Instant::now();
+                let preview = sql.chars().take(80).collect::<String>();
+
+                let cur_idx = idx + 1;
+                let cur_preview = preview.clone();
+                let cur_succ = succeeded;
+                let cur_fail = failed;
+                let _ = this.update(cx, |app, cx| {
+                    app.restore_progress = Some(RestoreProgress {
+                        current_statement: cur_idx,
+                        total_statements: total,
+                        percent: (cur_idx as f32 / total as f32) * 100.0,
+                        current_sql_preview: cur_preview,
+                        succeeded_count: cur_succ,
+                        failed_count: cur_fail,
+                        is_finished: false,
+                    });
+                    cx.notify();
+                });
+
+                let res = conn.execute_query(sql).await;
+                let duration_ms = stmt_start.elapsed().as_millis() as u64;
+
+                let is_ok = res.is_ok();
+                let err_msg = res.err().map(|e| e.to_string());
+
+                if is_ok {
+                    succeeded += 1;
+                } else {
+                    failed += 1;
+                }
+
+                let log_entry = StatementExecutionLog {
+                    index: idx,
+                    sql_preview: preview,
+                    duration_ms,
+                    is_success: is_ok,
+                    error_message: err_msg,
+                };
+
+                let _ = this.update(cx, |app, cx| {
+                    app.restore_logs.push(log_entry);
+                    cx.notify();
+                });
+
+                if !is_ok && options.error_policy == RestoreErrorPolicy::StopOnError {
+                    aborted = true;
+                    break;
+                }
+            }
+
+            if options.wrap_in_transaction {
+                if aborted {
+                    let _ = conn.execute_query("ROLLBACK;").await;
+                } else {
+                    let _ = conn.execute_query("COMMIT;").await;
+                }
+            }
+
+            if options.disable_foreign_keys {
+                match conn.config.db_type.family() {
+                    DatabaseFamily::MySql => {
+                        let _ = conn.execute_query("SET FOREIGN_KEY_CHECKS = 1;").await;
+                    }
+                    DatabaseFamily::Sqlite => {
+                        let _ = conn.execute_query("PRAGMA foreign_keys = ON;").await;
+                    }
+                    DatabaseFamily::Postgres => {}
+                }
+            }
+
+            let total_duration = start.elapsed().as_millis();
+
+            let _ = this.update(cx, |app, cx| {
+                app.restore_is_executing = false;
+                app.restore_summary = Some(RestoreSummary {
+                    total_statements: total,
+                    succeeded_count: succeeded,
+                    failed_count: failed,
+                    duration_ms: total_duration,
+                    aborted_early: aborted,
+                    logs: app.restore_logs.clone(),
+                });
+                if let Some(ref mut p) = app.restore_progress {
+                    p.is_finished = true;
+                }
+                app.status_message = Some(format!(
+                    "Restore finished: {} succeeded, {} failed ({} ms)",
+                    succeeded, failed, total_duration
+                ));
+                cx.notify();
+            });
+        });
     }
 
     /// Open modal to create a new SQL snippet
@@ -6304,6 +6829,30 @@ impl Render for CrabStudioApp {
             move |table, window, cx| {
                 handle.update(cx, |this, cx| {
                     this.open_export_modal(Some(table.name), window, cx);
+                });
+            }
+        })
+        .on_dump_table({
+            let handle = app_handle.clone();
+            move |table, _, cx| {
+                handle.update(cx, |this, cx| {
+                    this.open_dump_modal(Some(table.name), cx);
+                });
+            }
+        })
+        .on_dump_database({
+            let handle = app_handle.clone();
+            move |_, cx| {
+                handle.update(cx, |this, cx| {
+                    this.open_dump_modal(None, cx);
+                });
+            }
+        })
+        .on_restore_database({
+            let handle = app_handle.clone();
+            move |_, cx| {
+                handle.update(cx, |this, cx| {
+                    this.open_restore_modal(cx);
                 });
             }
         })
@@ -8720,6 +9269,269 @@ impl Render for CrabStudioApp {
             None
         };
 
+        // Database Dump Modal Overlay
+        let dump_overlay = if self.dump_modal_open {
+            let on_step = {
+                let handle = app_handle.clone();
+                move |step: DumpModalStep, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.dump_step = step;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_toggle_table = {
+                let handle = app_handle.clone();
+                move |tbl: String, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        if this.dump_selected_tables.contains(&tbl) {
+                            this.dump_selected_tables.remove(&tbl);
+                        } else {
+                            this.dump_selected_tables.insert(tbl);
+                        }
+                        cx.notify();
+                    });
+                }
+            };
+            let on_select_all = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        for t in &this.dump_available_tables {
+                            this.dump_selected_tables.insert(t.clone());
+                        }
+                        cx.notify();
+                    });
+                }
+            };
+            let on_deselect_all = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.dump_selected_tables.clear();
+                        cx.notify();
+                    });
+                }
+            };
+            let on_scope = {
+                let handle = app_handle.clone();
+                move |scope: ExportScope, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.dump_config.scope = scope;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_drop = {
+                let handle = app_handle.clone();
+                move |drop: bool, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.dump_config.options.drop_table_if_exists = drop;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_tx = {
+                let handle = app_handle.clone();
+                move |tx: bool, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.dump_config.options.wrap_in_transaction = tx;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_fk = {
+                let handle = app_handle.clone();
+                move |fk: bool, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.dump_config.disable_foreign_keys = fk;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_comments = {
+                let handle = app_handle.clone();
+                move |comm: bool, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.dump_config.options.include_comments = comm;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_batch = {
+                let handle = app_handle.clone();
+                move |size: usize, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.dump_config.options.batch_size = size;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_dest = {
+                let handle = app_handle.clone();
+                move |dest: DumpDestination, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.dump_config.destination = dest;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_browse = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.browse_dump_file(cx);
+                    });
+                }
+            };
+            let on_start = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.start_dump_process(cx);
+                    });
+                }
+            };
+            let on_console = {
+                let handle = app_handle.clone();
+                move |sql: String, window: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.open_dump_sql_in_console(sql, window, cx);
+                    });
+                }
+            };
+            let on_close = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.close_dump_modal(cx);
+                    });
+                }
+            };
+
+            Some(
+                DumpModal::new(
+                    self.dump_step,
+                    self.dump_config.clone(),
+                    self.dump_available_tables.clone(),
+                    self.dump_selected_tables.clone(),
+                    self.dump_filter_query.clone(),
+                    self.dump_file_path.clone(),
+                    self.dump_is_exporting,
+                    self.dump_progress.clone(),
+                    self.dump_summary.clone(),
+                    self.dump_error_msg.clone(),
+                    self.dump_copied,
+                    self.settings_manager.settings().language,
+                )
+                .on_step_change(on_step)
+                .on_toggle_table(on_toggle_table)
+                .on_select_all(on_select_all)
+                .on_deselect_all(on_deselect_all)
+                .on_change_scope(on_scope)
+                .on_toggle_drop_table(on_drop)
+                .on_toggle_transaction(on_tx)
+                .on_toggle_fk_checks(on_fk)
+                .on_toggle_comments(on_comments)
+                .on_change_batch_size(on_batch)
+                .on_change_destination(on_dest)
+                .on_browse_file(on_browse)
+                .on_start_dump(on_start)
+                .on_open_in_console(on_console)
+                .on_close(on_close),
+            )
+        } else {
+            None
+        };
+
+        // SQL Script Restore Modal Overlay
+        let restore_overlay = if self.restore_modal_open {
+            let on_step = {
+                let handle = app_handle.clone();
+                move |step: RestoreModalStep, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.restore_step = step;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_browse = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.browse_restore_file(cx);
+                    });
+                }
+            };
+            let on_policy = {
+                let handle = app_handle.clone();
+                move |policy: RestoreErrorPolicy, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.restore_options.error_policy = policy;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_tx = {
+                let handle = app_handle.clone();
+                move |tx: bool, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.restore_options.wrap_in_transaction = tx;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_fk = {
+                let handle = app_handle.clone();
+                move |fk: bool, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.restore_options.disable_foreign_keys = fk;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_start = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.start_restore_process(cx);
+                    });
+                }
+            };
+            let on_close = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.close_restore_modal(cx);
+                    });
+                }
+            };
+
+            Some(
+                RestoreModal::new(
+                    self.restore_step,
+                    self.restore_file_path.clone(),
+                    self.restore_analysis.clone(),
+                    self.restore_options.clone(),
+                    self.restore_is_executing,
+                    self.restore_progress.clone(),
+                    self.restore_logs.clone(),
+                    self.restore_summary.clone(),
+                    self.restore_error_msg.clone(),
+                    self.settings_manager.settings().language,
+                )
+                .on_step_change(on_step)
+                .on_browse_file(on_browse)
+                .on_change_policy(on_policy)
+                .on_toggle_transaction(on_tx)
+                .on_toggle_fk_checks(on_fk)
+                .on_start_restore(on_start)
+                .on_close(on_close),
+            )
+        } else {
+            None
+        };
+
         // Settings View component
         let settings_view = SettingsView::new(
             self.settings_manager.settings().clone(),
@@ -8855,7 +9667,11 @@ impl Render for CrabStudioApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &CloseDialog, _, cx| {
-                if this.snippet_modal_open {
+                if this.restore_modal_open {
+                    this.close_restore_modal(cx);
+                } else if this.dump_modal_open {
+                    this.close_dump_modal(cx);
+                } else if this.snippet_modal_open {
                     this.close_snippet_modal(cx);
                 } else if this.data_diff_modal_open {
                     this.close_data_diff(cx);
@@ -8891,7 +9707,11 @@ impl Render for CrabStudioApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
-                if this.snippet_modal_open {
+                if this.restore_modal_open {
+                    this.close_restore_modal(cx);
+                } else if this.dump_modal_open {
+                    this.close_dump_modal(cx);
+                } else if this.snippet_modal_open {
                     this.close_snippet_modal(cx);
                 } else if this.data_diff_modal_open {
                     this.close_data_diff(cx);
@@ -9083,5 +9903,7 @@ impl Render for CrabStudioApp {
             .children(data_diff_overlay)
             .children(snippet_modal_overlay)
             .children(kill_confirm_overlay)
+            .children(dump_overlay)
+            .children(restore_overlay)
     }
 }

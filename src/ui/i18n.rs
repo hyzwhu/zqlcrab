@@ -367,6 +367,63 @@ fn translate_en(key: &'static str) -> &'static str {
         "er_diagram.view_schema" => "Schema",
         "table_menu.view_er" => "View in ER Diagram",
 
+        // Database & Table Dump Wizard
+        "db_menu.dump_database" => "Dump Database (SQL)...",
+        "db_menu.restore_database" => "Restore from SQL Script...",
+        "table_menu.dump_table" => "Dump Table (SQL)...",
+        "dump_modal.title" => "Database & Table Dump Wizard",
+        "dump_modal.subtitle" => "Export schema DDL, constraints, and data records into standard SQL scripts",
+        "dump_modal.step_select" => "1. Select Tables",
+        "dump_modal.step_options" => "2. Dump Options",
+        "dump_modal.step_destination" => "3. Destination",
+        "dump_modal.scope_full" => "Full (DDL + Data)",
+        "dump_modal.scope_schema" => "Schema Only (DDL)",
+        "dump_modal.scope_data" => "Data Only (DML)",
+        "dump_modal.filter_tables_placeholder" => "Filter tables...",
+        "dump_modal.select_all" => "Select All",
+        "dump_modal.deselect_all" => "Deselect All",
+        "dump_modal.selected_count" => "selected",
+        "dump_modal.opt_drop_table" => "Include DROP TABLE IF EXISTS",
+        "dump_modal.opt_transaction" => "Wrap in Transaction (BEGIN...COMMIT)",
+        "dump_modal.opt_fk_checks" => "Disable Foreign Key Checks",
+        "dump_modal.opt_comments" => "Include Header & Table Comments",
+        "dump_modal.opt_batch_size" => "Insert Batch Size",
+        "dump_modal.dest_file" => "Save to SQL File (.sql)",
+        "dump_modal.dest_clipboard" => "Copy to Clipboard",
+        "dump_modal.dest_console" => "Open in SQL Console",
+        "dump_modal.btn_dump" => "Start Dump",
+        "dump_modal.dumping" => "Dumping...",
+        "dump_modal.completed" => "Dump Completed!",
+        "dump_modal.summary_tables" => "Tables Exported",
+        "dump_modal.summary_rows" => "Rows Exported",
+        "dump_modal.summary_size" => "File Size",
+        "dump_modal.summary_time" => "Time Elapsed",
+
+        // SQL Script Restore Wizard
+        "restore_modal.title" => "SQL Script Restore & Batch Runner",
+        "restore_modal.subtitle" => "Parse and execute SQL batch scripts with live progress and error isolation",
+        "restore_modal.select_file" => "Select SQL Script File",
+        "restore_modal.browse" => "Browse...",
+        "restore_modal.no_file" => "No file selected",
+        "restore_modal.analysis_title" => "Script Inspection",
+        "restore_modal.total_stmts" => "Total Statements",
+        "restore_modal.ddl_stmts" => "DDL Statements",
+        "restore_modal.dml_stmts" => "DML Statements",
+        "restore_modal.other_stmts" => "Other Statements",
+        "restore_modal.file_size" => "File Size",
+        "restore_modal.preview_title" => "Statement Preview",
+        "restore_modal.policy_label" => "Error Handling Policy",
+        "restore_modal.policy_stop" => "Stop on First Error (Recommended)",
+        "restore_modal.policy_continue" => "Continue & Log Errors",
+        "restore_modal.opt_transaction" => "Enforce Atomic Transaction (BEGIN...COMMIT)",
+        "restore_modal.btn_restore" => "Start Execution",
+        "restore_modal.executing" => "Executing Statements...",
+        "restore_modal.live_logs" => "Live Execution Logs",
+        "restore_modal.completed" => "Execution Completed",
+        "restore_modal.aborted" => "Execution Aborted on Error",
+        "restore_modal.success_count" => "Succeeded",
+        "restore_modal.failed_count" => "Failed",
+
         // Fallback
         _ => key,
     }
@@ -712,6 +769,63 @@ fn translate_zh(key: &'static str) -> &'static str {
         "er_diagram.view_schema" => "查看结构",
         "table_menu.view_er" => "在 ER 图谱中查看",
 
+        // Database & Table Dump Wizard
+        "db_menu.dump_database" => "转储数据库 (SQL)...",
+        "db_menu.restore_database" => "从 SQL 脚本恢复...",
+        "table_menu.dump_table" => "转储表结构与数据 (SQL)...",
+        "dump_modal.title" => "数据库与数据表转储向导",
+        "dump_modal.subtitle" => "将数据库结构 DDL、约束以及数据行导出为标准 SQL 脚本",
+        "dump_modal.step_select" => "1. 选择数据表",
+        "dump_modal.step_options" => "2. 转储选项",
+        "dump_modal.step_destination" => "3. 输出目标",
+        "dump_modal.scope_full" => "完整转储 (结构 + 数据)",
+        "dump_modal.scope_schema" => "仅表结构 (DDL)",
+        "dump_modal.scope_data" => "仅数据行 (DML)",
+        "dump_modal.filter_tables_placeholder" => "过滤搜索表名...",
+        "dump_modal.select_all" => "全选",
+        "dump_modal.deselect_all" => "取消全选",
+        "dump_modal.selected_count" => "个已选中",
+        "dump_modal.opt_drop_table" => "包含 DROP TABLE IF EXISTS 语句",
+        "dump_modal.opt_transaction" => "使用事务包裹 (BEGIN...COMMIT)",
+        "dump_modal.opt_fk_checks" => "临时禁用外键约束检查",
+        "dump_modal.opt_comments" => "包含文件头与表信息注释",
+        "dump_modal.opt_batch_size" => "INSERT 批量行数",
+        "dump_modal.dest_file" => "保存为本地文件 (.sql)",
+        "dump_modal.dest_clipboard" => "复制到剪贴板",
+        "dump_modal.dest_console" => "在 SQL 控制台打开",
+        "dump_modal.btn_dump" => "开始转储",
+        "dump_modal.dumping" => "正在转储中...",
+        "dump_modal.completed" => "数据库转储完成！",
+        "dump_modal.summary_tables" => "已导出表数",
+        "dump_modal.summary_rows" => "已导出数据行",
+        "dump_modal.summary_size" => "文件大小",
+        "dump_modal.summary_time" => "总耗时",
+
+        // SQL Script Restore Wizard
+        "restore_modal.title" => "SQL 脚本恢复与批量执行器",
+        "restore_modal.subtitle" => "快速解析并批量执行本地 SQL 脚本，支持实时进度与错误隔离",
+        "restore_modal.select_file" => "选择 SQL 脚本文件",
+        "restore_modal.browse" => "浏览选择...",
+        "restore_modal.no_file" => "未选择任何文件",
+        "restore_modal.analysis_title" => "脚本静态检查",
+        "restore_modal.total_stmts" => "语句总数",
+        "restore_modal.ddl_stmts" => "结构定义 (DDL)",
+        "restore_modal.dml_stmts" => "数据操作 (DML)",
+        "restore_modal.other_stmts" => "其他配置语句",
+        "restore_modal.file_size" => "脚本大小",
+        "restore_modal.preview_title" => "语句预览 (前5条)",
+        "restore_modal.policy_label" => "错误处理策略",
+        "restore_modal.policy_stop" => "遇到错误立即停止 (推荐，保护安全)",
+        "restore_modal.policy_continue" => "忽略错误并继续执行 (记录日志)",
+        "restore_modal.opt_transaction" => "启用原子事务保护 (全部成功才提交)",
+        "restore_modal.btn_restore" => "开始批量执行",
+        "restore_modal.executing" => "正在执行 SQL 语句...",
+        "restore_modal.live_logs" => "实时执行日志",
+        "restore_modal.completed" => "脚本批量执行完成",
+        "restore_modal.aborted" => "执行因错误已中止",
+        "restore_modal.success_count" => "成功执行",
+        "restore_modal.failed_count" => "执行失败",
+
         // Fallback
         _ => translate_en(key),
     }
@@ -799,6 +913,30 @@ mod tests {
         assert_eq!(
             t("table_menu.data_diff", AppLanguage::En),
             "Compare Data..."
+        );
+        assert_eq!(
+            t("dump_modal.title", AppLanguage::ZhCn),
+            "数据库与数据表转储向导"
+        );
+        assert_eq!(
+            t("dump_modal.title", AppLanguage::En),
+            "Database & Table Dump Wizard"
+        );
+        assert_eq!(
+            t("restore_modal.title", AppLanguage::ZhCn),
+            "SQL 脚本恢复与批量执行器"
+        );
+        assert_eq!(
+            t("restore_modal.title", AppLanguage::En),
+            "SQL Script Restore & Batch Runner"
+        );
+        assert_eq!(
+            t("db_menu.dump_database", AppLanguage::ZhCn),
+            "转储数据库 (SQL)..."
+        );
+        assert_eq!(
+            t("db_menu.restore_database", AppLanguage::En),
+            "Restore from SQL Script..."
         );
     }
 }

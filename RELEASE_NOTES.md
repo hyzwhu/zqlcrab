@@ -5,6 +5,30 @@ Fast, lightweight, GPU-accelerated database desktop client built with Rust & GPU
 ### 📋 Changelog
 
 #### v0.1.7 Release Highlights:
+- 📦 **Database Dump & Multi-Table SQL Backup Wizard (整库与多表 SQL 转储备份向导)**:
+  - **Multi-Dialect Dump Engine**: Generates self-contained, standard `.sql` backup dumps for SQLite, PostgreSQL, and MySQL.
+  - **Flexible Scope Selection**: Support for Full Database / Multi-Table dumps with granular scope control (`Structure & Data`, `Structure Only / DDL`, `Data Only / DML`).
+  - **Dialect-Aware Foreign Key Protections & Atomic Transactions**:
+    - Automatically controls foreign key constraint checks across engines (`PRAGMA foreign_keys = OFF/ON` for SQLite, `SET FOREIGN_KEY_CHECKS = 0/1` for MySQL, `SET CONSTRAINTS ALL DEFERRED` for PostgreSQL).
+    - Configurable transactional wrapping (`BEGIN ... COMMIT`) and optional `DROP TABLE IF EXISTS` generation.
+  - **Chunked & Batched DML Inserts**: Configurable batch insertion sizes (100, 200, 500, 1000 rows per `INSERT INTO`) to prevent query memory overflow and ensure maximum ingestion throughput.
+  - **Versatile Output Destinations**:
+    - Direct export to local `.sql` files via native system file dialogs (`rfd`).
+    - One-click copy to system clipboard with visual toast indicator.
+    - Direct inspection and execution in a dedicated Query Console editor tab (`dump_backup.sql`).
+  - **Pervasive Entry Points**: Accessible from Database Explorer header actions, database item toolbar (`Download` icon), and table context menu ("Dump Table (SQL)..." / "转储表结构与数据 (SQL)...").
+
+- 📥 **SQL Script Restore & Batch Execution Wizard (SQL 脚本恢复与批量执行器)**:
+  - **Intelligent SQL Script Tokenizer & Statement Splitter**: Robust multi-line parser that accurately separates batch SQL statements while ignoring semicolons inside string literals (`'`, `"`, ``` ` ```), escaped quotes (`\'`, `''`), line comments (`--`, `#`), and block comments (`/* ... */`).
+  - **Static Script Inspection & Metrics**: Instant pre-execution analysis displaying statement counts, DDL vs DML breakdown, file size, and statement previews.
+  - **Configurable Fault-Tolerance Policies**:
+    - **Stop on First Error**: Halts execution immediately upon encountering an error to protect data integrity.
+    - **Continue & Log Errors**: Skips failing statements and proceeds with the rest of the batch for maximum recovery.
+  - **Live Progress & Real-Time Audit Log**:
+    - Real-time progress bar with completed percentage, statement counter, and live SQL statement preview.
+    - Live execution audit log with duration benchmarks and formatted error details.
+  - **Integrated Trigger**: Accessible directly from Database Explorer header actions (`Upload` icon / "Restore from SQL...").
+
 - 🔄 **Visual Table Data Diff & Bidirectional Synchronization Wizard (可视化数据对比与双向同步向导)**:
   - **Key-Indexed Row & Cell Discrepancy Matrix**: Side-by-side reconciliation of records between two tables, categorizing discrepancies into `+ ADD`, `- DROP`, `~ MODIFY`, and `= SAME`.
   - **Deep Cell-Level Value Inspector**: Inspects field-by-field differences across all SQL data types (Strings, Integers, Floats, Booleans, Nulls, Timestamps) with visual `source ➔ target` transition pills.

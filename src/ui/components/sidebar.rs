@@ -23,6 +23,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 #[derive(Clone)]
+#[allow(clippy::type_complexity)]
 struct TableActionCallbacks {
     on_select: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_view_schema: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
@@ -33,6 +34,7 @@ struct TableActionCallbacks {
     on_copy_insert: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_import: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_export: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
+    on_dump: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_mock_data: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_schema_diff: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_data_diff: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
@@ -42,6 +44,7 @@ struct TableActionCallbacks {
 }
 
 #[derive(IntoElement)]
+#[allow(clippy::type_complexity)]
 pub struct Sidebar {
     connections: Vec<ConnectionConfig>,
     active_connection_id: Option<String>,
@@ -67,6 +70,9 @@ pub struct Sidebar {
     on_delete_connection: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
     on_import_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_export_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
+    on_dump_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
+    on_dump_database: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
+    on_restore_database: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_mock_data_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_schema_diff_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_data_diff_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
@@ -110,6 +116,9 @@ impl Sidebar {
             on_delete_connection: None,
             on_import_table: None,
             on_export_table: None,
+            on_dump_table: None,
+            on_dump_database: None,
+            on_restore_database: None,
             on_mock_data_table: None,
             on_schema_diff_table: None,
             on_data_diff_table: None,
@@ -183,6 +192,30 @@ impl Sidebar {
         F: Fn(TableInfo, &mut Window, &mut App) + 'static,
     {
         self.on_export_table = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_dump_table<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(TableInfo, &mut Window, &mut App) + 'static,
+    {
+        self.on_dump_table = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_dump_database<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&mut Window, &mut App) + 'static,
+    {
+        self.on_dump_database = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_restore_database<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&mut Window, &mut App) + 'static,
+    {
+        self.on_restore_database = Some(Rc::new(handler));
         self
     }
 
@@ -496,6 +529,19 @@ impl Sidebar {
                 .on_click(move |_, window, cx| {
                     if let Some(ref handler) = export_handler {
                         handler(tbl_export.clone(), window, cx);
+                    }
+                }),
+        );
+
+        // Dump Table (SQL)... / 转储表结构与数据 (SQL)...
+        let dump_handler = actions.on_dump.clone();
+        let tbl_dump = info.clone();
+        menu = menu.item(
+            PopupMenuItem::new(t("table_menu.dump_table", lang))
+                .icon(IconName::Database)
+                .on_click(move |_, window, cx| {
+                    if let Some(ref handler) = dump_handler {
+                        handler(tbl_dump.clone(), window, cx);
                     }
                 }),
         );
@@ -1008,6 +1054,30 @@ impl RenderOnce for Sidebar {
             });
         }
 
+        let mut dump_db_btn = Button::new("db_dump_btn")
+            .ghost()
+            .xsmall()
+            .icon(IconName::Download)
+            .tooltip(t("db_menu.dump_database", self.language));
+        if let Some(ref on_dump) = self.on_dump_database {
+            let on_dump = on_dump.clone();
+            dump_db_btn = dump_db_btn.on_click(move |_, window, cx| {
+                on_dump(window, cx);
+            });
+        }
+
+        let mut restore_db_btn = Button::new("db_restore_btn")
+            .ghost()
+            .xsmall()
+            .icon(IconName::Upload)
+            .tooltip(t("db_menu.restore_database", self.language));
+        if let Some(ref on_restore) = self.on_restore_database {
+            let on_restore = on_restore.clone();
+            restore_db_btn = restore_db_btn.on_click(move |_, window, cx| {
+                on_restore(window, cx);
+            });
+        }
+
         let database_row = h_flex()
             .w_full()
             .px_3()
@@ -1053,16 +1123,22 @@ impl RenderOnce for Sidebar {
                     ),
             )
             .child(
-                h_flex().items_center().gap_1().child(create_tbl_btn).child(
-                    div()
-                        .px_1()
-                        .py_0p5()
-                        .rounded_sm()
-                        .bg(ThemeColors::BG_SURFACE_HOVER)
-                        .text_size(px(10.0))
-                        .text_color(ThemeColors::TEXT_FAINT)
-                        .child(family_label(active_family)),
-                ),
+                h_flex()
+                    .items_center()
+                    .gap_1()
+                    .child(create_tbl_btn)
+                    .child(dump_db_btn)
+                    .child(restore_db_btn)
+                    .child(
+                        div()
+                            .px_1()
+                            .py_0p5()
+                            .rounded_sm()
+                            .bg(ThemeColors::BG_SURFACE_HOVER)
+                            .text_size(px(10.0))
+                            .text_color(ThemeColors::TEXT_FAINT)
+                            .child(family_label(active_family)),
+                    ),
             );
 
         let search_row = h_flex()
@@ -1137,6 +1213,7 @@ impl RenderOnce for Sidebar {
                         on_copy_insert: self.on_copy_insert_template.clone(),
                         on_import: self.on_import_table.clone(),
                         on_export: self.on_export_table.clone(),
+                        on_dump: self.on_dump_table.clone(),
                         on_mock_data: self.on_mock_data_table.clone(),
                         on_schema_diff: self.on_schema_diff_table.clone(),
                         on_data_diff: self.on_data_diff_table.clone(),
