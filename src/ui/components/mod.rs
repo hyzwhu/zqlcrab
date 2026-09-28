@@ -24,6 +24,7 @@ pub mod snippet_edit_modal;
 pub mod snippet_view;
 pub mod sql_review_modal;
 pub mod status_bar;
+pub mod transfer_modal;
 
 pub use activity_bar::{ActivityBar, ActivityNav};
 pub use confirm_dialog::{ConfirmActionKind, ConfirmDialog};
@@ -51,3 +52,4 @@ pub use snippet_edit_modal::SnippetEditModal;
 pub use snippet_view::SnippetView;
 pub use sql_review_modal::SqlReviewModal;
 pub use status_bar::AppStatusBar;
+pub use transfer_modal::{TransferModal, TransferModalStep};

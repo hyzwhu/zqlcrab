@@ -35,6 +35,7 @@ struct TableActionCallbacks {
     on_import: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_export: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_dump: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
+    on_transfer: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_mock_data: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_schema_diff: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_data_diff: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
@@ -71,8 +72,10 @@ pub struct Sidebar {
     on_import_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_export_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_dump_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
+    on_transfer_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_dump_database: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_restore_database: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
+    on_transfer_database: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_mock_data_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_schema_diff_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_data_diff_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
@@ -117,8 +120,10 @@ impl Sidebar {
             on_import_table: None,
             on_export_table: None,
             on_dump_table: None,
+            on_transfer_table: None,
             on_dump_database: None,
             on_restore_database: None,
+            on_transfer_database: None,
             on_mock_data_table: None,
             on_schema_diff_table: None,
             on_data_diff_table: None,
@@ -216,6 +221,22 @@ impl Sidebar {
         F: Fn(&mut Window, &mut App) + 'static,
     {
         self.on_restore_database = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_transfer_database<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&mut Window, &mut App) + 'static,
+    {
+        self.on_transfer_database = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_transfer_table<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(TableInfo, &mut Window, &mut App) + 'static,
+    {
+        self.on_transfer_table = Some(Rc::new(handler));
         self
     }
 
@@ -542,6 +563,19 @@ impl Sidebar {
                 .on_click(move |_, window, cx| {
                     if let Some(ref handler) = dump_handler {
                         handler(tbl_dump.clone(), window, cx);
+                    }
+                }),
+        );
+
+        // Transfer Table... / 传输数据表...
+        let transfer_handler = actions.on_transfer.clone();
+        let tbl_transfer = info.clone();
+        menu = menu.item(
+            PopupMenuItem::new(t("table_menu.transfer_table", lang))
+                .icon(IconName::ArrowRight)
+                .on_click(move |_, window, cx| {
+                    if let Some(ref handler) = transfer_handler {
+                        handler(tbl_transfer.clone(), window, cx);
                     }
                 }),
         );
@@ -1078,6 +1112,18 @@ impl RenderOnce for Sidebar {
             });
         }
 
+        let mut transfer_db_btn = Button::new("db_transfer_btn")
+            .ghost()
+            .xsmall()
+            .icon(IconName::ArrowRight)
+            .tooltip(t("db_menu.transfer_database", self.language));
+        if let Some(ref on_transfer) = self.on_transfer_database {
+            let on_transfer = on_transfer.clone();
+            transfer_db_btn = transfer_db_btn.on_click(move |_, window, cx| {
+                on_transfer(window, cx);
+            });
+        }
+
         let database_row = h_flex()
             .w_full()
             .px_3()
@@ -1129,6 +1175,7 @@ impl RenderOnce for Sidebar {
                     .child(create_tbl_btn)
                     .child(dump_db_btn)
                     .child(restore_db_btn)
+                    .child(transfer_db_btn)
                     .child(
                         div()
                             .px_1()
@@ -1214,6 +1261,7 @@ impl RenderOnce for Sidebar {
                         on_import: self.on_import_table.clone(),
                         on_export: self.on_export_table.clone(),
                         on_dump: self.on_dump_table.clone(),
+                        on_transfer: self.on_transfer_table.clone(),
                         on_mock_data: self.on_mock_data_table.clone(),
                         on_schema_diff: self.on_schema_diff_table.clone(),
                         on_data_diff: self.on_data_diff_table.clone(),

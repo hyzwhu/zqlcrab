@@ -44,6 +44,11 @@ use crate::db::sql_gen::{
     column_matches_index_spec, extract_table_from_sql, generate_alter_table_plan,
     generate_create_table_sql, generate_review_plan, parse_create_table_sql, parse_sql_column_list,
 };
+use crate::db::transfer::{
+    TransferAuditLog, TransferLogLevel, TransferOptions, TransferProgress, TransferScope,
+    TransferSummary, TransferTableMapping, generate_create_table_ddl, generate_drop_table_ddl,
+    generate_foreign_keys_toggle, generate_transfer_batch_insert_sql, generate_truncate_table_ddl,
+};
 use crate::db::types::{
     ColumnInfo, ConnectionConfig, DatabaseFamily, DatabaseType, IndexInfo, QueryResult, QueryValue,
     SortDirection, TableInfo,
@@ -56,7 +61,7 @@ use crate::ui::components::{
     ExportSuccessInfo, ExportWizardStep, ImportModal, ImportWizardStep, KillConfirmModal,
     MockDataModal, MockWizardStep, QueryConsole, QueryHistoryView, QueryTabHeader, RestoreModal,
     RestoreModalStep, SchemaDiffModal, SchemaViewer, SessionsView, SettingsTab, SettingsView,
-    Sidebar, SnippetEditModal, SnippetView, SqlReviewModal,
+    Sidebar, SnippetEditModal, SnippetView, SqlReviewModal, TransferModal, TransferModalStep,
     create_table_modal::{CreateTableColumnState, CreateTableIndexState, CreateTableModal},
     data_grid::GridCellCoord,
     schema_viewer::SchemaEditColumnState,
@@ -454,6 +459,27 @@ pub struct CrabStudioApp {
     restore_logs: Vec<StatementExecutionLog>,
     restore_summary: Option<RestoreSummary>,
     restore_error_msg: Option<String>,
+
+    // Cross-Database Data Transfer Wizard state
+    transfer_modal_open: bool,
+    transfer_step: TransferModalStep,
+    transfer_source_conn_id: Option<String>,
+    transfer_source_conn_name: String,
+    transfer_source_db: Option<String>,
+    transfer_target_conn_id: Option<String>,
+    transfer_target_conn_name: String,
+    transfer_target_db: Option<String>,
+    transfer_available_source_dbs: Vec<String>,
+    transfer_available_target_dbs: Vec<String>,
+    transfer_tables: Vec<TransferTableMapping>,
+    transfer_filter_query: String,
+    transfer_options: TransferOptions,
+    transfer_is_running: bool,
+    transfer_progress: Option<TransferProgress>,
+    transfer_summary: Option<TransferSummary>,
+    transfer_logs: Vec<TransferAuditLog>,
+    transfer_error_msg: Option<String>,
+    transfer_copied: bool,
 
     // Settings state
     settings_manager: SettingsManager,
@@ -909,6 +935,25 @@ impl CrabStudioApp {
             restore_logs: Vec::new(),
             restore_summary: None,
             restore_error_msg: None,
+            transfer_modal_open: false,
+            transfer_step: TransferModalStep::SourceTarget,
+            transfer_source_conn_id: None,
+            transfer_source_conn_name: String::new(),
+            transfer_source_db: None,
+            transfer_target_conn_id: None,
+            transfer_target_conn_name: String::new(),
+            transfer_target_db: None,
+            transfer_available_source_dbs: Vec::new(),
+            transfer_available_target_dbs: Vec::new(),
+            transfer_tables: Vec::new(),
+            transfer_filter_query: String::new(),
+            transfer_options: TransferOptions::default(),
+            transfer_is_running: false,
+            transfer_progress: None,
+            transfer_summary: None,
+            transfer_logs: Vec::new(),
+            transfer_error_msg: None,
+            transfer_copied: false,
             settings_manager,
             active_nav: ActivityNav::Databases,
             active_settings_tab: SettingsTab::Appearance,
@@ -5741,6 +5786,525 @@ impl CrabStudioApp {
         });
     }
 
+    /// Open the Cross-Database Data Transfer Wizard modal
+    pub fn open_transfer_modal(&mut self, initial_table: Option<String>, cx: &mut Context<Self>) {
+        self.transfer_modal_open = true;
+        self.transfer_step = TransferModalStep::SourceTarget;
+        self.transfer_is_running = false;
+        self.transfer_progress = None;
+        self.transfer_summary = None;
+        self.transfer_error_msg = None;
+        self.transfer_copied = false;
+        self.transfer_logs.clear();
+        self.transfer_filter_query.clear();
+
+        // Source connection: default to current active connection if present
+        if let Some(ref conn) = self.active_connection {
+            self.transfer_source_conn_id = Some(conn.id.clone());
+            self.transfer_source_conn_name = conn.config.name.clone();
+            let db_name = if conn.config.database.is_empty() {
+                "default".to_string()
+            } else {
+                conn.config.database.clone()
+            };
+            self.transfer_source_db = Some(db_name.clone());
+            self.transfer_available_source_dbs = vec![db_name];
+        } else if let Some(first_conn) = self.saved_connections.first() {
+            self.transfer_source_conn_id = Some(first_conn.id.clone());
+            self.transfer_source_conn_name = first_conn.name.clone();
+            let db_name = if first_conn.database.is_empty() {
+                "default".to_string()
+            } else {
+                first_conn.database.clone()
+            };
+            self.transfer_source_db = Some(db_name.clone());
+            self.transfer_available_source_dbs = vec![db_name];
+        } else {
+            self.transfer_source_conn_id = None;
+            self.transfer_source_conn_name = String::new();
+            self.transfer_source_db = None;
+            self.transfer_available_source_dbs.clear();
+        }
+
+        // Target connection: default to a different connection if available, else first connection
+        let target_cand = self
+            .saved_connections
+            .iter()
+            .find(|c| Some(&c.id) != self.transfer_source_conn_id.as_ref())
+            .or_else(|| self.saved_connections.first());
+
+        if let Some(target) = target_cand {
+            self.transfer_target_conn_id = Some(target.id.clone());
+            self.transfer_target_conn_name = target.name.clone();
+            let db_name = if target.database.is_empty() {
+                "default".to_string()
+            } else {
+                target.database.clone()
+            };
+            self.transfer_target_db = Some(db_name.clone());
+            self.transfer_available_target_dbs = vec![db_name];
+        } else {
+            self.transfer_target_conn_id = None;
+            self.transfer_target_conn_name = String::new();
+            self.transfer_target_db = None;
+            self.transfer_available_target_dbs.clear();
+        }
+
+        // Populate table mappings from active_tables (non-views)
+        self.transfer_tables = self
+            .active_tables
+            .iter()
+            .filter(|t| !t.is_view())
+            .map(|t| {
+                let mut mapping = TransferTableMapping::new(&t.name);
+                if let Some(ref init) = initial_table {
+                    mapping.selected = &t.name == init;
+                } else {
+                    mapping.selected = true;
+                }
+                mapping
+            })
+            .collect();
+
+        cx.notify();
+    }
+
+    /// Close the Cross-Database Data Transfer Wizard modal
+    pub fn close_transfer_modal(&mut self, cx: &mut Context<Self>) {
+        self.transfer_modal_open = false;
+        self.transfer_is_running = false;
+        cx.notify();
+    }
+
+    /// Start asynchronous Cross-Database Data Transfer execution
+    pub fn start_transfer_execution(&mut self, cx: &mut Context<Self>) {
+        let Some(src_id) = self.transfer_source_conn_id.clone() else {
+            self.transfer_error_msg = Some("Please select a source connection".to_string());
+            cx.notify();
+            return;
+        };
+        let Some(tgt_id) = self.transfer_target_conn_id.clone() else {
+            self.transfer_error_msg = Some("Please select a target connection".to_string());
+            cx.notify();
+            return;
+        };
+
+        let src_config = self
+            .saved_connections
+            .iter()
+            .find(|c| c.id == src_id)
+            .cloned();
+        let tgt_config = self
+            .saved_connections
+            .iter()
+            .find(|c| c.id == tgt_id)
+            .cloned();
+
+        let (Some(src_cfg), Some(tgt_cfg)) = (src_config, tgt_config) else {
+            self.transfer_error_msg = Some("Selected connection configuration not found".to_string());
+            cx.notify();
+            return;
+        };
+
+        let tables_to_transfer: Vec<TransferTableMapping> = self
+            .transfer_tables
+            .iter()
+            .filter(|t| t.selected)
+            .cloned()
+            .collect();
+
+        if tables_to_transfer.is_empty() {
+            self.transfer_error_msg = Some("No tables selected for transfer".to_string());
+            cx.notify();
+            return;
+        }
+
+        self.transfer_step = TransferModalStep::Execution;
+        self.transfer_is_running = true;
+        self.transfer_logs.clear();
+        self.transfer_summary = None;
+        self.transfer_error_msg = None;
+        self.transfer_copied = false;
+
+        let options = self.transfer_options.clone();
+        let active_opt = self.active_connection.clone();
+
+        self.transfer_logs.push(TransferAuditLog::new(
+            TransferLogLevel::Info,
+            format!(
+                "Starting transfer of {} table(s) from [{}] to [{}]",
+                tables_to_transfer.len(),
+                src_cfg.name,
+                tgt_cfg.name
+            ),
+        ));
+
+        let total_tables = tables_to_transfer.len();
+        self.transfer_progress = Some(TransferProgress {
+            current_table_idx: 0,
+            total_tables,
+            current_table_name: tables_to_transfer[0].source_table.clone(),
+            current_table_transferred_rows: 0,
+            current_table_total_rows: 0,
+            total_rows_transferred: 0,
+            total_errors: 0,
+            percentage: 0.0,
+            message: "Connecting to database servers...".to_string(),
+        });
+        cx.notify();
+
+        let _ = cx.spawn(async move |this, cx: &mut AsyncApp| {
+            let start = std::time::Instant::now();
+
+            // Connect or reuse source connection
+            let src_conn = if let Some(ref active) = active_opt && active.id == src_cfg.id {
+                active.clone()
+            } else {
+                let conn = ActiveConnection::new(src_cfg.clone());
+                if let Err(e) = conn.connect().await {
+                    let _ = this.update(cx, |app, cx| {
+                        app.transfer_is_running = false;
+                        app.transfer_error_msg = Some(format!("Failed to connect to source: {e}"));
+                        app.transfer_logs.push(TransferAuditLog::new(
+                            TransferLogLevel::Error,
+                            format!("Source connection failed: {e}"),
+                        ));
+                        cx.notify();
+                    });
+                    return;
+                }
+                conn
+            };
+
+            // Connect or reuse target connection
+            let tgt_conn = if let Some(ref active) = active_opt && active.id == tgt_cfg.id {
+                active.clone()
+            } else {
+                let conn = ActiveConnection::new(tgt_cfg.clone());
+                if let Err(e) = conn.connect().await {
+                    let _ = this.update(cx, |app, cx| {
+                        app.transfer_is_running = false;
+                        app.transfer_error_msg = Some(format!("Failed to connect to target: {e}"));
+                        app.transfer_logs.push(TransferAuditLog::new(
+                            TransferLogLevel::Error,
+                            format!("Target connection failed: {e}"),
+                        ));
+                        cx.notify();
+                    });
+                    return;
+                }
+                conn
+            };
+
+            let src_family = src_cfg.db_type.family();
+            let tgt_family = tgt_cfg.db_type.family();
+
+            let _ = this.update(cx, |app, cx| {
+                app.transfer_logs.push(TransferAuditLog::new(
+                    TransferLogLevel::Info,
+                    format!("Connected successfully. Source dialect: {src_family:?}, Target dialect: {tgt_family:?}"),
+                ));
+                cx.notify();
+            });
+
+            // Disable foreign keys if requested
+            let (disable_fk_sql, enable_fk_sql) = generate_foreign_keys_toggle(tgt_family);
+            if options.disable_foreign_keys && let Some(disable_sql) = disable_fk_sql {
+                let _ = tgt_conn.execute_query(disable_sql).await;
+                let _ = this.update(cx, |app, cx| {
+                    app.transfer_logs.push(TransferAuditLog::new(
+                        TransferLogLevel::Info,
+                        "Disabled target foreign key constraint checks",
+                    ));
+                    cx.notify();
+                });
+            }
+
+            let mut tables_completed = 0;
+            let mut total_rows_transferred = 0;
+            let mut errors_count = 0;
+            let mut aborted_early = false;
+
+            for (idx, mapping) in tables_to_transfer.iter().enumerate() {
+                // Check if user requested abort
+                let is_running = this.read_with(cx, |app, _| app.transfer_is_running).unwrap_or(false);
+                if !is_running {
+                    aborted_early = true;
+                    break;
+                }
+
+                let percent = (idx as f32 / total_tables as f32) * 100.0;
+                let _ = this.update(cx, |app, cx| {
+                    if let Some(ref mut p) = app.transfer_progress {
+                        p.current_table_idx = idx;
+                        p.current_table_name = mapping.source_table.clone();
+                        p.percentage = percent;
+                        p.message = format!("Processing table {}/{}...", idx + 1, total_tables);
+                    }
+                    app.transfer_logs.push(TransferAuditLog::new(
+                        TransferLogLevel::Info,
+                        format!("--> [{}/{}] Transferring table `{}` -> `{}` (Scope: {})", idx + 1, total_tables, mapping.source_table, mapping.target_table, mapping.scope.display_name()),
+                    ));
+                    cx.notify();
+                });
+
+                // 1. Structure (DDL) Phase
+                if mapping.scope == TransferScope::StructureAndData || mapping.scope == TransferScope::StructureOnly {
+                    // Fetch source table columns
+                    let cols_res = src_conn.list_columns(None, None, &mapping.source_table).await;
+                    let cols = match cols_res {
+                        Ok(c) => c,
+                        Err(e) => {
+                            errors_count += 1;
+                            let _ = this.update(cx, |app, cx| {
+                                app.transfer_logs.push(TransferAuditLog::new(
+                                    TransferLogLevel::Error,
+                                    format!("Failed to read schema of {}: {e}", mapping.source_table),
+                                ));
+                                cx.notify();
+                            });
+                            if !options.continue_on_error {
+                                aborted_early = true;
+                                break;
+                            }
+                            continue;
+                        }
+                    };
+
+                    let pks: Vec<String> = cols
+                        .iter()
+                        .filter(|c| c.is_primary_key)
+                        .map(|c| c.name.clone())
+                        .collect();
+
+                    // Drop target if exists
+                    if options.drop_target_if_exists {
+                        let drop_ddl = generate_drop_table_ddl(&mapping.target_table, tgt_family);
+                        let _ = tgt_conn.execute_query(&drop_ddl).await;
+                        let _ = this.update(cx, |app, cx| {
+                            app.transfer_logs.push(TransferAuditLog::new(
+                                TransferLogLevel::Ddl,
+                                format!("Dropped target table `{}` (if existed)", mapping.target_table),
+                            ));
+                            cx.notify();
+                        });
+                    }
+
+                    // Create target table
+                    if options.create_target_if_not_exists {
+                        let create_ddl = generate_create_table_ddl(
+                            &mapping.target_table,
+                            &cols,
+                            &pks,
+                            src_family,
+                            tgt_family,
+                            true,
+                        );
+                        if let Err(e) = tgt_conn.execute_query(&create_ddl).await {
+                            errors_count += 1;
+                            let _ = this.update(cx, |app, cx| {
+                                app.transfer_logs.push(TransferAuditLog::new(
+                                    TransferLogLevel::Error,
+                                    format!("Failed to create table `{}`: {e}", mapping.target_table),
+                                ));
+                                cx.notify();
+                            });
+                            if !options.continue_on_error {
+                                aborted_early = true;
+                                break;
+                            }
+                            continue;
+                        } else {
+                            let _ = this.update(cx, |app, cx| {
+                                app.transfer_logs.push(TransferAuditLog::new(
+                                    TransferLogLevel::Ddl,
+                                    format!("Created target table `{}` ({} columns)", mapping.target_table, cols.len()),
+                                ));
+                                cx.notify();
+                            });
+                        }
+                    }
+                }
+
+                // 2. Data (DML) Phase
+                if mapping.scope == TransferScope::StructureAndData || mapping.scope == TransferScope::DataOnly {
+                    // Truncate target first if option enabled
+                    if options.truncate_target_first {
+                        let trunc_ddl = generate_truncate_table_ddl(&mapping.target_table, tgt_family);
+                        let _ = tgt_conn.execute_query(&trunc_ddl).await;
+                        let _ = this.update(cx, |app, cx| {
+                            app.transfer_logs.push(TransferAuditLog::new(
+                                TransferLogLevel::Ddl,
+                                format!("Truncated target table `{}`", mapping.target_table),
+                            ));
+                            cx.notify();
+                        });
+                    }
+
+                    // Query all rows from source table
+                    let q_sql = format!(
+                        "SELECT * FROM {};",
+                        crate::db::types::quote_ident(&mapping.source_table, src_family)
+                    );
+                    let q_res = src_conn.execute_query(&q_sql).await;
+                    let table_data = match q_res {
+                        Ok(data) => data,
+                        Err(e) => {
+                            errors_count += 1;
+                            let _ = this.update(cx, |app, cx| {
+                                app.transfer_logs.push(TransferAuditLog::new(
+                                    TransferLogLevel::Error,
+                                    format!("Failed to read data from `{}`: {e}", mapping.source_table),
+                                ));
+                                cx.notify();
+                            });
+                            if !options.continue_on_error {
+                                aborted_early = true;
+                                break;
+                            }
+                            continue;
+                        }
+                    };
+
+                    let row_count = table_data.rows.len();
+                    let cols_list = table_data.columns.clone();
+
+                    if row_count == 0 {
+                        let _ = this.update(cx, |app, cx| {
+                            app.transfer_logs.push(TransferAuditLog::new(
+                                TransferLogLevel::Info,
+                                format!("Table `{}` is empty (0 rows)", mapping.source_table),
+                            ));
+                            cx.notify();
+                        });
+                    } else {
+                        let mut table_rows_inserted = 0;
+                        let batch_size = options.batch_size.max(10);
+
+                        for chunk in table_data.rows.chunks(batch_size) {
+                            // Check for abort between chunks
+                            let running = this.read_with(cx, |app, _| app.transfer_is_running).unwrap_or(false);
+                            if !running {
+                                aborted_early = true;
+                                break;
+                            }
+
+                            let insert_sql = generate_transfer_batch_insert_sql(
+                                &mapping.target_table,
+                                &cols_list,
+                                chunk,
+                                tgt_family,
+                            );
+
+                            let exec_sql = if options.wrap_in_transaction {
+                                format!("BEGIN;\n{insert_sql}\nCOMMIT;")
+                            } else {
+                                insert_sql
+                            };
+
+                            if let Err(e) = tgt_conn.execute_query(&exec_sql).await {
+                                errors_count += 1;
+                                let _ = this.update(cx, |app, cx| {
+                                    app.transfer_logs.push(TransferAuditLog::new(
+                                        TransferLogLevel::Error,
+                                        format!("Failed to insert batch of {} rows into `{}`: {e}", chunk.len(), mapping.target_table),
+                                    ));
+                                    cx.notify();
+                                });
+                                if !options.continue_on_error {
+                                    aborted_early = true;
+                                    break;
+                                }
+                            } else {
+                                table_rows_inserted += chunk.len();
+                                total_rows_transferred += chunk.len();
+
+                                let cur_total = total_rows_transferred;
+                                let cur_tbl_trans = table_rows_inserted;
+                                let tbl_name = mapping.source_table.clone();
+                                let _ = this.update(cx, |app, cx| {
+                                    if let Some(ref mut p) = app.transfer_progress {
+                                        p.current_table_transferred_rows = cur_tbl_trans;
+                                        p.current_table_total_rows = row_count;
+                                        p.total_rows_transferred = cur_total;
+                                        p.message = format!(
+                                            "Inserting `{tbl_name}` ({cur_tbl_trans}/{row_count} rows)..."
+                                        );
+                                    }
+                                    cx.notify();
+                                });
+                            }
+                        }
+
+                        if aborted_early {
+                            break;
+                        }
+
+                        let _ = this.update(cx, |app, cx| {
+                            app.transfer_logs.push(TransferAuditLog::new(
+                                TransferLogLevel::Success,
+                                format!("Transferred {table_rows_inserted}/{row_count} rows into `{}`", mapping.target_table),
+                            ));
+                            cx.notify();
+                        });
+                    }
+                }
+
+                tables_completed += 1;
+            }
+
+            // Restore foreign keys
+            if options.disable_foreign_keys && let Some(enable_sql) = enable_fk_sql {
+                let _ = tgt_conn.execute_query(enable_sql).await;
+                let _ = this.update(cx, |app, cx| {
+                    app.transfer_logs.push(TransferAuditLog::new(
+                        TransferLogLevel::Info,
+                        "Re-enabled target foreign key constraint checks",
+                    ));
+                    cx.notify();
+                });
+            }
+
+            let duration_ms = start.elapsed().as_millis();
+            let is_success = errors_count == 0 && !aborted_early;
+
+            let _ = this.update(cx, |app, cx| {
+                app.transfer_is_running = false;
+                app.transfer_summary = Some(TransferSummary {
+                    tables_completed,
+                    tables_total: total_tables,
+                    rows_transferred: total_rows_transferred,
+                    errors_count,
+                    duration_ms,
+                    is_success,
+                    aborted_early,
+                });
+                if let Some(ref mut p) = app.transfer_progress {
+                    p.percentage = 100.0;
+                    p.message = if is_success {
+                        "Transfer completed successfully!".to_string()
+                    } else if aborted_early {
+                        "Transfer aborted.".to_string()
+                    } else {
+                        format!("Transfer completed with {errors_count} error(s).")
+                    };
+                }
+                app.transfer_logs.push(TransferAuditLog::new(
+                    if is_success { TransferLogLevel::Success } else { TransferLogLevel::Warn },
+                    format!(
+                        "Transfer process ended. Tables: {}/{}, Rows: {}, Errors: {}, Time: {:.2}s",
+                        tables_completed, total_tables, total_rows_transferred, errors_count, duration_ms as f64 / 1000.0
+                    ),
+                ));
+                app.status_message = Some(format!(
+                    "Transfer finished: {} table(s), {} row(s) in {:.2}s",
+                    tables_completed, total_rows_transferred, duration_ms as f64 / 1000.0
+                ));
+                cx.notify();
+            });
+        });
+    }
+
     /// Open modal to create a new SQL snippet
     pub fn open_new_snippet_modal(
         &mut self,
@@ -6853,6 +7417,22 @@ impl Render for CrabStudioApp {
             move |_, cx| {
                 handle.update(cx, |this, cx| {
                     this.open_restore_modal(cx);
+                });
+            }
+        })
+        .on_transfer_database({
+            let handle = app_handle.clone();
+            move |_, cx| {
+                handle.update(cx, |this, cx| {
+                    this.open_transfer_modal(None, cx);
+                });
+            }
+        })
+        .on_transfer_table({
+            let handle = app_handle.clone();
+            move |table, _, cx| {
+                handle.update(cx, |this, cx| {
+                    this.open_transfer_modal(Some(table.name), cx);
                 });
             }
         })
@@ -9532,6 +10112,296 @@ impl Render for CrabStudioApp {
             None
         };
 
+        // Cross-Database Data Transfer Modal Overlay
+        let transfer_overlay = if self.transfer_modal_open {
+            let on_step = {
+                let handle = app_handle.clone();
+                move |step: TransferModalStep, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.transfer_step = step;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_src_conn = {
+                let handle = app_handle.clone();
+                move |cid: String, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.transfer_source_conn_id = Some(cid.clone());
+                        if let Some(c) = this.saved_connections.iter().find(|x| x.id == cid) {
+                            this.transfer_source_conn_name = c.name.clone();
+                            let db = if c.database.is_empty() {
+                                "default".to_string()
+                            } else {
+                                c.database.clone()
+                            };
+                            this.transfer_source_db = Some(db.clone());
+                            this.transfer_available_source_dbs = vec![db];
+                        }
+                        cx.notify();
+                    });
+                }
+            };
+            let on_src_db = {
+                let handle = app_handle.clone();
+                move |db: String, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.transfer_source_db = Some(db);
+                        cx.notify();
+                    });
+                }
+            };
+            let on_tgt_conn = {
+                let handle = app_handle.clone();
+                move |cid: String, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.transfer_target_conn_id = Some(cid.clone());
+                        if let Some(c) = this.saved_connections.iter().find(|x| x.id == cid) {
+                            this.transfer_target_conn_name = c.name.clone();
+                            let db = if c.database.is_empty() {
+                                "default".to_string()
+                            } else {
+                                c.database.clone()
+                            };
+                            this.transfer_target_db = Some(db.clone());
+                            this.transfer_available_target_dbs = vec![db];
+                        }
+                        cx.notify();
+                    });
+                }
+            };
+            let on_tgt_db = {
+                let handle = app_handle.clone();
+                move |db: String, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.transfer_target_db = Some(db);
+                        cx.notify();
+                    });
+                }
+            };
+            let on_toggle_tbl = {
+                let handle = app_handle.clone();
+                move |idx: usize, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        if let Some(tbl) = this.transfer_tables.get_mut(idx) {
+                            tbl.selected = !tbl.selected;
+                            cx.notify();
+                        }
+                    });
+                }
+            };
+            let on_cycle_scope = {
+                let handle = app_handle.clone();
+                move |idx: usize, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        if let Some(tbl) = this.transfer_tables.get_mut(idx) {
+                            tbl.scope = match tbl.scope {
+                                TransferScope::StructureAndData => TransferScope::StructureOnly,
+                                TransferScope::StructureOnly => TransferScope::DataOnly,
+                                TransferScope::DataOnly => TransferScope::StructureAndData,
+                            };
+                            cx.notify();
+                        }
+                    });
+                }
+            };
+            let on_sel_all = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        for t in &mut this.transfer_tables {
+                            t.selected = true;
+                        }
+                        cx.notify();
+                    });
+                }
+            };
+            let on_desel_all = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        for t in &mut this.transfer_tables {
+                            t.selected = false;
+                        }
+                        cx.notify();
+                    });
+                }
+            };
+            let on_set_scopes = {
+                let handle = app_handle.clone();
+                move |scope: TransferScope, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        for t in &mut this.transfer_tables {
+                            t.scope = scope;
+                        }
+                        cx.notify();
+                    });
+                }
+            };
+            let on_drop = {
+                let handle = app_handle.clone();
+                move |val: bool, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.transfer_options.drop_target_if_exists = val;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_create = {
+                let handle = app_handle.clone();
+                move |val: bool, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.transfer_options.create_target_if_not_exists = val;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_truncate = {
+                let handle = app_handle.clone();
+                move |val: bool, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.transfer_options.truncate_target_first = val;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_fk = {
+                let handle = app_handle.clone();
+                move |val: bool, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.transfer_options.disable_foreign_keys = val;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_tx = {
+                let handle = app_handle.clone();
+                move |val: bool, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.transfer_options.wrap_in_transaction = val;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_cont = {
+                let handle = app_handle.clone();
+                move |val: bool, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.transfer_options.continue_on_error = val;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_batch = {
+                let handle = app_handle.clone();
+                move |size: usize, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.transfer_options.batch_size = size;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_start = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.start_transfer_execution(cx);
+                    });
+                }
+            };
+            let on_abort = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.transfer_is_running = false;
+                        this.transfer_logs.push(TransferAuditLog::new(
+                            TransferLogLevel::Warn,
+                            "Transfer aborted by user",
+                        ));
+                        cx.notify();
+                    });
+                }
+            };
+            let on_copy = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        let text = this
+                            .transfer_logs
+                            .iter()
+                            .map(|l| format!("{} {:?}: {}", l.timestamp, l.level, l.message))
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        cx.write_to_clipboard(ClipboardItem::new_string(text));
+                        this.transfer_copied = true;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_close = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.close_transfer_modal(cx);
+                    });
+                }
+            };
+
+            let conns_list: Vec<(String, String)> = self
+                .saved_connections
+                .iter()
+                .map(|c| (c.id.clone(), c.name.clone()))
+                .collect();
+
+            Some(
+                TransferModal::new(
+                    self.transfer_step,
+                    self.transfer_source_conn_id.clone(),
+                    self.transfer_source_conn_name.clone(),
+                    self.transfer_source_db.clone(),
+                    self.transfer_target_conn_id.clone(),
+                    self.transfer_target_conn_name.clone(),
+                    self.transfer_target_db.clone(),
+                    conns_list,
+                    self.transfer_available_source_dbs.clone(),
+                    self.transfer_available_target_dbs.clone(),
+                    self.transfer_tables.clone(),
+                    self.transfer_filter_query.clone(),
+                    self.transfer_options.clone(),
+                    self.transfer_is_running,
+                    self.transfer_progress.clone(),
+                    self.transfer_summary.clone(),
+                    self.transfer_logs.clone(),
+                    self.transfer_error_msg.clone(),
+                    self.transfer_copied,
+                    self.settings_manager.settings().language,
+                )
+                .on_step_change(on_step)
+                .on_select_source_conn(on_src_conn)
+                .on_select_source_db(on_src_db)
+                .on_select_target_conn(on_tgt_conn)
+                .on_select_target_db(on_tgt_db)
+                .on_toggle_table(on_toggle_tbl)
+                .on_cycle_table_scope(on_cycle_scope)
+                .on_select_all(on_sel_all)
+                .on_deselect_all(on_desel_all)
+                .on_set_all_scopes(on_set_scopes)
+                .on_toggle_drop_target(on_drop)
+                .on_toggle_create_target(on_create)
+                .on_toggle_truncate_target(on_truncate)
+                .on_toggle_disable_fk(on_fk)
+                .on_toggle_transaction(on_tx)
+                .on_toggle_continue_error(on_cont)
+                .on_change_batch_size(on_batch)
+                .on_start_transfer(on_start)
+                .on_abort_transfer(on_abort)
+                .on_copy_logs(on_copy)
+                .on_close(on_close),
+            )
+        } else {
+            None
+        };
+
         // Settings View component
         let settings_view = SettingsView::new(
             self.settings_manager.settings().clone(),
@@ -9667,7 +10537,9 @@ impl Render for CrabStudioApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &CloseDialog, _, cx| {
-                if this.restore_modal_open {
+                if this.transfer_modal_open {
+                    this.close_transfer_modal(cx);
+                } else if this.restore_modal_open {
                     this.close_restore_modal(cx);
                 } else if this.dump_modal_open {
                     this.close_dump_modal(cx);
@@ -9707,7 +10579,9 @@ impl Render for CrabStudioApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
-                if this.restore_modal_open {
+                if this.transfer_modal_open {
+                    this.close_transfer_modal(cx);
+                } else if this.restore_modal_open {
                     this.close_restore_modal(cx);
                 } else if this.dump_modal_open {
                     this.close_dump_modal(cx);
@@ -9905,5 +10779,6 @@ impl Render for CrabStudioApp {
             .children(kill_confirm_overlay)
             .children(dump_overlay)
             .children(restore_overlay)
+            .children(transfer_overlay)
     }
 }

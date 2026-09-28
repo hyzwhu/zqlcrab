@@ -424,6 +424,49 @@ fn translate_en(key: &'static str) -> &'static str {
         "restore_modal.success_count" => "Succeeded",
         "restore_modal.failed_count" => "Failed",
 
+        // Data Transfer Wizard
+        "db_menu.transfer_database" => "Data Transfer Wizard...",
+        "table_menu.transfer_table" => "Transfer Table...",
+        "transfer_modal.title" => "Cross-Database Data Transfer Wizard",
+        "transfer_modal.subtitle" => "Transfer table schemas and records across databases and connections with live audit",
+        "transfer_modal.step_source_target" => "1. Source & Target",
+        "transfer_modal.step_tables" => "2. Tables & Mapping",
+        "transfer_modal.step_options" => "3. Options",
+        "transfer_modal.step_execution" => "4. Execution",
+        "transfer_modal.source_conn" => "Source Connection",
+        "transfer_modal.source_db" => "Source Database",
+        "transfer_modal.target_conn" => "Target Connection",
+        "transfer_modal.target_db" => "Target Database",
+        "transfer_modal.filter_tables_placeholder" => "Filter tables...",
+        "transfer_modal.select_all" => "Select All",
+        "transfer_modal.deselect_all" => "Deselect All",
+        "transfer_modal.scope_all_full" => "All: Struct + Data",
+        "transfer_modal.scope_all_schema" => "All: Struct Only",
+        "transfer_modal.scope_all_data" => "All: Data Only",
+        "transfer_modal.scope_full" => "Structure & Data",
+        "transfer_modal.scope_schema" => "Structure Only",
+        "transfer_modal.scope_data" => "Data Only",
+        "transfer_modal.opt_drop_target" => "Drop target table if exists",
+        "transfer_modal.opt_create_target" => "Create target table if not exists",
+        "transfer_modal.opt_truncate_target" => "Truncate target table before insert",
+        "transfer_modal.opt_batch_size" => "Batch Insert Size",
+        "transfer_modal.opt_disable_fk" => "Disable foreign key checks during transfer",
+        "transfer_modal.opt_transaction" => "Wrap batch inserts in transaction",
+        "transfer_modal.opt_continue_error" => "Continue on error & log failures",
+        "transfer_modal.btn_transfer" => "Start Transfer",
+        "transfer_modal.transferring" => "Transferring data...",
+        "transfer_modal.abort_transfer" => "Abort Transfer",
+        "transfer_modal.completed" => "Data Transfer Completed",
+        "transfer_modal.aborted" => "Transfer Aborted",
+        "transfer_modal.summary_tables" => "Tables Completed",
+        "transfer_modal.summary_rows" => "Rows Transferred",
+        "transfer_modal.summary_errors" => "Errors Encountered",
+        "transfer_modal.summary_time" => "Total Duration",
+        "transfer_modal.copy_logs" => "Copy Audit Log",
+        "transfer_modal.logs_copied" => "Audit Log Copied!",
+        "transfer_modal.no_tables" => "No tables selected for transfer",
+        "transfer_modal.same_source_target_warning" => "Source and target database cannot be identical",
+
         // Fallback
         _ => key,
     }
@@ -826,6 +869,49 @@ fn translate_zh(key: &'static str) -> &'static str {
         "restore_modal.success_count" => "成功执行",
         "restore_modal.failed_count" => "执行失败",
 
+        // Data Transfer Wizard
+        "db_menu.transfer_database" => "数据传输与迁移向导...",
+        "table_menu.transfer_table" => "传输数据表...",
+        "transfer_modal.title" => "跨库数据传输与迁移向导",
+        "transfer_modal.subtitle" => "在不同数据库或连接间迁移表结构与数据，支持方言类型转换与实时审计",
+        "transfer_modal.step_source_target" => "1. 源与目标配置",
+        "transfer_modal.step_tables" => "2. 表映射与范围",
+        "transfer_modal.step_options" => "3. 传输配置选项",
+        "transfer_modal.step_execution" => "4. 执行与日志",
+        "transfer_modal.source_conn" => "源数据库连接",
+        "transfer_modal.source_db" => "源数据库",
+        "transfer_modal.target_conn" => "目标数据库连接",
+        "transfer_modal.target_db" => "目标数据库",
+        "transfer_modal.filter_tables_placeholder" => "过滤搜索表名...",
+        "transfer_modal.select_all" => "全选",
+        "transfer_modal.deselect_all" => "取消全选",
+        "transfer_modal.scope_all_full" => "全部：结构+数据",
+        "transfer_modal.scope_all_schema" => "全部：仅结构",
+        "transfer_modal.scope_all_data" => "全部：仅数据",
+        "transfer_modal.scope_full" => "结构与数据",
+        "transfer_modal.scope_schema" => "仅传输结构",
+        "transfer_modal.scope_data" => "仅传输数据",
+        "transfer_modal.opt_drop_target" => "如果目标表已存在则先删除 (DROP)",
+        "transfer_modal.opt_create_target" => "如果目标表不存在则自动创建 (CREATE)",
+        "transfer_modal.opt_truncate_target" => "写入数据前先清空目标表 (TRUNCATE)",
+        "transfer_modal.opt_batch_size" => "批量写入分块大小",
+        "transfer_modal.opt_disable_fk" => "传输期间临时禁用外键约束检查",
+        "transfer_modal.opt_transaction" => "使用事务包裹批量写入",
+        "transfer_modal.opt_continue_error" => "遇到错误跳过并记录日志",
+        "transfer_modal.btn_transfer" => "开始数据传输",
+        "transfer_modal.transferring" => "正在执行数据传输...",
+        "transfer_modal.abort_transfer" => "终止传输",
+        "transfer_modal.completed" => "数据传输顺利完成",
+        "transfer_modal.aborted" => "数据传输已终止",
+        "transfer_modal.summary_tables" => "已完成表数",
+        "transfer_modal.summary_rows" => "已传输数据行",
+        "transfer_modal.summary_errors" => "异常错误数",
+        "transfer_modal.summary_time" => "总耗时",
+        "transfer_modal.copy_logs" => "复制审计日志",
+        "transfer_modal.logs_copied" => "审计日志已复制！",
+        "transfer_modal.no_tables" => "未选中任何需要传输的数据表",
+        "transfer_modal.same_source_target_warning" => "源数据库与目标数据库不能完全相同",
+
         // Fallback
         _ => translate_en(key),
     }
@@ -937,6 +1023,22 @@ mod tests {
         assert_eq!(
             t("db_menu.restore_database", AppLanguage::En),
             "Restore from SQL Script..."
+        );
+        assert_eq!(
+            t("transfer_modal.title", AppLanguage::ZhCn),
+            "跨库数据传输与迁移向导"
+        );
+        assert_eq!(
+            t("transfer_modal.title", AppLanguage::En),
+            "Cross-Database Data Transfer Wizard"
+        );
+        assert_eq!(
+            t("db_menu.transfer_database", AppLanguage::ZhCn),
+            "数据传输与迁移向导..."
+        );
+        assert_eq!(
+            t("db_menu.transfer_database", AppLanguage::En),
+            "Data Transfer Wizard..."
         );
     }
 }
