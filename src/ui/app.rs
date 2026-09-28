@@ -18,6 +18,10 @@ use crate::db::mock_data::{
     MockColumnConfig, MockGeneratorType, MockProgress, MockResult, execute_mock_seeding,
     generate_mock_preview, initialize_column_configs,
 };
+use crate::db::schema_diff::{
+    MigrationDirection, MigrationScript, SchemaDiffOptions, SchemaDiffReport, compare_tables,
+    generate_migration_ddl,
+};
 use crate::db::session_monitor::{
     KillAction, SessionInfo, build_kill_sql, build_session_list_sql, parse_session_list,
 };
@@ -35,10 +39,11 @@ use crate::db::types::{
 use crate::settings::{SettingsManager, ThemePreference};
 use crate::ui::components::{
     ActivityBar, ActivityNav, AppStatusBar, ConfirmActionKind, ConfirmDialog, ConnectionDialog,
-    ConsoleBottomTab, DataGrid, ExplainViewMode, ExportDestination, ExportModal, ExportSuccessInfo,
-    ExportWizardStep, ImportModal, ImportWizardStep, KillConfirmModal, MockDataModal,
-    MockWizardStep, QueryConsole, QueryHistoryView, QueryTabHeader, SchemaViewer, SessionsView,
-    SettingsTab, SettingsView, Sidebar, SnippetEditModal, SnippetView, SqlReviewModal,
+    ConsoleBottomTab, DataGrid, DiffFilterTab, ExplainViewMode, ExportDestination, ExportModal,
+    ExportSuccessInfo, ExportWizardStep, ImportModal, ImportWizardStep, KillConfirmModal,
+    MockDataModal, MockWizardStep, QueryConsole, QueryHistoryView, QueryTabHeader, SchemaDiffModal,
+    SchemaViewer, SessionsView, SettingsTab, SettingsView, Sidebar, SnippetEditModal, SnippetView,
+    SqlReviewModal,
     create_table_modal::{CreateTableColumnState, CreateTableIndexState, CreateTableModal},
     data_grid::GridCellCoord,
     schema_viewer::SchemaEditColumnState,
@@ -369,6 +374,21 @@ pub struct CrabStudioApp {
     sessions_auto_refresh_secs: u32,
     sessions_is_refreshing: bool,
     kill_confirm_modal: Option<(SessionInfo, KillAction, String)>,
+
+    // Visual Schema Diff & Migration Script Generator state
+    schema_diff_modal_open: bool,
+    schema_diff_source_table: String,
+    schema_diff_target_table: String,
+    schema_diff_available_tables: Vec<String>,
+    schema_diff_source_cols: Vec<ColumnInfo>,
+    schema_diff_source_indexes: Vec<IndexInfo>,
+    schema_diff_target_cols: Vec<ColumnInfo>,
+    schema_diff_target_indexes: Vec<IndexInfo>,
+    schema_diff_options: SchemaDiffOptions,
+    schema_diff_filter_tab: DiffFilterTab,
+    schema_diff_copied: bool,
+    schema_diff_report: SchemaDiffReport,
+    schema_diff_script: MigrationScript,
 
     // Settings state
     settings_manager: SettingsManager,
@@ -756,6 +776,19 @@ impl CrabStudioApp {
             sessions_auto_refresh_secs: 0,
             sessions_is_refreshing: false,
             kill_confirm_modal: None,
+            schema_diff_modal_open: false,
+            schema_diff_source_table: String::new(),
+            schema_diff_target_table: String::new(),
+            schema_diff_available_tables: Vec::new(),
+            schema_diff_source_cols: Vec::new(),
+            schema_diff_source_indexes: Vec::new(),
+            schema_diff_target_cols: Vec::new(),
+            schema_diff_target_indexes: Vec::new(),
+            schema_diff_options: SchemaDiffOptions::default(),
+            schema_diff_filter_tab: DiffFilterTab::DifferencesOnly,
+            schema_diff_copied: false,
+            schema_diff_report: SchemaDiffReport::default(),
+            schema_diff_script: MigrationScript::default(),
             settings_manager,
             active_nav: ActivityNav::Databases,
             active_settings_tab: SettingsTab::Appearance,
@@ -4643,6 +4676,193 @@ impl CrabStudioApp {
         .detach();
     }
 
+    /// Open the Schema Diff & Migration Wizard modal
+    pub fn open_schema_diff(&mut self, source_table: Option<String>, cx: &mut Context<Self>) {
+        self.schema_diff_modal_open = true;
+        self.schema_diff_copied = false;
+        self.schema_diff_filter_tab = DiffFilterTab::DifferencesOnly;
+
+        self.schema_diff_available_tables = self
+            .active_tables
+            .iter()
+            .filter(|t| !t.is_view())
+            .map(|t| t.name.clone())
+            .collect();
+
+        if self.schema_diff_available_tables.is_empty() {
+            if let Some(ref st) = source_table {
+                self.schema_diff_available_tables.push(st.clone());
+            }
+        }
+
+        let src = source_table
+            .or_else(|| self.selected_table.clone())
+            .or_else(|| self.schema_diff_available_tables.first().cloned())
+            .unwrap_or_default();
+
+        let tgt = self
+            .schema_diff_available_tables
+            .iter()
+            .find(|t| *t != &src)
+            .cloned()
+            .unwrap_or_else(|| src.clone());
+
+        self.schema_diff_source_table = src.clone();
+        self.schema_diff_target_table = tgt.clone();
+        self.schema_diff_source_cols.clear();
+        self.schema_diff_source_indexes.clear();
+        self.schema_diff_target_cols.clear();
+        self.schema_diff_target_indexes.clear();
+
+        // Check if selected table schema is already cached
+        if self.selected_table.as_deref() == Some(&src) && !self.schema_columns.is_empty() {
+            self.schema_diff_source_cols = self.schema_columns.clone();
+            self.schema_diff_source_indexes = self.schema_indexes.clone();
+        }
+
+        self.recalculate_schema_diff(cx);
+
+        // Fetch fresh metadata for both tables
+        if !src.is_empty() {
+            self.load_diff_table_metadata(true, src, cx);
+        }
+        if !tgt.is_empty() && tgt != self.schema_diff_source_table {
+            self.load_diff_table_metadata(false, tgt, cx);
+        }
+    }
+
+    /// Close the Schema Diff modal
+    pub fn close_schema_diff(&mut self, cx: &mut Context<Self>) {
+        self.schema_diff_modal_open = false;
+        self.schema_diff_copied = false;
+        cx.notify();
+    }
+
+    /// Select a new source table in the schema diff wizard
+    pub fn select_diff_source_table(&mut self, source: String, cx: &mut Context<Self>) {
+        self.schema_diff_source_table = source.clone();
+        self.schema_diff_source_cols.clear();
+        self.schema_diff_source_indexes.clear();
+        if self.selected_table.as_deref() == Some(&source) && !self.schema_columns.is_empty() {
+            self.schema_diff_source_cols = self.schema_columns.clone();
+            self.schema_diff_source_indexes = self.schema_indexes.clone();
+        }
+        self.recalculate_schema_diff(cx);
+        self.load_diff_table_metadata(true, source, cx);
+    }
+
+    /// Select a new target table in the schema diff wizard
+    pub fn select_diff_target_table(&mut self, target: String, cx: &mut Context<Self>) {
+        self.schema_diff_target_table = target.clone();
+        self.schema_diff_target_cols.clear();
+        self.schema_diff_target_indexes.clear();
+        if self.selected_table.as_deref() == Some(&target) && !self.schema_columns.is_empty() {
+            self.schema_diff_target_cols = self.schema_columns.clone();
+            self.schema_diff_target_indexes = self.schema_indexes.clone();
+        }
+        self.recalculate_schema_diff(cx);
+        self.load_diff_table_metadata(false, target, cx);
+    }
+
+    /// Swap source and target tables
+    pub fn swap_diff_tables(&mut self, cx: &mut Context<Self>) {
+        std::mem::swap(
+            &mut self.schema_diff_source_table,
+            &mut self.schema_diff_target_table,
+        );
+        std::mem::swap(
+            &mut self.schema_diff_source_cols,
+            &mut self.schema_diff_target_cols,
+        );
+        std::mem::swap(
+            &mut self.schema_diff_source_indexes,
+            &mut self.schema_diff_target_indexes,
+        );
+        self.recalculate_schema_diff(cx);
+    }
+
+    /// Recalculate diff report and migration script based on current tables and options
+    pub fn recalculate_schema_diff(&mut self, cx: &mut Context<Self>) {
+        let family = self
+            .active_connection
+            .as_ref()
+            .map(|c| c.config.db_type.family())
+            .unwrap_or(DatabaseFamily::Sqlite);
+        self.schema_diff_report = compare_tables(
+            &self.schema_diff_source_table,
+            None,
+            &self.schema_diff_source_cols,
+            &self.schema_diff_source_indexes,
+            &self.schema_diff_target_table,
+            None,
+            &self.schema_diff_target_cols,
+            &self.schema_diff_target_indexes,
+            family,
+        );
+        self.schema_diff_script =
+            generate_migration_ddl(&self.schema_diff_report, &self.schema_diff_options);
+        cx.notify();
+    }
+
+    /// Load columns and indexes asynchronously for a table in the diff wizard
+    pub fn load_diff_table_metadata(
+        &mut self,
+        is_source: bool,
+        table_name: String,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(conn) = self.active_connection.clone() else {
+            return;
+        };
+
+        let tbl = table_name.clone();
+        let table_info = self.active_tables.iter().find(|t| t.name == tbl).cloned();
+        let schema = table_info.as_ref().and_then(|t| t.schema.clone());
+
+        cx.spawn(async move |this, cx: &mut AsyncApp| {
+            let cols = conn
+                .list_columns(None, schema.as_deref(), &tbl)
+                .await
+                .unwrap_or_default();
+            let indexes = conn
+                .list_indexes(None, schema.as_deref(), &tbl)
+                .await
+                .unwrap_or_default();
+
+            this.update(cx, |app, cx| {
+                if is_source && app.schema_diff_source_table == tbl {
+                    app.schema_diff_source_cols = cols;
+                    app.schema_diff_source_indexes = indexes;
+                    app.recalculate_schema_diff(cx);
+                } else if !is_source && app.schema_diff_target_table == tbl {
+                    app.schema_diff_target_cols = cols;
+                    app.schema_diff_target_indexes = indexes;
+                    app.recalculate_schema_diff(cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Open migration DDL in a new Query Console tab
+    pub fn open_diff_sql_in_console(
+        &mut self,
+        sql: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.schema_diff_modal_open = false;
+        self.create_query_tab(
+            Some("schema_migration.sql".to_string()),
+            Some(&sql),
+            window,
+            cx,
+        );
+        self.status_message = Some("Loaded Schema Migration SQL into Query Tab".to_string());
+        cx.notify();
+    }
+
     /// Open modal to create a new SQL snippet
     pub fn open_new_snippet_modal(
         &mut self,
@@ -5730,6 +5950,14 @@ impl Render for CrabStudioApp {
                 });
             }
         })
+        .on_schema_diff_table({
+            let handle = app_handle.clone();
+            move |table, _, cx| {
+                handle.update(cx, |this, cx| {
+                    this.open_schema_diff(Some(table.name), cx);
+                });
+            }
+        })
         .on_disconnect({
             let handle = app_handle.clone();
             move |_, cx| {
@@ -6357,6 +6585,14 @@ impl Render for CrabStudioApp {
                             });
                         }
                     };
+                    let on_diff = {
+                        let handle = app_handle.clone();
+                        move |tbl: String, _: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                this.open_schema_diff(Some(tbl), cx);
+                            });
+                        }
+                    };
 
                     let db_family = self
                         .active_connection
@@ -6385,6 +6621,7 @@ impl Render for CrabStudioApp {
                     .on_toggle_pk(on_toggle_pk)
                     .on_toggle_auto_increment(on_toggle_auto)
                     .on_review_alterations(on_review_alter)
+                    .on_schema_diff(on_diff)
                     .into_any_element()
                 }
                 WorkspaceTab::History => {
@@ -7355,6 +7592,137 @@ impl Render for CrabStudioApp {
             None
         };
 
+        // Schema Diff & Migration Wizard overlay
+        let schema_diff_overlay = if self.schema_diff_modal_open {
+            let on_close = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.close_schema_diff(cx);
+                    });
+                }
+            };
+            let on_src = {
+                let handle = app_handle.clone();
+                move |src: String, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.select_diff_source_table(src, cx);
+                    });
+                }
+            };
+            let on_tgt = {
+                let handle = app_handle.clone();
+                move |tgt: String, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.select_diff_target_table(tgt, cx);
+                    });
+                }
+            };
+            let on_swap = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.swap_diff_tables(cx);
+                    });
+                }
+            };
+            let on_filter = {
+                let handle = app_handle.clone();
+                move |tab: DiffFilterTab, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.schema_diff_filter_tab = tab;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_safe = {
+                let handle = app_handle.clone();
+                move |safe: bool, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.schema_diff_options.include_drops = !safe;
+                        this.schema_diff_script = generate_migration_ddl(
+                            &this.schema_diff_report,
+                            &this.schema_diff_options,
+                        );
+                        cx.notify();
+                    });
+                }
+            };
+            let on_tx = {
+                let handle = app_handle.clone();
+                move |wrap: bool, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.schema_diff_options.wrap_transaction = wrap;
+                        this.schema_diff_script = generate_migration_ddl(
+                            &this.schema_diff_report,
+                            &this.schema_diff_options,
+                        );
+                        cx.notify();
+                    });
+                }
+            };
+            let on_dir = {
+                let handle = app_handle.clone();
+                move |dir: MigrationDirection, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.schema_diff_options.direction = dir;
+                        this.schema_diff_script = generate_migration_ddl(
+                            &this.schema_diff_report,
+                            &this.schema_diff_options,
+                        );
+                        cx.notify();
+                    });
+                }
+            };
+            let on_copy = {
+                let handle = app_handle.clone();
+                move |sql: String, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        let len = sql.len();
+                        cx.write_to_clipboard(ClipboardItem::new_string(sql));
+                        this.schema_diff_copied = true;
+                        this.status_message =
+                            Some(format!("Copied Migration SQL to clipboard ({len} bytes)"));
+                        cx.notify();
+                    });
+                }
+            };
+            let on_console = {
+                let handle = app_handle.clone();
+                move |sql: String, window: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.open_diff_sql_in_console(sql, window, cx);
+                    });
+                }
+            };
+
+            Some(
+                SchemaDiffModal::new(
+                    self.schema_diff_source_table.clone(),
+                    self.schema_diff_target_table.clone(),
+                    self.schema_diff_available_tables.clone(),
+                    self.schema_diff_report.clone(),
+                    self.schema_diff_options.clone(),
+                    self.schema_diff_script.clone(),
+                    self.settings_manager.settings().language,
+                )
+                .filter_tab(self.schema_diff_filter_tab)
+                .copied(self.schema_diff_copied)
+                .on_close(on_close)
+                .on_select_source_table(on_src)
+                .on_select_target_table(on_tgt)
+                .on_swap_tables(on_swap)
+                .on_change_filter(on_filter)
+                .on_toggle_safe_mode(on_safe)
+                .on_toggle_wrap_tx(on_tx)
+                .on_change_direction(on_dir)
+                .on_copy_sql(on_copy)
+                .on_open_in_console(on_console),
+            )
+        } else {
+            None
+        };
+
         // Left rail Activity Bar
         let activity_bar =
             ActivityBar::new(self.active_nav, self.settings_manager.settings().language)
@@ -7820,6 +8188,8 @@ impl Render for CrabStudioApp {
             .on_action(cx.listener(|this, _: &CloseDialog, _, cx| {
                 if this.snippet_modal_open {
                     this.close_snippet_modal(cx);
+                } else if this.schema_diff_modal_open {
+                    this.close_schema_diff(cx);
                 } else if this.kill_confirm_modal.is_some() {
                     this.kill_confirm_modal = None;
                     cx.notify();
@@ -7852,6 +8222,8 @@ impl Render for CrabStudioApp {
             .on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
                 if this.snippet_modal_open {
                     this.close_snippet_modal(cx);
+                } else if this.schema_diff_modal_open {
+                    this.close_schema_diff(cx);
                 } else if this.kill_confirm_modal.is_some() {
                     this.kill_confirm_modal = None;
                     cx.notify();
@@ -8034,6 +8406,7 @@ impl Render for CrabStudioApp {
             .children(import_overlay)
             .children(export_overlay)
             .children(mock_overlay)
+            .children(schema_diff_overlay)
             .children(snippet_modal_overlay)
             .children(kill_confirm_overlay)
     }

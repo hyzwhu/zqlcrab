@@ -136,6 +136,7 @@ fn translate_en(key: &'static str) -> &'static str {
         "table_menu.import_data" => "Import Data...",
         "table_menu.export_data" => "Export Data / Dump...",
         "table_menu.generate_mock_data" => "Generate Mock Data...",
+        "table_menu.schema_diff" => "Compare Structure...",
         "table_menu.copy_name" => "Copy Table Name",
         "table_menu.copy_select" => "Copy SELECT Statement",
         "table_menu.copy_insert" => "Copy INSERT Template",
@@ -309,6 +310,32 @@ fn translate_en(key: &'static str) -> &'static str {
         "snippets.desc_placeholder" => "Describe what this query does...",
         "snippets.sql_placeholder" => "SELECT ...;",
 
+        // Schema Diff & Migration Wizard
+        "schema_diff.title" => "Table Schema Diff & Migration Wizard",
+        "schema_diff.subtitle" => {
+            "Compare table definitions side-by-side and generate dialect-accurate DDL migration scripts"
+        }
+        "schema_diff.source_table" => "Source",
+        "schema_diff.target_table" => "Target",
+        "schema_diff.swap_tables" => "Swap source and target tables",
+        "schema_diff.tab_differences_only" => "Differences Only",
+        "schema_diff.tab_all" => "All",
+        "schema_diff.tab_columns_only" => "Columns Only",
+        "schema_diff.tab_indexes_only" => "Indexes Only",
+        "schema_diff.no_discrepancies" => "No schema discrepancies detected. Tables are identical.",
+        "schema_diff.safe_mode_on" => "Safe Mode: ON (Skip DROPs)",
+        "schema_diff.safe_mode_off" => "Safe Mode: OFF (Include DROPs)",
+        "schema_diff.wrap_transaction" => "Wrap in Transaction",
+        "schema_diff.statements" => "statements",
+        "schema_diff.copy_sql" => "Copy Migration SQL",
+        "schema_diff.copied" => "Copied!",
+        "schema_diff.open_in_console" => "Open in SQL Console",
+        "common.close" => "Close",
+        "schema_viewer.compare" => "Compare Structure",
+        "schema_viewer.compare_tooltip" => {
+            "Compare this table's schema against another table and generate migrations"
+        }
+
         // Fallback
         _ => key,
     }
@@ -431,6 +458,7 @@ fn translate_zh(key: &'static str) -> &'static str {
         "table_menu.import_data" => "导入数据...",
         "table_menu.export_data" => "导出数据与转储...",
         "table_menu.generate_mock_data" => "生成模拟测试数据...",
+        "table_menu.schema_diff" => "结构对比与迁移向导...",
         "table_menu.copy_name" => "复制表名",
         "table_menu.copy_select" => "复制 SELECT 语句",
         "table_menu.copy_insert" => "复制 INSERT 插入模板",
@@ -600,6 +628,28 @@ fn translate_zh(key: &'static str) -> &'static str {
         "snippets.desc_placeholder" => "描述此 SQL 查询的作用...",
         "snippets.sql_placeholder" => "SELECT ...;",
 
+        // Schema Diff & Migration Wizard
+        "schema_diff.title" => "表结构对比与版本迁移向导",
+        "schema_diff.subtitle" => "左右对比两表字段与索引差异，自动生成方言适配的增量 DDL 迁移脚本",
+        "schema_diff.source_table" => "源表",
+        "schema_diff.target_table" => "目标表",
+        "schema_diff.swap_tables" => "交换源表与目标表",
+        "schema_diff.tab_differences_only" => "仅看差异",
+        "schema_diff.tab_all" => "全部项目",
+        "schema_diff.tab_columns_only" => "仅看字段",
+        "schema_diff.tab_indexes_only" => "仅看索引",
+        "schema_diff.no_discrepancies" => "未检测到结构差异，两张表的字段与索引完全一致。",
+        "schema_diff.safe_mode_on" => "安全模式: 已开启 (跳过DROP)",
+        "schema_diff.safe_mode_off" => "安全模式: 已关闭 (包含DROP)",
+        "schema_diff.wrap_transaction" => "事务包裹 (BEGIN/COMMIT)",
+        "schema_diff.statements" => "条语句",
+        "schema_diff.copy_sql" => "复制迁移 SQL",
+        "schema_diff.copied" => "已复制!",
+        "schema_diff.open_in_console" => "在 SQL 控制台中打开",
+        "common.close" => "关闭",
+        "schema_viewer.compare" => "结构对比",
+        "schema_viewer.compare_tooltip" => "与另一张表对比结构差异并生成增量迁移脚本",
+
         // Fallback
         _ => translate_en(key),
     }
@@ -656,5 +706,21 @@ mod tests {
         );
         assert_eq!(t("nav.sessions", AppLanguage::ZhCn), "会话监控");
         assert_eq!(t("nav.sessions", AppLanguage::En), "Active Sessions");
+        assert_eq!(
+            t("schema_diff.title", AppLanguage::ZhCn),
+            "表结构对比与版本迁移向导"
+        );
+        assert_eq!(
+            t("schema_diff.title", AppLanguage::En),
+            "Table Schema Diff & Migration Wizard"
+        );
+        assert_eq!(
+            t("table_menu.schema_diff", AppLanguage::ZhCn),
+            "结构对比与迁移向导..."
+        );
+        assert_eq!(
+            t("table_menu.schema_diff", AppLanguage::En),
+            "Compare Structure..."
+        );
     }
 }

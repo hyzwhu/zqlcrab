@@ -47,6 +47,7 @@ pub struct SchemaViewer {
     pending_alterations_count: usize,
     // Callbacks
     on_quick_query: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
+    on_schema_diff: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
     on_create_table: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_start_edit: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_cancel_edit: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
@@ -75,6 +76,7 @@ impl SchemaViewer {
             edit_columns: Vec::new(),
             pending_alterations_count: 0,
             on_quick_query: None,
+            on_schema_diff: None,
             on_create_table: None,
             on_start_edit: None,
             on_cancel_edit: None,
@@ -186,6 +188,14 @@ impl SchemaViewer {
         self.on_quick_query = Some(Rc::new(handler));
         self
     }
+
+    pub fn on_schema_diff<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(String, &mut Window, &mut App) + 'static,
+    {
+        self.on_schema_diff = Some(Rc::new(handler));
+        self
+    }
 }
 
 impl RenderOnce for SchemaViewer {
@@ -241,6 +251,8 @@ impl RenderOnce for SchemaViewer {
         let on_quick_sel = self.on_quick_query.clone();
         let on_quick_cnt = self.on_quick_query.clone();
         let on_quick_exp = self.on_quick_query.clone();
+        let on_diff_hdr = self.on_schema_diff.clone();
+        let tbl_for_diff = table_name.clone();
         let on_create_hdr = self.on_create_table.clone();
         let on_start_edit_hdr = self.on_start_edit.clone();
         let on_cancel_edit_hdr = self.on_cancel_edit.clone();
@@ -313,6 +325,18 @@ impl RenderOnce for SchemaViewer {
             });
         }
 
+        let diff_btn = Button::new("schema_diff_btn")
+            .ghost()
+            .xsmall()
+            .icon(IconName::GitCompare)
+            .tooltip("Compare table structure with another table")
+            .child("Diff")
+            .when_some(on_diff_hdr, |btn, handler| {
+                btn.on_click(move |_, window, cx| {
+                    handler(tbl_for_diff.clone(), window, cx);
+                })
+            });
+
         let header_actions = if self.is_editing {
             h_flex()
                 .items_center()
@@ -377,6 +401,7 @@ impl RenderOnce for SchemaViewer {
                             })
                         }),
                 )
+                .child(diff_btn)
                 .child(new_table_btn)
         };
 

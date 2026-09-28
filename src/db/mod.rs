@@ -16,6 +16,7 @@ pub mod postgres;
 pub mod remote_adapter;
 pub mod runtime;
 pub mod safety;
+pub mod schema_diff;
 pub mod session_monitor;
 pub mod snippets;
 pub mod sql_format;
@@ -41,6 +42,10 @@ pub use postgres::PostgresAdapter;
 pub use remote_adapter::RemoteHttpAdapter;
 pub use runtime::{run_on_tokio, tokio_runtime};
 pub use safety::QuerySafetyValidator;
+pub use schema_diff::{
+    ColumnDiff, ColumnDiffStatus, IndexDiff, IndexDiffStatus, MigrationDirection, MigrationScript,
+    SchemaDiffOptions, SchemaDiffReport, SchemaDiffSummary, compare_tables, generate_migration_ddl,
+};
 pub use session_monitor::{
     KillAction, SessionInfo, SessionLatencySeverity, build_kill_sql, build_session_list_sql,
     parse_session_list,

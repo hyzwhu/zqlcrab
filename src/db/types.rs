@@ -825,7 +825,7 @@ pub struct DatabaseSchema {
 }
 
 /// Table index information.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IndexInfo {
     pub name: String,
     pub table_name: String,
