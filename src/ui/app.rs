@@ -1777,9 +1777,16 @@ impl CrabStudioApp {
 
     /// Get current active QueryResult (either from inspected table or active query tab)
     pub fn current_data_result(&self) -> Option<Arc<QueryResult>> {
-        self.table_data
-            .clone()
-            .or_else(|| self.active_query_tab().and_then(|t| t.result.clone()))
+        match self.active_tab {
+            WorkspaceTab::QueryConsole => self
+                .active_query_tab()
+                .and_then(|t| t.result.clone())
+                .or_else(|| self.table_data.clone()),
+            _ => self
+                .table_data
+                .clone()
+                .or_else(|| self.active_query_tab().and_then(|t| t.result.clone())),
+        }
     }
 
     /// Export DataGrid results to system clipboard
@@ -2342,24 +2349,25 @@ impl CrabStudioApp {
         let (updates, deletes, inserts) = self.grid_changeset.change_summary();
         if now_deleted {
             self.status_message = Some(format!(
-                "Row #{} staged for deletion. Review the DELETE statement to remove it. Total: {updates} update(s), {deletes} deletion(s), {inserts} new row(s)",
+                "Row #{} staged for deletion. Staged: {deletes} deletion(s), {updates} update(s), {inserts} new row(s)",
                 row_idx + 1
             ));
-            // Staging alone left the row in the database, so open the review
-            // modal immediately and let the user commit the DELETE.
-            self.open_sql_review_modal(cx);
         } else {
             self.status_message = Some(format!(
-                "Restored row #{}. Total: {updates} update(s), {deletes} deletion(s), {inserts} new row(s)",
+                "Restored row #{}. Staged: {deletes} deletion(s), {updates} update(s), {inserts} new row(s)",
                 row_idx + 1
             ));
-            if !self.grid_changeset.is_dirty() {
+        }
+
+        if self.sql_review_modal_open {
+            if self.grid_changeset.is_dirty() {
+                self.open_sql_review_modal(cx);
+            } else {
                 self.sql_review_modal_open = false;
                 self.sql_review_plan = None;
-            } else if self.sql_review_modal_open {
-                self.open_sql_review_modal(cx);
-                return;
+                cx.notify();
             }
+        } else {
             cx.notify();
         }
     }
