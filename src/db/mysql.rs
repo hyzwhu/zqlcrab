@@ -4,8 +4,8 @@ use crate::db::{
     adapter::DatabaseAdapter,
     error::{DbError, DbResult},
     types::{
-        ColumnInfo, ConnectionConfig, ConnectionStatus, DatabaseSchema, IndexInfo, QueryResult,
-        QueryValue, TableInfo,
+        ColumnInfo, ConnectionConfig, ConnectionStatus, DatabaseSchema, ForeignKeyInfo, IndexInfo,
+        QueryResult, QueryValue, TableInfo,
     },
 };
 use async_trait::async_trait;
@@ -527,6 +527,98 @@ impl DatabaseAdapter for MysqlAdapter {
             }
         }
         Ok(indexes)
+    }
+
+    async fn list_foreign_keys(
+        &self,
+        database: Option<&str>,
+        _schema: Option<&str>,
+        table: Option<&str>,
+    ) -> DbResult<Vec<ForeignKeyInfo>> {
+        let pool = self
+            .pool
+            .as_ref()
+            .ok_or_else(|| DbError::connection("Not connected"))?;
+        let mut conn = pool
+            .get_conn()
+            .await
+            .map_err(|e| DbError::connection(e.to_string()))?;
+
+        let db_name = database.unwrap_or(&self.config.database);
+        let table_filter = match table {
+            Some(t) => format!("AND kcu.TABLE_NAME = '{}'", t.replace('\'', "''")),
+            None => String::new(),
+        };
+
+        let sql = format!(
+            "SELECT \
+             kcu.CONSTRAINT_NAME, \
+             kcu.TABLE_NAME, \
+             kcu.COLUMN_NAME, \
+             kcu.REFERENCED_TABLE_NAME, \
+             kcu.REFERENCED_COLUMN_NAME, \
+             rc.UPDATE_RULE, \
+             rc.DELETE_RULE \
+             FROM information_schema.KEY_COLUMN_USAGE kcu \
+             JOIN information_schema.REFERENTIAL_CONSTRAINTS rc \
+               ON kcu.CONSTRAINT_NAME = rc.CONSTRAINT_NAME \
+              AND kcu.CONSTRAINT_SCHEMA = rc.CONSTRAINT_SCHEMA \
+             WHERE kcu.CONSTRAINT_SCHEMA = '{}' \
+               {} \
+               AND kcu.REFERENCED_TABLE_NAME IS NOT NULL \
+             ORDER BY kcu.TABLE_NAME, kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;",
+            db_name.replace('\'', "''"),
+            table_filter
+        );
+
+        let rows: Vec<(
+            String,
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+        )> = conn
+            .query(&sql)
+            .await
+            .map_err(|e| DbError::query(e.to_string()))?;
+
+        let mut fks: Vec<ForeignKeyInfo> = Vec::new();
+        for (
+            constraint_name,
+            table_name,
+            column_name,
+            ref_table,
+            ref_column,
+            update_rule,
+            delete_rule,
+        ) in rows
+        {
+            if let Some(existing) = fks
+                .iter_mut()
+                .find(|fk| fk.name == constraint_name && fk.table_name == table_name)
+            {
+                if !existing.columns.contains(&column_name) {
+                    existing.columns.push(column_name);
+                }
+                if !existing.referenced_columns.contains(&ref_column) {
+                    existing.referenced_columns.push(ref_column);
+                }
+            } else {
+                fks.push(ForeignKeyInfo {
+                    name: constraint_name,
+                    table_name,
+                    columns: vec![column_name],
+                    referenced_table: ref_table,
+                    referenced_columns: vec![ref_column],
+                    on_update: update_rule,
+                    on_delete: delete_rule,
+                });
+            }
+        }
+
+        Ok(fks)
     }
 }
 

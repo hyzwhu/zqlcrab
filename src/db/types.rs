@@ -834,6 +834,18 @@ pub struct IndexInfo {
     pub is_primary: bool,
 }
 
+/// Foreign key relationship information.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ForeignKeyInfo {
+    pub name: String,
+    pub table_name: String,
+    pub columns: Vec<String>,
+    pub referenced_table: String,
+    pub referenced_columns: Vec<String>,
+    pub on_update: Option<String>,
+    pub on_delete: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

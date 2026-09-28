@@ -336,6 +336,17 @@ fn translate_en(key: &'static str) -> &'static str {
             "Compare this table's schema against another table and generate migrations"
         }
 
+        // ER Diagram
+        "workspace.er_diagram" => "ER Diagram",
+        "er_diagram.title" => "Entity-Relationship (ER) Diagram",
+        "er_diagram.tables" => "Tables",
+        "er_diagram.relations" => "Relations",
+        "er_diagram.export_mermaid" => "Export Mermaid",
+        "er_diagram.copied" => "Copied!",
+        "er_diagram.view_data" => "Data",
+        "er_diagram.view_schema" => "Schema",
+        "table_menu.view_er" => "View in ER Diagram",
+
         // Fallback
         _ => key,
     }
@@ -649,6 +660,17 @@ fn translate_zh(key: &'static str) -> &'static str {
         "common.close" => "关闭",
         "schema_viewer.compare" => "结构对比",
         "schema_viewer.compare_tooltip" => "与另一张表对比结构差异并生成增量迁移脚本",
+
+        // ER Diagram
+        "workspace.er_diagram" => "ER 关系图",
+        "er_diagram.title" => "实体关系 (ER) 拓扑图谱",
+        "er_diagram.tables" => "张表",
+        "er_diagram.relations" => "个外键关系",
+        "er_diagram.export_mermaid" => "导出 Mermaid",
+        "er_diagram.copied" => "已复制!",
+        "er_diagram.view_data" => "查看数据",
+        "er_diagram.view_schema" => "查看结构",
+        "table_menu.view_er" => "在 ER 图谱中查看",
 
         // Fallback
         _ => translate_en(key),

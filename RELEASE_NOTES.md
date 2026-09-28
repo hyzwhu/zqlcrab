@@ -5,6 +5,28 @@ Fast, lightweight, GPU-accelerated database desktop client built with Rust & GPU
 ### 📋 Changelog
 
 #### v0.1.7 Release Highlights:
+- 📊 **Visual ER Diagram & Table Relationship Graph (可视化实体关系 ER 拓扑图谱)**:
+  - **Multi-Engine Foreign Key & Relationship Discovery**:
+    - **PostgreSQL**: Introspects `information_schema.table_constraints`, `key_column_usage`, and `referential_constraints` for both single and composite foreign key constraints.
+    - **MySQL**: Automatically queries schema-wide `KEY_COLUMN_USAGE` and `REFERENTIAL_CONSTRAINTS`.
+    - **SQLite**: Dynamic table schema introspection via `PRAGMA foreign_key_list`, grouping composite foreign key columns and target references.
+  - **Topology Layout & 2D Canvas Engine (`ErDiagramGraph`)**:
+    - Automatic 2D arrangement with connection-degree hub positioning, legible multi-column alignment, and collision-free spatial bounds calculation.
+    - Graph cardinality detection: Automatically identifies `1:N`, `1:1`, and `N:1` relationships based on uniqueness and primary key constraints.
+  - **Interactive Table Cards (`ErDiagramView`)**:
+    - Displays schema definitions, row count estimates, table types, and scrollable column lists.
+    - Highlighted key badges: Gold `PK` for Primary Keys, Cyan `FK` for Foreign Key links, and detailed data type tags.
+    - Direct actions: Jump directly from any table card to `DataGrid` (View Data) or `SchemaViewer` (Inspect Schema).
+    - Table focus and relationship dimming: Click any table to focus its direct relations while dimming unrelated tables.
+  - **Mermaid Markdown ER Export**:
+    - One-click copy of the active ER diagram in standard Mermaid markdown syntax (`erDiagram ...`) for documentation, PR descriptions, and team architecture wikis.
+  - **Search & Quick Zoom Controls**:
+    - Live table filter input to search and isolate specific tables on large canvases.
+    - Zoom toolbar: Zoom In, Zoom Out (40%–200%), and 100% Reset controls.
+  - **Seamless Workspace Integration & Bilingual Localization**:
+    - First-class workspace tab (`ER Diagram` / `ER 关系图`) accessible from titlebar tab strip, sidebar context menu ("View in ER Diagram" / "在 ER 图谱中查看"), and auto-refresh on schema updates.
+    - Complete English and Simplified Chinese (简体中文) localization support.
+
 - 🔄 **Visual Schema Diff & Multi-Dialect Migration Script Generator (可视化表结构对比与差异迁移脚本生成器)**:
   - **Side-by-Side Schema Discrepancy Matrix**: Interactive visual comparison of table definitions (columns, data types, nullability, default values, primary keys, and indexes) with color-coded status badges: `+ ADD`, `- DROP`, `~ MODIFY`, and `= IDENTICAL`.
   - **Multi-Dialect DDL Migration Engine**:
@@ -19,4 +41,3 @@ Fast, lightweight, GPU-accelerated database desktop client built with Rust & GPU
   - **Seamless Actionable Workflows**: One-click clipboard copy with visual feedback, and direct loading into SQL Console (`schema_migration.sql`) for immediate review, customization, or execution.
   - **Integrated Entry Points**: Accessible directly from Database Explorer table context menus ("Compare Structure..." / "结构对比与迁移向导...") and Schema Viewer toolbar (`Diff`).
   - **Bilingual Localization (i18n)**: Comprehensive English and Simplified Chinese (简体中文) translations across all wizard selectors, status tags, option pills, and tooltips.
-

@@ -35,6 +35,7 @@ struct TableActionCallbacks {
     on_export: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_mock_data: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_schema_diff: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
+    on_view_er: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_truncate: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_drop: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
 }
@@ -67,6 +68,7 @@ pub struct Sidebar {
     on_export_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_mock_data_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_schema_diff_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
+    on_view_er_diagram: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_truncate_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_drop_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_create_table: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
@@ -108,6 +110,7 @@ impl Sidebar {
             on_export_table: None,
             on_mock_data_table: None,
             on_schema_diff_table: None,
+            on_view_er_diagram: None,
             on_truncate_table: None,
             on_drop_table: None,
             on_create_table: None,
@@ -193,6 +196,14 @@ impl Sidebar {
         F: Fn(TableInfo, &mut Window, &mut App) + 'static,
     {
         self.on_schema_diff_table = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_view_er_diagram<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(TableInfo, &mut Window, &mut App) + 'static,
+    {
+        self.on_view_er_diagram = Some(Rc::new(handler));
         self
     }
 
@@ -503,6 +514,19 @@ impl Sidebar {
                     .on_click(move |_, window, cx| {
                         if let Some(ref handler) = diff_handler {
                             handler(tbl_diff.clone(), window, cx);
+                        }
+                    }),
+            );
+
+            // View in ER Diagram... / 在 ER 图谱中查看...
+            let er_handler = actions.on_view_er.clone();
+            let tbl_er = info.clone();
+            menu = menu.item(
+                PopupMenuItem::new(t("table_menu.view_er", lang))
+                    .icon(IconName::Workflow)
+                    .on_click(move |_, window, cx| {
+                        if let Some(ref handler) = er_handler {
+                            handler(tbl_er.clone(), window, cx);
                         }
                     }),
             );
@@ -1091,6 +1115,7 @@ impl RenderOnce for Sidebar {
                         on_export: self.on_export_table.clone(),
                         on_mock_data: self.on_mock_data_table.clone(),
                         on_schema_diff: self.on_schema_diff_table.clone(),
+                        on_view_er: self.on_view_er_diagram.clone(),
                         on_truncate: self.on_truncate_table.clone(),
                         on_drop: self.on_drop_table.clone(),
                     };

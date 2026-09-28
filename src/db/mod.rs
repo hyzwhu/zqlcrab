@@ -3,6 +3,7 @@
 pub mod adapter;
 pub mod autocomplete;
 pub mod changeset;
+pub mod er_diagram;
 pub mod error;
 pub mod explain;
 pub mod export;
@@ -27,6 +28,7 @@ pub mod types;
 pub use adapter::DatabaseAdapter;
 pub use autocomplete::{SqlCompletionProvider, SqlMetadataCache};
 pub use changeset::{CellEdit, GridChangeset, RowDeletion};
+pub use er_diagram::{ErDiagramGraph, RelationCardinality, RelationEdge, TableNode};
 pub use error::{DbError, DbResult};
 pub use export::{ExportFormat, ExportOptions, export_result};
 pub use handle::ActiveConnection;

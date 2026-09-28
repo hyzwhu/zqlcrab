@@ -4,8 +4,8 @@ use crate::db::{
     adapter::DatabaseAdapter,
     error::{DbError, DbResult},
     types::{
-        ColumnInfo, ConnectionConfig, ConnectionStatus, DatabaseSchema, IndexInfo, QueryResult,
-        QueryValue, TableInfo,
+        ColumnInfo, ConnectionConfig, ConnectionStatus, DatabaseSchema, ForeignKeyInfo, IndexInfo,
+        QueryResult, QueryValue, TableInfo,
     },
 };
 use async_trait::async_trait;
@@ -676,6 +676,83 @@ impl DatabaseAdapter for PostgresAdapter {
             }
         }
         Ok(indexes)
+    }
+
+    async fn list_foreign_keys(
+        &self,
+        _database: Option<&str>,
+        schema: Option<&str>,
+        table: Option<&str>,
+    ) -> DbResult<Vec<ForeignKeyInfo>> {
+        let client_arc = self
+            .client
+            .as_ref()
+            .ok_or_else(|| DbError::connection("Not connected"))?;
+        let client = client_arc.lock().await;
+
+        let schema_name = schema.unwrap_or("public");
+        let sql = "SELECT \
+                   tc.constraint_name, \
+                   tc.table_name, \
+                   kcu.column_name, \
+                   ccu.table_name AS foreign_table_name, \
+                   ccu.column_name AS foreign_column_name, \
+                   rc.update_rule, \
+                   rc.delete_rule \
+                   FROM information_schema.table_constraints AS tc \
+                   JOIN information_schema.key_column_usage AS kcu \
+                     ON tc.constraint_name = kcu.constraint_name \
+                    AND tc.table_schema = kcu.table_schema \
+                   JOIN information_schema.constraint_column_usage AS ccu \
+                     ON ccu.constraint_name = tc.constraint_name \
+                    AND ccu.table_schema = tc.table_schema \
+                   JOIN information_schema.referential_constraints AS rc \
+                     ON rc.constraint_name = tc.constraint_name \
+                    AND rc.constraint_schema = tc.table_schema \
+                   WHERE tc.constraint_type = 'FOREIGN KEY' \
+                     AND tc.table_schema = $1 \
+                     AND ($2::text IS NULL OR tc.table_name = $2) \
+                   ORDER BY tc.table_name, tc.constraint_name, kcu.ordinal_position;";
+
+        let rows = client
+            .query(sql, &[&schema_name, &table])
+            .await
+            .map_err(|e| DbError::query(e.to_string()))?;
+
+        let mut fks: Vec<ForeignKeyInfo> = Vec::new();
+        for row in rows {
+            let constraint_name: String = row.get(0);
+            let table_name: String = row.get(1);
+            let column_name: String = row.get(2);
+            let foreign_table_name: String = row.get(3);
+            let foreign_column_name: String = row.get(4);
+            let update_rule: Option<String> = row.get(5);
+            let delete_rule: Option<String> = row.get(6);
+
+            if let Some(existing) = fks
+                .iter_mut()
+                .find(|fk| fk.name == constraint_name && fk.table_name == table_name)
+            {
+                if !existing.columns.contains(&column_name) {
+                    existing.columns.push(column_name);
+                }
+                if !existing.referenced_columns.contains(&foreign_column_name) {
+                    existing.referenced_columns.push(foreign_column_name);
+                }
+            } else {
+                fks.push(ForeignKeyInfo {
+                    name: constraint_name,
+                    table_name,
+                    columns: vec![column_name],
+                    referenced_table: foreign_table_name,
+                    referenced_columns: vec![foreign_column_name],
+                    on_update: update_rule,
+                    on_delete: delete_rule,
+                });
+            }
+        }
+
+        Ok(fks)
     }
 }
 

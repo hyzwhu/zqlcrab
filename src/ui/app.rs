@@ -1,6 +1,7 @@
 //! Main desktop application workspace coordinating navigation, query console, and data inspection.
 
 use crate::db::changeset::GridChangeset;
+use crate::db::er_diagram::{ErDiagramGraph, TableNode};
 use crate::db::explain::{ExplainPlan, parse_explain_result, wrap_explain_sql};
 use crate::db::export::{
     ExportFormat, ExportOptions, ExportScope, TableDumpConfig, export_result,
@@ -39,11 +40,11 @@ use crate::db::types::{
 use crate::settings::{SettingsManager, ThemePreference};
 use crate::ui::components::{
     ActivityBar, ActivityNav, AppStatusBar, ConfirmActionKind, ConfirmDialog, ConnectionDialog,
-    ConsoleBottomTab, DataGrid, DiffFilterTab, ExplainViewMode, ExportDestination, ExportModal,
-    ExportSuccessInfo, ExportWizardStep, ImportModal, ImportWizardStep, KillConfirmModal,
-    MockDataModal, MockWizardStep, QueryConsole, QueryHistoryView, QueryTabHeader, SchemaDiffModal,
-    SchemaViewer, SessionsView, SettingsTab, SettingsView, Sidebar, SnippetEditModal, SnippetView,
-    SqlReviewModal,
+    ConsoleBottomTab, DataGrid, DiffFilterTab, ErDiagramView, ExplainViewMode, ExportDestination,
+    ExportModal, ExportSuccessInfo, ExportWizardStep, ImportModal, ImportWizardStep,
+    KillConfirmModal, MockDataModal, MockWizardStep, QueryConsole, QueryHistoryView,
+    QueryTabHeader, SchemaDiffModal, SchemaViewer, SessionsView, SettingsTab, SettingsView,
+    Sidebar, SnippetEditModal, SnippetView, SqlReviewModal,
     create_table_modal::{CreateTableColumnState, CreateTableIndexState, CreateTableModal},
     data_grid::GridCellCoord,
     schema_viewer::SchemaEditColumnState,
@@ -113,6 +114,7 @@ pub enum WorkspaceTab {
     DataGrid,
     Schema,
     History,
+    ERDiagram,
 }
 
 fn parse_edited_query_value(new_text: &str, orig_val: &QueryValue, col_type: &str) -> QueryValue {
@@ -390,6 +392,14 @@ pub struct CrabStudioApp {
     schema_diff_report: SchemaDiffReport,
     schema_diff_script: MigrationScript,
 
+    // Visual ER Diagram state
+    er_graph: Option<ErDiagramGraph>,
+    er_is_loading: bool,
+    er_search_input: Entity<InputState>,
+    er_selected_table: Option<String>,
+    er_zoom: f32,
+    er_mermaid_copied: bool,
+
     // Settings state
     settings_manager: SettingsManager,
     active_nav: ActivityNav,
@@ -634,6 +644,15 @@ impl CrabStudioApp {
         )
         .detach();
 
+        let er_search_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Filter tables..."));
+        cx.subscribe(&er_search_input, |_this, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
+        })
+        .detach();
+
         let mut history_manager = QueryHistoryManager::new();
         history_manager.set_max_entries(settings_manager.settings().query.history_limit);
 
@@ -789,6 +808,12 @@ impl CrabStudioApp {
             schema_diff_copied: false,
             schema_diff_report: SchemaDiffReport::default(),
             schema_diff_script: MigrationScript::default(),
+            er_graph: None,
+            er_is_loading: false,
+            er_search_input,
+            er_selected_table: None,
+            er_zoom: 1.0,
+            er_mermaid_copied: false,
             settings_manager,
             active_nav: ActivityNav::Databases,
             active_settings_tab: SettingsTab::Appearance,
@@ -1198,6 +1223,8 @@ impl CrabStudioApp {
             self.schema_columns.clear();
             self.schema_indexes.clear();
             self.schema_ddl = None;
+            self.er_graph = None;
+            self.er_selected_table = None;
             self.status_message = Some(format!("Disconnected from {name}"));
             cx.notify();
         }
@@ -1237,11 +1264,76 @@ impl CrabStudioApp {
                 .detach();
 
                 app.status_message = Some("Schema refreshed".to_string());
+                if app.er_graph.is_some() {
+                    app.load_er_diagram(cx);
+                }
                 cx.notify();
             })
             .ok();
         })
         .detach();
+    }
+
+    /// Asynchronously generate and layout the ER diagram graph for the active connection.
+    pub fn load_er_diagram(&mut self, cx: &mut Context<Self>) {
+        let Some(conn) = self.active_connection.clone() else {
+            self.er_graph = None;
+            self.er_is_loading = false;
+            cx.notify();
+            return;
+        };
+
+        self.er_is_loading = true;
+        cx.notify();
+
+        cx.spawn(async move |this, cx: &mut AsyncApp| {
+            let tables = conn.list_tables(None, None).await.unwrap_or_default();
+            let all_fks = conn
+                .list_foreign_keys(None, None, None)
+                .await
+                .unwrap_or_default();
+
+            let mut table_nodes = Vec::new();
+            for tbl in &tables {
+                let cols = conn
+                    .list_columns(None, tbl.schema.as_deref(), &tbl.name)
+                    .await
+                    .unwrap_or_default();
+                let indexes = conn
+                    .list_indexes(None, tbl.schema.as_deref(), &tbl.name)
+                    .await
+                    .unwrap_or_default();
+
+                let mut node = TableNode::new(&tbl.name, tbl.schema.as_deref(), tbl.is_view());
+                node.columns = cols;
+                node.indexes = indexes;
+                node.row_count_estimate = tbl.row_count_estimate;
+                node.update_dimensions();
+                table_nodes.push(node);
+            }
+
+            let graph = ErDiagramGraph::from_metadata(table_nodes, &all_fks);
+
+            this.update(cx, |app, cx| {
+                app.er_graph = Some(graph);
+                app.er_is_loading = false;
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Select and focus a table in the ER Diagram canvas.
+    pub fn focus_er_table(&mut self, table_name: &str, cx: &mut Context<Self>) {
+        self.active_tab = WorkspaceTab::ERDiagram;
+        self.active_nav = ActivityNav::Databases;
+        self.er_selected_table = Some(table_name.to_string());
+        if self.er_graph.is_none() {
+            self.load_er_diagram(cx);
+        } else {
+            cx.notify();
+        }
     }
 
     /// Trigger application update check against GitHub Releases API
@@ -5958,6 +6050,14 @@ impl Render for CrabStudioApp {
                 });
             }
         })
+        .on_view_er_diagram({
+            let handle = app_handle.clone();
+            move |table, _, cx| {
+                handle.update(cx, |this, cx| {
+                    this.focus_er_table(&table.name, cx);
+                });
+            }
+        })
         .on_disconnect({
             let handle = app_handle.clone();
             move |_, cx| {
@@ -6115,6 +6215,36 @@ impl Render for CrabStudioApp {
                                 handle.update(cx, |this, cx| {
                                     this.active_tab = WorkspaceTab::Schema;
                                     this.active_nav = ActivityNav::Databases;
+                                    cx.notify();
+                                });
+                            })
+                    })
+                    .child({
+                        let is_active = self.active_tab == WorkspaceTab::ERDiagram;
+                        let handle = app_handle.clone();
+                        let er_str = t("workspace.er_diagram", lang);
+                        Button::new("tab_er_diagram")
+                            .small()
+                            .ghost()
+                            .flex_shrink(1.0)
+                            .min_w(px(36.0))
+                            .overflow_hidden()
+                            .icon(IconName::Workflow)
+                            .label(er_str)
+                            .tooltip(er_str)
+                            .border_b_2()
+                            .border_color(if is_active {
+                                ThemeColors::PRIMARY_BORDER
+                            } else {
+                                ThemeColors::TRANSPARENT
+                            })
+                            .on_click(move |_, _, cx| {
+                                handle.update(cx, |this, cx| {
+                                    this.active_tab = WorkspaceTab::ERDiagram;
+                                    this.active_nav = ActivityNav::Databases;
+                                    if this.er_graph.is_none() {
+                                        this.load_er_diagram(cx);
+                                    }
                                     cx.notify();
                                 });
                             })
@@ -6675,6 +6805,128 @@ impl Render for CrabStudioApp {
                         .on_clear_history(on_clear)
                         .into_any_element()
                 }
+                WorkspaceTab::ERDiagram => {
+                    let on_select = {
+                        let handle = app_handle.clone();
+                        move |table_name: String, _window: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                this.er_selected_table = Some(table_name);
+                                cx.notify();
+                            });
+                        }
+                    };
+                    let on_view_data = {
+                        let handle = app_handle.clone();
+                        move |table_name: String, _window: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                if let Some(tbl) = this
+                                    .active_tables
+                                    .iter()
+                                    .find(|t| t.name.eq_ignore_ascii_case(&table_name))
+                                    .cloned()
+                                {
+                                    this.select_table(tbl, cx);
+                                    this.active_tab = WorkspaceTab::DataGrid;
+                                    cx.notify();
+                                }
+                            });
+                        }
+                    };
+                    let on_view_schema = {
+                        let handle = app_handle.clone();
+                        move |table_name: String, _window: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                if let Some(tbl) = this
+                                    .active_tables
+                                    .iter()
+                                    .find(|t| t.name.eq_ignore_ascii_case(&table_name))
+                                    .cloned()
+                                {
+                                    this.select_table(tbl, cx);
+                                    this.active_tab = WorkspaceTab::Schema;
+                                    cx.notify();
+                                }
+                            });
+                        }
+                    };
+                    let on_zoom_in = {
+                        let handle = app_handle.clone();
+                        move |_: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                this.er_zoom = (this.er_zoom + 0.1).min(2.0);
+                                cx.notify();
+                            });
+                        }
+                    };
+                    let on_zoom_out = {
+                        let handle = app_handle.clone();
+                        move |_: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                this.er_zoom = (this.er_zoom - 0.1).max(0.4);
+                                cx.notify();
+                            });
+                        }
+                    };
+                    let on_zoom_reset = {
+                        let handle = app_handle.clone();
+                        move |_: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                this.er_zoom = 1.0;
+                                cx.notify();
+                            });
+                        }
+                    };
+                    let on_copy_mermaid = {
+                        let handle = app_handle.clone();
+                        move |code: String, _: &mut Window, cx: &mut App| {
+                            cx.write_to_clipboard(ClipboardItem::new_string(code));
+                            handle.update(cx, |this, cx| {
+                                this.er_mermaid_copied = true;
+                                this.status_message = Some(
+                                    "Copied ER diagram in Mermaid format to clipboard".to_string(),
+                                );
+                                cx.notify();
+
+                                let delayed_handle = handle.clone();
+                                cx.spawn(async move |_this, cx: &mut AsyncApp| {
+                                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                                    delayed_handle.update(cx, |this, cx| {
+                                        this.er_mermaid_copied = false;
+                                        cx.notify();
+                                    });
+                                })
+                                .detach();
+                            });
+                        }
+                    };
+                    let on_refresh = {
+                        let handle = app_handle.clone();
+                        move |_: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                this.load_er_diagram(cx);
+                            });
+                        }
+                    };
+
+                    ErDiagramView::new(
+                        self.er_graph.clone(),
+                        self.er_is_loading,
+                        self.er_search_input.clone(),
+                        self.er_selected_table.clone(),
+                        self.er_zoom,
+                        self.er_mermaid_copied,
+                        lang,
+                    )
+                    .on_select_table(on_select)
+                    .on_view_data(on_view_data)
+                    .on_view_schema(on_view_schema)
+                    .on_zoom_in(on_zoom_in)
+                    .on_zoom_out(on_zoom_out)
+                    .on_zoom_reset(on_zoom_reset)
+                    .on_copy_mermaid(on_copy_mermaid)
+                    .on_refresh(on_refresh)
+                    .into_any_element()
+                }
             }
         };
 
@@ -6687,6 +6939,7 @@ impl Render for CrabStudioApp {
             WorkspaceTab::DataGrid => self.current_data_result().as_ref().map(|r| r.rows.len()),
             WorkspaceTab::Schema => Some(self.schema_columns.len()),
             WorkspaceTab::History => Some(self.history_manager.items().len()),
+            WorkspaceTab::ERDiagram => self.er_graph.as_ref().map(|g| g.tables.len()),
         };
         let query_duration = self
             .active_query_tab()

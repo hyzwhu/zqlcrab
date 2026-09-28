@@ -5,7 +5,10 @@
 
 use crate::db::{
     error::DbResult,
-    types::{ColumnInfo, ConnectionStatus, DatabaseSchema, IndexInfo, QueryResult, TableInfo},
+    types::{
+        ColumnInfo, ConnectionStatus, DatabaseSchema, ForeignKeyInfo, IndexInfo, QueryResult,
+        TableInfo,
+    },
 };
 use async_trait::async_trait;
 
@@ -62,6 +65,16 @@ pub trait DatabaseAdapter: Send + Sync {
         _schema: Option<&str>,
         _table: &str,
     ) -> DbResult<Vec<IndexInfo>> {
+        Ok(Vec::new())
+    }
+
+    /// List foreign key constraints for a specific table or for all tables in a schema if table is None.
+    async fn list_foreign_keys(
+        &self,
+        _database: Option<&str>,
+        _schema: Option<&str>,
+        _table: Option<&str>,
+    ) -> DbResult<Vec<ForeignKeyInfo>> {
         Ok(Vec::new())
     }
 

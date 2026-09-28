@@ -7,8 +7,8 @@ use crate::db::{
     postgres::PostgresAdapter,
     sqlite::SqliteAdapter,
     types::{
-        ColumnInfo, ConnectionConfig, ConnectionStatus, DatabaseFamily, DatabaseSchema, IndexInfo,
-        QueryResult, TableInfo,
+        ColumnInfo, ConnectionConfig, ConnectionStatus, DatabaseFamily, DatabaseSchema,
+        ForeignKeyInfo, IndexInfo, QueryResult, TableInfo,
     },
 };
 use std::sync::Arc;
@@ -197,6 +197,25 @@ impl ActiveConnection {
             let adapter = adapter.lock().await;
             adapter
                 .list_indexes(database.as_deref(), schema.as_deref(), &table)
+                .await
+        })
+        .await
+    }
+
+    pub async fn list_foreign_keys(
+        &self,
+        database: Option<&str>,
+        schema: Option<&str>,
+        table: Option<&str>,
+    ) -> DbResult<Vec<ForeignKeyInfo>> {
+        let adapter = self.adapter.clone();
+        let database = database.map(|s| s.to_string());
+        let schema = schema.map(|s| s.to_string());
+        let table = table.map(|s| s.to_string());
+        crate::db::runtime::run_on_tokio(async move {
+            let adapter = adapter.lock().await;
+            adapter
+                .list_foreign_keys(database.as_deref(), schema.as_deref(), table.as_deref())
                 .await
         })
         .await

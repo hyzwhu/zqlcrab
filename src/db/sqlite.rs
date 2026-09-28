@@ -4,8 +4,8 @@ use crate::db::{
     adapter::DatabaseAdapter,
     error::{DbError, DbResult},
     types::{
-        ColumnInfo, ConnectionConfig, ConnectionStatus, DatabaseSchema, IndexInfo, QueryResult,
-        QueryValue, TableInfo,
+        ColumnInfo, ConnectionConfig, ConnectionStatus, DatabaseSchema, ForeignKeyInfo, IndexInfo,
+        QueryResult, QueryValue, TableInfo,
     },
 };
 use async_trait::async_trait;
@@ -464,6 +464,108 @@ impl DatabaseAdapter for SqliteAdapter {
             });
         }
         Ok(indexes)
+    }
+
+    async fn list_foreign_keys(
+        &self,
+        _database: Option<&str>,
+        _schema: Option<&str>,
+        table: Option<&str>,
+    ) -> DbResult<Vec<ForeignKeyInfo>> {
+        let conn_arc = self
+            .conn
+            .as_ref()
+            .ok_or_else(|| DbError::connection("Not connected"))?;
+        let conn = conn_arc
+            .lock()
+            .map_err(|e| DbError::PoolError(e.to_string()))?;
+
+        let mut target_tables = Vec::new();
+        if let Some(t) = table {
+            target_tables.push(t.to_string());
+        } else {
+            let sql = "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;";
+            let mut stmt = conn
+                .prepare(sql)
+                .map_err(|e| DbError::query(e.to_string()))?;
+            let mut rows = stmt.query([]).map_err(|e| DbError::query(e.to_string()))?;
+            while let Some(row) = rows.next().map_err(|e| DbError::query(e.to_string()))? {
+                let name: String = row.get(0).map_err(|e| DbError::query(e.to_string()))?;
+                target_tables.push(name);
+            }
+        }
+
+        let mut fk_list = Vec::new();
+        for tbl in target_tables {
+            let clean_table = tbl.replace('"', "\"\"");
+            let sql = format!("PRAGMA foreign_key_list(\"{clean_table}\");");
+            let mut stmt = match conn.prepare(&sql) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+
+            struct FkRow {
+                id: i64,
+                ref_table: String,
+                from_col: String,
+                to_col: Option<String>,
+                on_update: Option<String>,
+                on_delete: Option<String>,
+            }
+
+            let mut rows = match stmt.query([]) {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+
+            let mut raw_fks: Vec<FkRow> = Vec::new();
+            while let Ok(Some(row)) = rows.next() {
+                let id: i64 = row.get(0).unwrap_or(0);
+                let ref_table: String = row.get(2).unwrap_or_default();
+                let from_col: String = row.get(3).unwrap_or_default();
+                let to_col: Option<String> = row.get(4).ok();
+                let on_update: Option<String> = row.get(5).ok();
+                let on_delete: Option<String> = row.get(6).ok();
+                raw_fks.push(FkRow {
+                    id,
+                    ref_table,
+                    from_col,
+                    to_col,
+                    on_update,
+                    on_delete,
+                });
+            }
+
+            use std::collections::BTreeMap;
+            let mut grouped: BTreeMap<i64, Vec<FkRow>> = BTreeMap::new();
+            for r in raw_fks {
+                grouped.entry(r.id).or_default().push(r);
+            }
+
+            for (id, items) in grouped {
+                if items.is_empty() {
+                    continue;
+                }
+                let ref_table = items[0].ref_table.clone();
+                let on_update = items[0].on_update.clone();
+                let on_delete = items[0].on_delete.clone();
+                let cols: Vec<String> = items.iter().map(|i| i.from_col.clone()).collect();
+                let ref_cols: Vec<String> = items.iter().filter_map(|i| i.to_col.clone()).collect();
+
+                let fk_name = format!("fk_{}_{}_{}", tbl, ref_table, id);
+                fk_list.push(ForeignKeyInfo {
+                    name: fk_name,
+                    table_name: tbl.clone(),
+                    columns: cols,
+                    referenced_table: ref_table,
+                    referenced_columns: ref_cols,
+                    on_update,
+                    on_delete,
+                });
+            }
+        }
+
+        Ok(fk_list)
     }
 
     async fn get_table_ddl(
