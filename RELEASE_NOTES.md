@@ -1,38 +1,34 @@
-## 🦀 zqlcrab v0.1.9
+## 🦀 zqlcrab v0.1.10
 
 Fast, lightweight, GPU-accelerated database desktop client built with Rust & GPUI.
 
 ### 📋 Changelog
 
-#### v0.1.9 Release Highlights:
-- 🚀 **Visual Storage Capacity Analyzer & Table Maintenance Diagnostics Wizard (库表存储容量分析与智能运维体检向导)**:
-  - **Multi-Engine Physical Storage Allocation Analytics**:
-    - Multi-dialect engine support inspecting physical disk footprints across SQLite, MySQL, and PostgreSQL.
-    - Deep metrics collection inspecting total physical table size, raw data space, index B-Tree allocations, free/bloat reclaimable space, row counts, and average row size.
-    - PostgreSQL support for vacuum diagnostics: dead tuple counts (`n_dead_tup`), `last_vacuum`, and `last_analyze` timestamps.
-    - MySQL `information_schema.TABLES` metrics inspection (`DATA_LENGTH`, `INDEX_LENGTH`, `DATA_FREE`, `AVG_ROW_LENGTH`, `ENGINE`).
-    - SQLite physical page breakdown (`PRAGMA page_count`, `PRAGMA page_size`, `PRAGMA freelist_count`).
-  - **2-Tab Interactive Diagnostics Experience**:
-    - **Tab 1: Storage Capacity Analysis (存储容量深度分析)**:
-      - 6 KPI summary overview cards: Total Database Footprint, Table Data Space, Index Space, Reclaimable Bloat / Free, Inspected Tables, and Total Row Records.
-      - Dual-color progress bars visually illustrating the data vs. index allocation ratio for each table.
-      - Search filter input and batch selection controls (`Select All`, `Deselect All`).
-      - "Maintain Selected Tables..." action button jumping directly to Diagnostics with pre-selected tables.
-    - **Tab 2: Maintenance & Diagnostics Wizard (智能运维与健康体检)**:
-      - Dialect-specific operational maintenance routines:
-        - `Optimize / Vacuum`: Reclaim unused disk space, defragment pages, and shrink database files (`OPTIMIZE TABLE`, `VACUUM (ANALYZE)`, `VACUUM FULL`, `VACUUM`).
-        - `Integrity Check`: Verify structural and B-Tree page consistency for corruption (`CHECK TABLE ... EXTENDED`, `ANALYZE VERBOSE`, `PRAGMA integrity_check`).
-        - `Analyze Statistics`: Collect and refresh optimizer query distribution statistics (`ANALYZE TABLE`, `ANALYZE`, `PRAGMA optimize`).
-        - `Rebuild Indexes`: Reconstruct fragmented or damaged index trees (`REINDEX TABLE`, `REINDEX`).
-        - `Checksum Verification`: Calculate cryptographic row checksums or quick page consistency checks (`CHECKSUM TABLE ... EXTENDED`, `PRAGMA quick_check`).
-      - Dialect-tailored configuration switches: PostgreSQL `VACUUM FULL` toggle and MySQL `EXTENDED` check toggle.
-      - Real-time progress bar with percentage, table counter, and active table indicator.
-      - Live color-coded audit log stream with status badges (`[OK]`, `[WARN]`, `[ERR]`), execution durations, and one-click log copy to clipboard.
-      - Post-run execution summary report with passed/failed counts and total elapsed duration.
-  - **Seamless Explorer Entry Points**:
-    - Database Explorer header action (`Storage & Maintenance Wizard...` with `Gauge` icon).
-    - Table context menu action ("Maintain & Optimize Table..." / "库表维护与体检...").
-  - **Lexical Query Safety Compatibility**:
-    - Extended `QuerySafetyValidator::is_result_set_query` to properly recognize maintenance result commands (`CHECK`, `OPTIMIZE`, `ANALYZE`, `REPAIR`, `CHECKSUM`) returning tabular diagnostic rows across database drivers.
+#### v0.1.10 Release Highlights:
+- ⏱️ **Visual SQL Query Profiler & Resource Timeline Panel (SQL 查询执行画像与资源时序耗时分析)**:
+  - **Multi-Dialect Execution Engine & Resource Metrics Extraction**:
+    - **MySQL Native Profiling**: Orchestrates `SET profiling = 1`, runs query statement events, captures `SHOW PROFILE ALL FOR QUERY ...`, parsing execution status stages, CPU user/system times, and block I/O operations (`Block_ops_in`, `Block_ops_out`).
+    - **PostgreSQL Buffer & Plan Analysis**: Dispatches `EXPLAIN (ANALYZE, BUFFERS, TIMING, SUMMARY, FORMAT JSON/TEXT)`, analyzing execution vs. planning times, buffer cache hits vs. reads (`Shared Hit Blocks`, `Shared Read Blocks`), and node execution latency.
+    - **SQLite & Synthetic Client Pipeline**: Measures high-resolution microsecond client execution phases (Syntax Parsing & AST Validation, Cost-based Query Planning, Virtual Machine Engine Step Execution, Row Stream & Buffering).
+  - **Console Bottom Pane 3-Tab Architecture**:
+    - Seamless bottom navigation across 3 specialized views: `Results` (Data Grid), `Execution Plan` (EXPLAIN Visual Tree & Cost Breakdown), and `Profile` (Resource Timeline & Gantt Waterfall).
+    - Top toolbar action button `Profile` (`⌘⇧P` / `Ctrl+Shift+P`) with loading animation and status feedback.
+  - **Visual Waterfall Timeline & Gantt Chart Visualization**:
+    - Microsecond time scale markers across the query timeline (0 ms, 25%, 50%, 75%, 100%).
+    - Proportional horizontal execution bars color-coded by category:
+      - Green (`ThemeColors::SUCCESS`) for Data Transmission & Fetch.
+      - Blue (`ThemeColors::PRIMARY_LIGHT`) for Engine Execution.
+      - Orange (`ThemeColors::WARNING`) for Optimizer & Statistics.
+      - Red (`ThemeColors::ERROR`) alert for bottleneck stages consuming >35% of query latency.
+    - Rich interactive tooltips displaying exact microsecond duration, percentage of total time, start offset, and engine details.
+  - **Top KPI Summary Metrics Cards**:
+    - *Total Duration*: Overall query latency in milliseconds and microseconds.
+    - *Planning Time*: Time spent in compilation, catalog lookup, and AST optimization.
+    - *Execution Time*: Time spent in engine virtual machine execution.
+    - *Buffer Cache Hit Ratio*: Shared memory buffer hit ratio percentage (e.g. `100.0%`).
+    - *Bottleneck Stage*: Heaviest query stage highlighted with badge.
+  - **Tabular Execution Breakdown & Export**:
+    - Tabular breakdown listing stage index, stage name, category badge, start offset, duration (ms), proportion ratio (%), and detailed I/O / buffer attributes.
+    - One-click copy formatted execution profile to system clipboard as a structured Markdown report.
   - **Complete Bilingual Localization**:
-    - Comprehensive English and Simplified Chinese (简体中文) translations across all KPI cards, table breakdown columns, action cards, options, and status badges.
+    - Comprehensive English and Simplified Chinese (简体中文) translations across all KPI metrics, stage categories, toolbar actions, and tooltips.

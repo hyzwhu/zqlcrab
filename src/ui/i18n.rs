@@ -25,9 +25,12 @@ fn translate_en(key: &'static str) -> &'static str {
         "console.format" => "Format",
         "console.explain" => "Explain",
         "console.explaining" => "Explaining...",
+        "console.profile" => "Profile",
+        "console.profiling" => "Profiling...",
         "console.clear" => "Clear",
         "console.results" => "Results",
         "console.explain_tab" => "Execution Plan",
+        "console.profile_tab" => "Profile",
         "console.rows" => "Rows",
         "console.time" => "Time",
 
@@ -521,6 +524,25 @@ fn translate_en(key: &'static str) -> &'static str {
         "maintenance.ready_hint" => "Ready to inspect storage allocation or run table maintenance diagnostics.",
         "maintenance.btn_close" => "Close",
 
+        // Query execution profiler
+        "profile.kpi_total_duration" => "Total Duration",
+        "profile.kpi_planning_time" => "Planning Time",
+        "profile.kpi_execution_time" => "Execution Time",
+        "profile.kpi_buffer_hits" => "Buffer Cache Hit Ratio",
+        "profile.kpi_bottleneck" => "Bottleneck Stage",
+        "profile.waterfall_title" => "Execution Stage Waterfall & Timeline",
+        "profile.stages_table_title" => "Stage Breakdown & Resource Details",
+        "profile.col_stage" => "Stage Name",
+        "profile.col_category" => "Category",
+        "profile.col_offset" => "Offset",
+        "profile.col_duration" => "Duration",
+        "profile.col_pct" => "Ratio",
+        "profile.col_details" => "Engine / I/O Details",
+        "profile.btn_copy_profile" => "Copy Profile",
+        "profile.copied" => "Profile Copied!",
+        "profile.no_profile_hint" => "Click 'Profile' (⌘⇧P) in the toolbar to capture execution timeline & resource metrics.",
+        "profile.profiling_hint" => "Executing query & collecting timeline breakdown...",
+
         // Fallback
         _ => key,
     }
@@ -540,9 +562,12 @@ fn translate_zh(key: &'static str) -> &'static str {
         "console.format" => "格式化",
         "console.explain" => "执行计划",
         "console.explaining" => "分析中...",
+        "console.profile" => "分析画像",
+        "console.profiling" => "画像分析中...",
         "console.clear" => "清空",
         "console.results" => "查询结果",
         "console.explain_tab" => "执行计划",
+        "console.profile_tab" => "耗时画像",
         "console.rows" => "行数",
         "console.time" => "耗时",
 
@@ -1020,6 +1045,25 @@ fn translate_zh(key: &'static str) -> &'static str {
         "maintenance.ready_hint" => "已就绪，可查看存储分布或启动智能运维体检。",
         "maintenance.btn_close" => "关闭",
 
+        // Query execution profiler
+        "profile.kpi_total_duration" => "总耗时",
+        "profile.kpi_planning_time" => "计划耗时",
+        "profile.kpi_execution_time" => "执行耗时",
+        "profile.kpi_buffer_hits" => "缓冲命中率",
+        "profile.kpi_bottleneck" => "最大瓶颈阶段",
+        "profile.waterfall_title" => "执行阶段瀑布流与时序甘特图",
+        "profile.stages_table_title" => "执行明细与资源消耗明细",
+        "profile.col_stage" => "阶段名称",
+        "profile.col_category" => "阶段分类",
+        "profile.col_offset" => "起始偏移",
+        "profile.col_duration" => "耗时",
+        "profile.col_pct" => "占比",
+        "profile.col_details" => "引擎与 I/O 详情",
+        "profile.btn_copy_profile" => "复制画像",
+        "profile.copied" => "画像已复制！",
+        "profile.no_profile_hint" => "点击工具栏中的'分析画像' (⌘⇧P) 采集查询阶段时序与资源消耗指标。",
+        "profile.profiling_hint" => "正在执行查询并采集各阶段时序明细...",
+
         // Fallback
         _ => translate_en(key),
     }
@@ -1159,6 +1203,22 @@ mod tests {
         assert_eq!(
             t("db_menu.maintenance_database", AppLanguage::ZhCn),
             "存储容量分析与智能运维体检向导..."
+        );
+        assert_eq!(
+            t("console.profile", AppLanguage::En),
+            "Profile"
+        );
+        assert_eq!(
+            t("console.profile", AppLanguage::ZhCn),
+            "分析画像"
+        );
+        assert_eq!(
+            t("profile.kpi_total_duration", AppLanguage::ZhCn),
+            "总耗时"
+        );
+        assert_eq!(
+            t("profile.kpi_bottleneck", AppLanguage::En),
+            "Bottleneck Stage"
         );
     }
 }

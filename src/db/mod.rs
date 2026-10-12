@@ -17,6 +17,7 @@ pub mod manager;
 pub mod mock_data;
 pub mod mysql;
 pub mod postgres;
+pub mod profile;
 pub mod remote_adapter;
 pub mod restore;
 pub mod runtime;
@@ -60,6 +61,11 @@ pub use mock_data::{
 };
 pub use mysql::MysqlAdapter;
 pub use postgres::PostgresAdapter;
+pub use profile::{
+    ProfileCategory, ProfileResourceMetrics, ProfileStage, QueryProfileReport,
+    build_synthetic_profile, format_duration_us, parse_mysql_profile_result,
+    parse_postgres_profile_result,
+};
 pub use remote_adapter::RemoteHttpAdapter;
 pub use restore::{
     RestoreErrorPolicy, RestoreOptions, RestoreProgress, RestoreSummary, SqlScriptAnalysis,

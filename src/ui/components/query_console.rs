@@ -1,10 +1,12 @@
 //! Interactive SQL query editor and execution console.
 
 use crate::db::explain::ExplainPlan;
+use crate::db::profile::QueryProfileReport;
 use crate::db::types::QueryResult;
 use crate::settings::{AppLanguage, EditorSettings};
 use crate::ui::components::data_grid::DataGrid;
 use crate::ui::components::explain_panel::{ExplainPanel, ExplainViewMode};
+use crate::ui::components::profile_panel::ProfilePanel;
 use crate::ui::i18n::t;
 use crate::ui::theme::ThemeColors;
 use gpui_kit::assets::IconName;
@@ -39,6 +41,7 @@ pub enum ConsoleBottomTab {
     #[default]
     Results,
     Explain,
+    Profile,
 }
 
 #[derive(IntoElement)]
@@ -51,8 +54,11 @@ pub struct QueryConsole {
     query_error: Option<String>,
     explain_plan: Option<ExplainPlan>,
     explain_error: Option<String>,
+    profile_report: Option<QueryProfileReport>,
+    profile_error: Option<String>,
     is_executing: bool,
     is_explaining: bool,
+    is_profiling: bool,
     bottom_tab: ConsoleBottomTab,
     explain_view: ExplainViewMode,
     connection_label: Option<String>,
@@ -63,8 +69,11 @@ pub struct QueryConsole {
     on_clear: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_format: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_explain: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
+    on_profile: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_bottom_tab: Option<Rc<dyn Fn(ConsoleBottomTab, &mut Window, &mut App) + 'static>>,
     on_explain_view: Option<Rc<dyn Fn(ExplainViewMode, &mut Window, &mut App) + 'static>>,
+    on_copy_profile: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
+    profile_copied: bool,
     on_select_tab: Option<Rc<dyn Fn(Uuid, &mut Window, &mut App) + 'static>>,
     on_close_tab: Option<Rc<dyn Fn(Uuid, &mut Window, &mut App) + 'static>>,
     on_new_tab: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
@@ -83,8 +92,11 @@ impl QueryConsole {
             query_error: None,
             explain_plan: None,
             explain_error: None,
+            profile_report: None,
+            profile_error: None,
             is_executing: false,
             is_explaining: false,
+            is_profiling: false,
             bottom_tab: ConsoleBottomTab::Results,
             explain_view: ExplainViewMode::Tree,
             connection_label: None,
@@ -95,8 +107,11 @@ impl QueryConsole {
             on_clear: None,
             on_format: None,
             on_explain: None,
+            on_profile: None,
             on_bottom_tab: None,
             on_explain_view: None,
+            on_copy_profile: None,
+            profile_copied: false,
             on_select_tab: None,
             on_close_tab: None,
             on_new_tab: None,
@@ -135,6 +150,16 @@ impl QueryConsole {
         self
     }
 
+    pub fn profile_report(mut self, report: Option<QueryProfileReport>) -> Self {
+        self.profile_report = report;
+        self
+    }
+
+    pub fn profile_error(mut self, error: Option<String>) -> Self {
+        self.profile_error = error;
+        self
+    }
+
     pub fn executing(mut self, is_executing: bool) -> Self {
         self.is_executing = is_executing;
         self
@@ -142,6 +167,16 @@ impl QueryConsole {
 
     pub fn explaining(mut self, is_explaining: bool) -> Self {
         self.is_explaining = is_explaining;
+        self
+    }
+
+    pub fn profiling(mut self, is_profiling: bool) -> Self {
+        self.is_profiling = is_profiling;
+        self
+    }
+
+    pub fn profile_copied(mut self, copied: bool) -> Self {
+        self.profile_copied = copied;
         self
     }
 
@@ -207,6 +242,22 @@ impl QueryConsole {
         self
     }
 
+    pub fn on_profile<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&mut Window, &mut App) + 'static,
+    {
+        self.on_profile = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_copy_profile<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&mut Window, &mut App) + 'static,
+    {
+        self.on_copy_profile = Some(Rc::new(handler));
+        self
+    }
+
     pub fn on_bottom_tab<F>(mut self, handler: F) -> Self
     where
         F: Fn(ConsoleBottomTab, &mut Window, &mut App) + 'static,
@@ -266,7 +317,7 @@ impl QueryConsole {
 
 impl RenderOnce for QueryConsole {
     fn render(self, _: &mut Window, _cx: &mut App) -> impl IntoElement {
-        let busy = self.is_executing || self.is_explaining;
+        let busy = self.is_executing || self.is_explaining || self.is_profiling;
         let lang = self.language;
 
         let ed_font_size = self
@@ -339,6 +390,28 @@ impl RenderOnce for QueryConsole {
             });
         }
 
+        let profile_label = if self.is_profiling {
+            t("console.profiling", lang)
+        } else {
+            t("console.profile", lang)
+        };
+
+        let mut profile_button = Button::new("profile_query")
+            .ghost()
+            .small()
+            .flex_shrink(1.0)
+            .min_w(px(28.0))
+            .overflow_hidden()
+            .icon(IconName::Gauge)
+            .label(profile_label)
+            .disabled(busy)
+            .tooltip("Profile query timeline (⌘⇧P)");
+        if let Some(on_profile) = self.on_profile {
+            profile_button = profile_button.on_click(move |_, window, cx| {
+                on_profile(window, cx);
+            });
+        }
+
         let mut clear_button = Button::new("clear_query")
             .ghost()
             .small()
@@ -405,6 +478,7 @@ impl RenderOnce for QueryConsole {
                     .child(run_button)
                     .child(format_button)
                     .child(explain_button)
+                    .child(profile_button)
                     .child(
                         div()
                             .h(px(16.0))
@@ -506,6 +580,7 @@ impl RenderOnce for QueryConsole {
         let bottom_selected = match self.bottom_tab {
             ConsoleBottomTab::Results => 0,
             ConsoleBottomTab::Explain => 1,
+            ConsoleBottomTab::Profile => 2,
         };
         let on_bottom = self.on_bottom_tab.clone();
         let bottom_tabs = TabBar::new("console-bottom-tabs")
@@ -515,10 +590,10 @@ impl RenderOnce for QueryConsole {
             .on_click(move |ix, window, cx| {
                 if let Some(ref handler) = on_bottom {
                     handler(
-                        if *ix == 1 {
-                            ConsoleBottomTab::Explain
-                        } else {
-                            ConsoleBottomTab::Results
+                        match *ix {
+                            1 => ConsoleBottomTab::Explain,
+                            2 => ConsoleBottomTab::Profile,
+                            _ => ConsoleBottomTab::Results,
                         },
                         window,
                         cx,
@@ -526,7 +601,8 @@ impl RenderOnce for QueryConsole {
                 }
             })
             .child(Tab::new().label(t("console.results", lang)))
-            .child(Tab::new().label(t("console.explain_tab", lang)));
+            .child(Tab::new().label(t("console.explain_tab", lang)))
+            .child(Tab::new().label(t("console.profile_tab", lang)));
 
         let stats = self.query_result.as_ref().map(|res| {
             format!(
@@ -582,6 +658,20 @@ impl RenderOnce for QueryConsole {
                     move |view, window, cx| {
                         if let Some(ref on_view) = handler {
                             on_view(view, window, cx);
+                        }
+                    }
+                })
+                .into_any_element(),
+            ConsoleBottomTab::Profile => ProfilePanel::new(self.profile_report)
+                .error(self.profile_error)
+                .profiling(self.is_profiling)
+                .copied(self.profile_copied)
+                .language(lang)
+                .on_copy({
+                    let handler = self.on_copy_profile.clone();
+                    move |window, cx| {
+                        if let Some(ref on_copy) = handler {
+                            on_copy(window, cx);
                         }
                     }
                 })

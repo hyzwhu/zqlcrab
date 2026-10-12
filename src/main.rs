@@ -17,7 +17,7 @@ use gpui_kit::gpui::{
 use ui::app::{
     AboutZqlcrab, AddNewRow, CheckForUpdates, CloseDialog, CloseWindow, CrabStudioApp,
     DeleteGridRow, DuplicateGridRow, ExplainQuery, FocusGridFilter, FormatSql, MinimizeWindow,
-    NewConnection, NewQueryTab, OpenDocs, OpenGithub, OpenSettings, Quit, RefreshTables,
+    NewConnection, NewQueryTab, OpenDocs, OpenGithub, OpenSettings, ProfileQuery, Quit, RefreshTables,
     ReportIssue, RunQuery, SaveGridChanges, SelectConsoleTab, SelectGridTab, SelectHistoryTab,
     SelectSchemaTab, ToggleActivityBar, ToggleFullscreen, ToggleStatusBar, ZoomWindow,
 };
@@ -176,6 +176,8 @@ fn main() {
             KeyBinding::new("alt-shift-f", FormatSql, Some("CrabStudio")),
             KeyBinding::new("cmd-shift-e", ExplainQuery, Some("CrabStudio")),
             KeyBinding::new("ctrl-shift-e", ExplainQuery, Some("CrabStudio")),
+            KeyBinding::new("cmd-shift-p", ProfileQuery, Some("CrabStudio")),
+            KeyBinding::new("ctrl-shift-p", ProfileQuery, Some("CrabStudio")),
             // Grid Data Editing & Mutation
             KeyBinding::new("cmd-f", FocusGridFilter, Some("CrabStudio")),
             KeyBinding::new("ctrl-f", FocusGridFilter, Some("CrabStudio")),

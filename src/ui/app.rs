@@ -28,6 +28,10 @@ use crate::db::maintenance::{
     parse_storage_query_result,
 };
 use crate::db::manager::ConnectionManager;
+use crate::db::profile::{
+    QueryProfileReport, build_synthetic_profile, parse_mysql_profile_result,
+    parse_postgres_profile_result,
+};
 use crate::db::mock_data::{
     MockColumnConfig, MockGeneratorType, MockProgress, MockResult, execute_mock_seeding,
     generate_mock_preview, initialize_column_configs,
@@ -123,6 +127,7 @@ gpui_kit::actions!(
         CloseDialog,
         FormatSql,
         ExplainQuery,
+        ProfileQuery,
         SaveGridChanges,
         DeleteGridRow,
         AddNewRow,
@@ -232,8 +237,11 @@ pub struct QueryTab {
     pub error: Option<String>,
     pub explain_plan: Option<ExplainPlan>,
     pub explain_error: Option<String>,
+    pub profile_report: Option<QueryProfileReport>,
+    pub profile_error: Option<String>,
     pub is_executing: bool,
     pub is_explaining: bool,
+    pub is_profiling: bool,
     pub execution_time_ms: Option<u64>,
     pub bottom_tab: ConsoleBottomTab,
     pub explain_view: ExplainViewMode,
@@ -267,6 +275,7 @@ pub struct CrabStudioApp {
     query_tab_counter: usize,
     sql_metadata_cache: Arc<RwLock<crate::db::autocomplete::SqlMetadataCache>>,
     status_message: Option<String>,
+    profile_copied: bool,
 
     // History & DataGrid state
     history_manager: QueryHistoryManager,
@@ -600,8 +609,11 @@ impl CrabStudioApp {
                 error: None,
                 explain_plan: None,
                 explain_error: None,
+                profile_report: None,
+                profile_error: None,
                 is_executing: false,
                 is_explaining: false,
+                is_profiling: false,
                 execution_time_ms: None,
                 bottom_tab: ConsoleBottomTab::Results,
                 explain_view: ExplainViewMode::Tree,
@@ -781,6 +793,7 @@ impl CrabStudioApp {
             query_tab_counter,
             sql_metadata_cache,
             status_message: Some("Ready".to_string()),
+            profile_copied: false,
             history_manager,
             history_filter: String::new(),
             grid_sort_col: None,
@@ -1074,8 +1087,11 @@ impl CrabStudioApp {
             error: None,
             explain_plan: None,
             explain_error: None,
+            profile_report: None,
+            profile_error: None,
             is_executing: false,
             is_explaining: false,
+            is_profiling: false,
             execution_time_ms: None,
             bottom_tab: ConsoleBottomTab::Results,
             explain_view: ExplainViewMode::Tree,
@@ -1140,9 +1156,12 @@ impl CrabStudioApp {
             tab.error = None;
             tab.explain_plan = None;
             tab.explain_error = None;
+            tab.profile_report = None;
+            tab.profile_error = None;
             tab.execution_time_ms = None;
             tab.is_executing = false;
             tab.is_explaining = false;
+            tab.is_profiling = false;
             self.status_message = Some("Reset query session".to_string());
             cx.notify();
             return;
@@ -1879,6 +1898,181 @@ impl CrabStudioApp {
                             tab.explain_plan = None;
                             tab.explain_error = Some(err.to_string());
                             app.status_message = Some("Explain failed".to_string());
+                        }
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Run execution profiling on the active query tab and switch to Profile tab
+    pub fn run_profile(&mut self, cx: &mut Context<Self>) {
+        if let Some(active_tab) = self.active_query_tab() {
+            let tab_id = active_tab.id;
+            self.run_profile_for_tab(tab_id, cx);
+        }
+    }
+
+    /// Run execution profiling on a specific tab's SQL
+    pub fn run_profile_for_tab(&mut self, tab_id: Uuid, cx: &mut Context<Self>) {
+        let Some(target_tab) = self.query_tabs.iter().find(|t| t.id == tab_id) else {
+            return;
+        };
+        let editor_read = target_tab.editor.read(cx);
+        let selected_text = editor_read.selected_text().to_string();
+        let sql = if !selected_text.trim().is_empty() {
+            selected_text
+        } else {
+            editor_read.value().to_string()
+        };
+        if sql.trim().is_empty() {
+            return;
+        }
+
+        let Some(conn) = self
+            .query_tabs
+            .iter()
+            .find(|t| t.id == tab_id)
+            .and_then(|t| self.connection_for_tab(t))
+        else {
+            if let Some(tab) = self.query_tabs.iter_mut().find(|t| t.id == tab_id) {
+                tab.profile_error = Some(
+                    "No active database connection. Please select or create a connection first."
+                        .to_string(),
+                );
+                tab.bottom_tab = ConsoleBottomTab::Profile;
+            }
+            cx.notify();
+            return;
+        };
+
+        if let Some(tab) = self.query_tabs.iter_mut().find(|t| t.id == tab_id) {
+            tab.is_profiling = true;
+            tab.profile_error = None;
+            tab.bottom_tab = ConsoleBottomTab::Profile;
+        }
+        self.profile_copied = false;
+        self.status_message = Some("Profiling query execution…".to_string());
+        cx.notify();
+
+        let family = conn.config.db_type.family();
+        let query_sql = sql.clone();
+
+        cx.spawn(async move |this, cx: &mut AsyncApp| {
+            let start = std::time::Instant::now();
+
+            let report_res: Result<QueryProfileReport, String> = match family {
+                DatabaseFamily::MySql => {
+                    // 1. SET profiling = 1
+                    let _ = conn.execute_query("SET profiling = 1").await;
+                    // 2. Run target query
+                    let q_res = conn.execute_query(&query_sql).await;
+                    let client_ms = start.elapsed().as_millis() as u64;
+                    // 3. SHOW PROFILE ALL FOR QUERY ...
+                    let profile_res = conn.execute_query("SHOW PROFILE ALL").await;
+                    // 4. Disable profiling
+                    let _ = conn.execute_query("SET profiling = 0").await;
+
+                    match (q_res, profile_res) {
+                        (Ok(qr), Ok(pr)) if !pr.rows.is_empty() => {
+                            let stages = parse_mysql_profile_result(&pr);
+                            let total_duration_us = stages.iter().map(|s| s.duration_us).sum::<u64>();
+                            let metrics = crate::db::profile::ProfileResourceMetrics {
+                                total_duration_us,
+                                planning_time_us: None,
+                                execution_time_us: None,
+                                rows_produced: qr.rows.len() as u64,
+                                peak_memory_bytes: None,
+                                buffer_hits: None,
+                                buffer_reads: None,
+                                temp_files_created: None,
+                            };
+                            Ok(QueryProfileReport::new(
+                                query_sql.clone(),
+                                family,
+                                stages,
+                                metrics,
+                                client_ms,
+                            ))
+                        }
+                        (Ok(qr), _) => {
+                            Ok(build_synthetic_profile(&query_sql, family, client_ms, qr.rows.len()))
+                        }
+                        (Err(e), _) => Err(e.to_string()),
+                    }
+                }
+                DatabaseFamily::Postgres => {
+                    // Try EXPLAIN (ANALYZE, BUFFERS, TIMING, SUMMARY, FORMAT JSON)
+                    let explain_analyze_json = format!("EXPLAIN (ANALYZE, BUFFERS, TIMING, SUMMARY, FORMAT JSON) {query_sql}");
+                    let res = conn.execute_query(&explain_analyze_json).await;
+                    let client_ms = start.elapsed().as_millis() as u64;
+
+                    match res {
+                        Ok(qr) => {
+                            let raw_json = qr.rows.first().and_then(|r| r.first()).map(|v| v.to_display_string()).unwrap_or_default();
+                            let (stages, metrics) = parse_postgres_profile_result(&raw_json, client_ms);
+                            Ok(QueryProfileReport::new(
+                                query_sql.clone(),
+                                family,
+                                stages,
+                                metrics,
+                                client_ms,
+                            ))
+                        }
+                        Err(_) => {
+                            // Text format fallback
+                            let explain_analyze_text = format!("EXPLAIN (ANALYZE, BUFFERS, TIMING, SUMMARY) {query_sql}");
+                            match conn.execute_query(&explain_analyze_text).await {
+                                Ok(qr) => {
+                                    let mut full_text = String::new();
+                                    for r in &qr.rows {
+                                        if let Some(v) = r.first() {
+                                            full_text.push_str(&v.to_display_string());
+                                            full_text.push('\n');
+                                        }
+                                    }
+                                    let (stages, metrics) = parse_postgres_profile_result(&full_text, client_ms);
+                                    Ok(QueryProfileReport::new(
+                                        query_sql.clone(),
+                                        family,
+                                        stages,
+                                        metrics,
+                                        client_ms,
+                                    ))
+                                }
+                                Err(e) => Err(e.to_string()),
+                            }
+                        }
+                    }
+                }
+                _ => {
+                    // SQLite & Generic synthetic client pipeline profiling
+                    let q_res = conn.execute_query(&query_sql).await;
+                    let client_ms = start.elapsed().as_millis() as u64;
+                    match q_res {
+                        Ok(qr) => Ok(build_synthetic_profile(&query_sql, family, client_ms, qr.rows.len())),
+                        Err(e) => Err(e.to_string()),
+                    }
+                }
+            };
+
+            this.update(cx, |app, cx| {
+                if let Some(tab) = app.query_tabs.iter_mut().find(|t| t.id == tab_id) {
+                    tab.is_profiling = false;
+                    match report_res {
+                        Ok(rep) => {
+                            let dur_ms = rep.metrics.total_duration_ms();
+                            tab.profile_report = Some(rep);
+                            tab.profile_error = None;
+                            app.status_message = Some(format!("Profile ready: {dur_ms:.2} ms"));
+                        }
+                        Err(err) => {
+                            tab.profile_report = None;
+                            tab.profile_error = Some(err);
+                            app.status_message = Some("Query profiling failed".to_string());
                         }
                     }
                 }
@@ -8201,6 +8395,30 @@ impl Render for CrabStudioApp {
                             });
                         }
                     };
+                    let on_profile = {
+                        let handle = app_handle.clone();
+                        move |_: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                this.run_profile(cx);
+                            });
+                        }
+                    };
+                    let on_copy_profile = {
+                        let handle = app_handle.clone();
+                        move |_: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                if let Some(tab) = this.active_query_tab() {
+                                    if let Some(ref rep) = tab.profile_report {
+                                        let md = rep.format_as_markdown();
+                                        cx.write_to_clipboard(ClipboardItem::new_string(md));
+                                        this.profile_copied = true;
+                                        this.status_message = Some("Copied Execution Profile to clipboard".to_string());
+                                        cx.notify();
+                                    }
+                                }
+                            });
+                        }
+                    };
                     let on_bottom_tab = {
                         let handle = app_handle.clone();
                         move |tab: ConsoleBottomTab, _: &mut Window, cx: &mut App| {
@@ -8273,8 +8491,12 @@ impl Render for CrabStudioApp {
                             .error(active_tab_ref.error.clone())
                             .explain_plan(active_tab_ref.explain_plan.clone())
                             .explain_error(active_tab_ref.explain_error.clone())
+                            .profile_report(active_tab_ref.profile_report.clone())
+                            .profile_error(active_tab_ref.profile_error.clone())
                             .executing(active_tab_ref.is_executing)
                             .explaining(active_tab_ref.is_explaining)
+                            .profiling(active_tab_ref.is_profiling)
+                            .profile_copied(self.profile_copied)
                             .bottom_tab(active_tab_ref.bottom_tab)
                             .explain_view(active_tab_ref.explain_view)
                             .connection_label(connection_label)
@@ -8288,6 +8510,8 @@ impl Render for CrabStudioApp {
                             .on_clear(on_clear)
                             .on_format(on_format)
                             .on_explain(on_explain)
+                            .on_profile(on_profile)
+                            .on_copy_profile(on_copy_profile)
                             .on_bottom_tab(on_bottom_tab)
                             .on_explain_view(on_explain_view)
                             .on_snippets({
@@ -11038,6 +11262,9 @@ impl Render for CrabStudioApp {
             }))
             .on_action(cx.listener(|this, _: &ExplainQuery, _, cx| {
                 this.run_explain(cx);
+            }))
+            .on_action(cx.listener(|this, _: &ProfileQuery, _, cx| {
+                this.run_profile(cx);
             }))
             .on_action(cx.listener(|this, _: &SaveGridChanges, _, cx| {
                 if (this.active_tab == WorkspaceTab::DataGrid
