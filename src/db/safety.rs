@@ -7,11 +7,12 @@ pub struct QuerySafetyValidator;
 
 impl QuerySafetyValidator {
     /// True when the statement should be executed as a result-returning query
-    /// (SELECT / WITH / PRAGMA / EXPLAIN / SHOW / DESCRIBE), after comments.
+    /// (SELECT / WITH / PRAGMA / EXPLAIN / SHOW / DESCRIBE / CHECK / OPTIMIZE / ANALYZE / REPAIR / CHECKSUM), after comments.
     pub fn is_result_set_query(sql: &str) -> bool {
         matches!(
             Self::first_keyword(sql).as_str(),
             "SELECT" | "WITH" | "PRAGMA" | "EXPLAIN" | "SHOW" | "DESCRIBE" | "DESC" | "VALUES"
+                | "CHECK" | "OPTIMIZE" | "ANALYZE" | "REPAIR" | "CHECKSUM"
         )
     }
 

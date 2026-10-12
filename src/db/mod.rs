@@ -12,6 +12,7 @@ pub mod export;
 pub mod handle;
 pub mod history;
 pub mod import;
+pub mod maintenance;
 pub mod manager;
 pub mod mock_data;
 pub mod mysql;
@@ -45,6 +46,12 @@ pub use error::{DbError, DbResult};
 pub use export::{ExportFormat, ExportOptions, export_result};
 pub use handle::ActiveConnection;
 pub use history::{QueryHistoryItem, QueryHistoryManager, QueryHistoryStatus};
+pub use maintenance::{
+    DatabaseStorageMetricsSummary, MaintenanceAction, MaintenanceLogEntry, MaintenanceOptions,
+    MaintenanceProgress, MaintenanceStatus, MaintenanceSummary, TableStorageMetrics, format_bytes,
+    generate_maintenance_sql, generate_storage_query_sql, parse_maintenance_result,
+    parse_storage_query_result,
+};
 pub use manager::ConnectionManager;
 pub use mock_data::{
     MockColumnConfig, MockGeneratorType, MockProgress, MockResult, execute_mock_seeding,

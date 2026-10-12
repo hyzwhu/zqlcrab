@@ -40,6 +40,7 @@ struct TableActionCallbacks {
     on_schema_diff: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_data_diff: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_view_er: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
+    on_maintenance: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_truncate: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_drop: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
 }
@@ -80,6 +81,8 @@ pub struct Sidebar {
     on_schema_diff_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_data_diff_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_view_er_diagram: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
+    on_maintenance_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
+    on_maintenance_database: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_truncate_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_drop_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_create_table: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
@@ -128,6 +131,8 @@ impl Sidebar {
             on_schema_diff_table: None,
             on_data_diff_table: None,
             on_view_er_diagram: None,
+            on_maintenance_table: None,
+            on_maintenance_database: None,
             on_truncate_table: None,
             on_drop_table: None,
             on_create_table: None,
@@ -269,6 +274,22 @@ impl Sidebar {
         F: Fn(TableInfo, &mut Window, &mut App) + 'static,
     {
         self.on_view_er_diagram = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_maintenance_table<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(TableInfo, &mut Window, &mut App) + 'static,
+    {
+        self.on_maintenance_table = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_maintenance_database<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&mut Window, &mut App) + 'static,
+    {
+        self.on_maintenance_database = Some(Rc::new(handler));
         self
     }
 
@@ -631,6 +652,19 @@ impl Sidebar {
                     .on_click(move |_, window, cx| {
                         if let Some(ref handler) = er_handler {
                             handler(tbl_er.clone(), window, cx);
+                        }
+                    }),
+            );
+
+            // Maintenance & Diagnostics... / 库表维护与体检...
+            let maint_handler = actions.on_maintenance.clone();
+            let tbl_maint = info.clone();
+            menu = menu.item(
+                PopupMenuItem::new(t("table_menu.maintenance", lang))
+                    .icon(IconName::Gauge)
+                    .on_click(move |_, window, cx| {
+                        if let Some(ref handler) = maint_handler {
+                            handler(tbl_maint.clone(), window, cx);
                         }
                     }),
             );
@@ -1124,6 +1158,18 @@ impl RenderOnce for Sidebar {
             });
         }
 
+        let mut maintenance_db_btn = Button::new("db_maintenance_btn")
+            .ghost()
+            .xsmall()
+            .icon(IconName::Gauge)
+            .tooltip(t("db_menu.maintenance_database", self.language));
+        if let Some(ref on_maint) = self.on_maintenance_database {
+            let on_maint = on_maint.clone();
+            maintenance_db_btn = maintenance_db_btn.on_click(move |_, window, cx| {
+                on_maint(window, cx);
+            });
+        }
+
         let database_row = h_flex()
             .w_full()
             .px_3()
@@ -1176,6 +1222,7 @@ impl RenderOnce for Sidebar {
                     .child(dump_db_btn)
                     .child(restore_db_btn)
                     .child(transfer_db_btn)
+                    .child(maintenance_db_btn)
                     .child(
                         div()
                             .px_1()
@@ -1266,6 +1313,7 @@ impl RenderOnce for Sidebar {
                         on_schema_diff: self.on_schema_diff_table.clone(),
                         on_data_diff: self.on_data_diff_table.clone(),
                         on_view_er: self.on_view_er_diagram.clone(),
+                        on_maintenance: self.on_maintenance_table.clone(),
                         on_truncate: self.on_truncate_table.clone(),
                         on_drop: self.on_drop_table.clone(),
                     };

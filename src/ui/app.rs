@@ -21,6 +21,12 @@ use crate::db::import::{
     FileEncoding, ImportExecutor, ImportFormat, ImportProgress, ImportResult, SqlPreviewData,
     auto_map_columns,
 };
+use crate::db::maintenance::{
+    DatabaseStorageMetricsSummary, MaintenanceAction, MaintenanceLogEntry, MaintenanceOptions,
+    MaintenanceProgress, MaintenanceStatus, MaintenanceSummary, TableStorageMetrics,
+    generate_maintenance_sql, generate_storage_query_sql, parse_maintenance_result,
+    parse_storage_query_result,
+};
 use crate::db::manager::ConnectionManager;
 use crate::db::mock_data::{
     MockColumnConfig, MockGeneratorType, MockProgress, MockResult, execute_mock_seeding,
@@ -59,7 +65,7 @@ use crate::ui::components::{
     ConsoleBottomTab, DataDiffFilterTab, DataDiffModal, DataGrid, DiffFilterTab, DumpModal,
     DumpModalStep, ErDiagramView, ExplainViewMode, ExportDestination, ExportModal,
     ExportSuccessInfo, ExportWizardStep, ImportModal, ImportWizardStep, KillConfirmModal,
-    MockDataModal, MockWizardStep, QueryConsole, QueryHistoryView, QueryTabHeader, RestoreModal,
+    MaintenanceModal, MaintenanceModalTab, MockDataModal, MockWizardStep, QueryConsole, QueryHistoryView, QueryTabHeader, RestoreModal,
     RestoreModalStep, SchemaDiffModal, SchemaViewer, SessionsView, SettingsTab, SettingsView,
     Sidebar, SnippetEditModal, SnippetView, SqlReviewModal, TransferModal, TransferModalStep,
     create_table_modal::{CreateTableColumnState, CreateTableIndexState, CreateTableModal},
@@ -480,6 +486,22 @@ pub struct CrabStudioApp {
     transfer_logs: Vec<TransferAuditLog>,
     transfer_error_msg: Option<String>,
     transfer_copied: bool,
+
+    // Database Storage Capacity Analysis & Table Maintenance Diagnostics state
+    maintenance_modal_open: bool,
+    maintenance_tab: MaintenanceModalTab,
+    maintenance_summary: Option<DatabaseStorageMetricsSummary>,
+    maintenance_selected_tables: HashSet<String>,
+    maintenance_filter_query: String,
+    maintenance_selected_action: MaintenanceAction,
+    maintenance_options: MaintenanceOptions,
+    maintenance_is_loading_metrics: bool,
+    maintenance_is_executing: bool,
+    maintenance_progress: Option<MaintenanceProgress>,
+    maintenance_logs: Vec<MaintenanceLogEntry>,
+    maintenance_exec_summary: Option<MaintenanceSummary>,
+    maintenance_error_msg: Option<String>,
+    maintenance_copied: bool,
 
     // Settings state
     settings_manager: SettingsManager,
@@ -954,6 +976,20 @@ impl CrabStudioApp {
             transfer_logs: Vec::new(),
             transfer_error_msg: None,
             transfer_copied: false,
+            maintenance_modal_open: false,
+            maintenance_tab: MaintenanceModalTab::Storage,
+            maintenance_summary: None,
+            maintenance_selected_tables: HashSet::new(),
+            maintenance_filter_query: String::new(),
+            maintenance_selected_action: MaintenanceAction::Optimize,
+            maintenance_options: MaintenanceOptions::default(),
+            maintenance_is_loading_metrics: false,
+            maintenance_is_executing: false,
+            maintenance_progress: None,
+            maintenance_logs: Vec::new(),
+            maintenance_exec_summary: None,
+            maintenance_error_msg: None,
+            maintenance_copied: false,
             settings_manager,
             active_nav: ActivityNav::Databases,
             active_settings_tab: SettingsTab::Appearance,
@@ -6305,6 +6341,313 @@ impl CrabStudioApp {
         });
     }
 
+    // -------------------------------------------------------------------------
+    // Storage Capacity Analysis & Table Maintenance Diagnostics Wizard
+    // -------------------------------------------------------------------------
+
+    pub fn open_maintenance_modal(
+        &mut self,
+        initial_table: Option<String>,
+        initial_tab: Option<MaintenanceModalTab>,
+        cx: &mut Context<Self>,
+    ) {
+        self.maintenance_modal_open = true;
+        self.maintenance_tab = initial_tab.unwrap_or(MaintenanceModalTab::Storage);
+        self.maintenance_is_executing = false;
+        self.maintenance_progress = None;
+        self.maintenance_exec_summary = None;
+        self.maintenance_error_msg = None;
+        self.maintenance_copied = false;
+        self.maintenance_logs.clear();
+        self.maintenance_filter_query.clear();
+
+        self.maintenance_selected_tables.clear();
+        if let Some(tbl) = initial_table {
+            self.maintenance_selected_tables.insert(tbl);
+        } else {
+            for t in &self.active_tables {
+                self.maintenance_selected_tables.insert(t.name.clone());
+            }
+        }
+
+        self.refresh_maintenance_metrics(cx);
+        cx.notify();
+    }
+
+    pub fn close_maintenance_modal(&mut self, cx: &mut Context<Self>) {
+        self.maintenance_modal_open = false;
+        self.maintenance_is_executing = false;
+        cx.notify();
+    }
+
+    pub fn refresh_maintenance_metrics(&mut self, cx: &mut Context<Self>) {
+        let Some(ref conn) = self.active_connection else {
+            self.maintenance_summary = None;
+            self.maintenance_is_loading_metrics = false;
+            return;
+        };
+
+        self.maintenance_is_loading_metrics = true;
+        self.maintenance_error_msg = None;
+
+        let conn_clone = conn.clone();
+        let family = conn.config.db_type.family();
+        let database = conn.config.database.clone();
+        let active_tbl_names: Vec<String> = self.active_tables.iter().map(|t| t.name.clone()).collect();
+
+        let _ = cx.spawn(async move |this, cx: &mut AsyncApp| {
+            let sql = generate_storage_query_sql(family, Some(&database), None);
+            let query_res = conn_clone.execute_query(&sql).await;
+
+            match query_res {
+                Ok(res) => {
+                    let mut tables = parse_storage_query_result(family, &res);
+
+                    // For SQLite, generate fallback metrics for known active tables if overview only
+                    if family == DatabaseFamily::Sqlite {
+                        let total_db_size = tables.first().map(|t| t.total_size_bytes).unwrap_or(0);
+                        let free_db_size = tables.first().map(|t| t.free_size_bytes).unwrap_or(0);
+                        let data_db_size = total_db_size.saturating_sub(free_db_size);
+
+                        let mut tbl_metrics = Vec::new();
+                        let tbl_count = active_tbl_names.len().max(1);
+                        let avg_size = data_db_size / (tbl_count as u64);
+
+                        for t_name in &active_tbl_names {
+                            let cnt_sql = format!("SELECT count(*) FROM \"{t_name}\";");
+                            let cnt = if let Ok(cnt_res) = conn_clone.execute_query(&cnt_sql).await {
+                                cnt_res
+                                    .rows
+                                    .first()
+                                    .and_then(|r| r.first())
+                                    .map(|v| match v {
+                                        QueryValue::Int(i) => (*i).max(0) as u64,
+                                        _ => 0,
+                                    })
+                                    .unwrap_or(0)
+                            } else {
+                                0
+                            };
+
+                            tbl_metrics.push(TableStorageMetrics {
+                                table_name: t_name.clone(),
+                                schema: None,
+                                engine: Some("SQLite B-Tree".to_string()),
+                                total_size_bytes: avg_size,
+                                data_size_bytes: avg_size,
+                                index_size_bytes: 0,
+                                free_size_bytes: 0,
+                                row_count: cnt,
+                                avg_row_size_bytes: if cnt > 0 { avg_size / cnt } else { 0 },
+                                dead_tuples: None,
+                                collation: None,
+                                last_vacuum: None,
+                                last_analyze: None,
+                            });
+                        }
+
+                        if !tbl_metrics.is_empty() {
+                            tables = tbl_metrics;
+                        }
+                    }
+
+                    let summary = DatabaseStorageMetricsSummary::from_tables(tables);
+                    let _ = this.update(cx, |app, cx| {
+                        app.maintenance_summary = Some(summary);
+                        app.maintenance_is_loading_metrics = false;
+                        cx.notify();
+                    });
+                }
+                Err(e) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.maintenance_error_msg = Some(format!("Failed to query storage metrics: {e}"));
+                        app.maintenance_is_loading_metrics = false;
+                        cx.notify();
+                    });
+                }
+            }
+        });
+    }
+
+    pub fn run_maintenance(&mut self, cx: &mut Context<Self>) {
+        let Some(ref conn) = self.active_connection else {
+            self.maintenance_error_msg = Some("No active database connection.".to_string());
+            return;
+        };
+
+        if self.maintenance_is_executing {
+            return;
+        }
+
+        self.maintenance_is_executing = true;
+        self.maintenance_error_msg = None;
+        self.maintenance_logs.clear();
+        self.maintenance_exec_summary = None;
+
+        let conn_clone = conn.clone();
+        let family = conn.config.db_type.family();
+        let action = self.maintenance_selected_action;
+        let options = self.maintenance_options.clone();
+
+        let target_tables: Vec<String> = if self.maintenance_selected_tables.is_empty() {
+            self.active_tables.iter().map(|t| t.name.clone()).collect()
+        } else {
+            self.maintenance_selected_tables.iter().cloned().collect()
+        };
+
+        let total_tables = target_tables.len();
+        if total_tables == 0 {
+            self.maintenance_is_executing = false;
+            self.maintenance_error_msg = Some("No tables available for maintenance.".to_string());
+            return;
+        }
+
+        self.maintenance_progress = Some(MaintenanceProgress {
+            current_index: 0,
+            total_tables,
+            current_table: target_tables[0].clone(),
+            action,
+            percentage: 0.0,
+        });
+
+        let _ = cx.spawn(async move |this, cx: &mut AsyncApp| {
+            let start = std::time::Instant::now();
+            let mut succeeded = 0;
+            let mut warnings = 0;
+            let mut failed = 0;
+            let mut logs = Vec::new();
+
+            for (idx, tbl) in target_tables.iter().enumerate() {
+                let is_exec = this.read_with(cx, |app, _| app.maintenance_is_executing).unwrap_or(false);
+                if !is_exec {
+                    break;
+                }
+
+                let pct = idx as f32 / total_tables as f32;
+                let _ = this.update(cx, |app, cx| {
+                    if let Some(ref mut p) = app.maintenance_progress {
+                        p.current_index = idx + 1;
+                        p.current_table = tbl.clone();
+                        p.percentage = pct;
+                    }
+                    cx.notify();
+                });
+
+                let stmts = generate_maintenance_sql(action, tbl, family, &options, None);
+                let tbl_start = std::time::Instant::now();
+                let mut tbl_has_err = false;
+                let mut tbl_entry: Option<MaintenanceLogEntry> = None;
+
+                for stmt in stmts {
+                    match conn_clone.execute_query(&stmt).await {
+                        Ok(res) => {
+                            let dur_ms = tbl_start.elapsed().as_millis() as u64;
+                            let entry = parse_maintenance_result(action, tbl, &res, dur_ms);
+                            if entry.status == MaintenanceStatus::Warning {
+                                warnings += 1;
+                            } else if entry.status == MaintenanceStatus::Error {
+                                tbl_has_err = true;
+                                failed += 1;
+                            }
+                            tbl_entry = Some(entry);
+                        }
+                        Err(e) => {
+                            tbl_has_err = true;
+                            failed += 1;
+                            let dur_ms = tbl_start.elapsed().as_millis() as u64;
+                            tbl_entry = Some(MaintenanceLogEntry {
+                                timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
+                                table_name: tbl.clone(),
+                                action,
+                                status: MaintenanceStatus::Error,
+                                message: format!("Execution failed: {e}"),
+                                duration_ms: dur_ms,
+                            });
+                            break;
+                        }
+                    }
+                }
+
+                if !tbl_has_err && tbl_entry.as_ref().map(|e| e.status) == Some(MaintenanceStatus::Success) {
+                    succeeded += 1;
+                }
+
+                if let Some(entry) = tbl_entry {
+                    logs.push(entry.clone());
+                    let _ = this.update(cx, |app, cx| {
+                        app.maintenance_logs.push(entry);
+                        cx.notify();
+                    });
+                }
+
+                if tbl_has_err && !options.continue_on_error {
+                    break;
+                }
+            }
+
+            let total_dur = start.elapsed().as_millis() as u64;
+            let summary = MaintenanceSummary {
+                total_tables,
+                succeeded,
+                warnings,
+                failed,
+                total_duration_ms: total_dur,
+                is_success: failed == 0,
+                logs: logs.clone(),
+            };
+
+            let _ = this.update(cx, |app, cx| {
+                app.maintenance_is_executing = false;
+                if let Some(ref mut p) = app.maintenance_progress {
+                    p.current_index = total_tables;
+                    p.percentage = 1.0;
+                }
+                app.maintenance_exec_summary = Some(summary);
+                app.status_message = Some(format!(
+                    "Maintenance completed: {} succeeded, {} failed in {}ms",
+                    succeeded, failed, total_dur
+                ));
+                cx.notify();
+            });
+        });
+    }
+
+    pub fn abort_maintenance(&mut self, cx: &mut Context<Self>) {
+        if self.maintenance_is_executing {
+            self.maintenance_is_executing = false;
+            self.maintenance_logs.push(MaintenanceLogEntry {
+                timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
+                table_name: "-".to_string(),
+                action: self.maintenance_selected_action,
+                status: MaintenanceStatus::Warning,
+                message: "Maintenance routine aborted by user.".to_string(),
+                duration_ms: 0,
+            });
+            cx.notify();
+        }
+    }
+
+    pub fn copy_maintenance_logs(&mut self, cx: &mut Context<Self>) {
+        let lines: Vec<String> = self
+            .maintenance_logs
+            .iter()
+            .map(|l| {
+                format!(
+                    "[{}] {} [{}] {} ({}ms)",
+                    l.timestamp,
+                    l.status.badge_text(),
+                    l.table_name,
+                    l.message,
+                    l.duration_ms
+                )
+            })
+            .collect();
+        let content = lines.join("\n");
+        cx.write_to_clipboard(ClipboardItem::new_string(content));
+        self.maintenance_copied = true;
+        cx.notify();
+    }
+
     /// Open modal to create a new SQL snippet
     pub fn open_new_snippet_modal(
         &mut self,
@@ -7433,6 +7776,22 @@ impl Render for CrabStudioApp {
             move |table, _, cx| {
                 handle.update(cx, |this, cx| {
                     this.open_transfer_modal(Some(table.name), cx);
+                });
+            }
+        })
+        .on_maintenance_database({
+            let handle = app_handle.clone();
+            move |_, cx| {
+                handle.update(cx, |this, cx| {
+                    this.open_maintenance_modal(None, Some(MaintenanceModalTab::Storage), cx);
+                });
+            }
+        })
+        .on_maintenance_table({
+            let handle = app_handle.clone();
+            move |table, _, cx| {
+                handle.update(cx, |this, cx| {
+                    this.open_maintenance_modal(Some(table.name), Some(MaintenanceModalTab::Diagnostics), cx);
                 });
             }
         })
@@ -10402,6 +10761,196 @@ impl Render for CrabStudioApp {
             None
         };
 
+        // Storage Capacity Analysis & Table Maintenance Diagnostics Wizard overlay
+        let maintenance_overlay = if self.maintenance_modal_open {
+            let active_family = self
+                .active_connection
+                .as_ref()
+                .map(|c| c.config.db_type.family())
+                .unwrap_or(DatabaseFamily::Sqlite);
+
+            let active_db = self
+                .active_connection
+                .as_ref()
+                .map(|c| {
+                    if c.config.database.is_empty() {
+                        "default".to_string()
+                    } else {
+                        c.config.database.clone()
+                    }
+                })
+                .unwrap_or_else(|| "default".to_string());
+
+            let on_tab = {
+                let handle = app_handle.clone();
+                move |tab: MaintenanceModalTab, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.maintenance_tab = tab;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_refresh = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.refresh_maintenance_metrics(cx);
+                    });
+                }
+            };
+            let on_filter = {
+                let handle = app_handle.clone();
+                move |q: String, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.maintenance_filter_query = q;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_toggle_table = {
+                let handle = app_handle.clone();
+                move |tbl: String, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        if this.maintenance_selected_tables.contains(&tbl) {
+                            this.maintenance_selected_tables.remove(&tbl);
+                        } else {
+                            this.maintenance_selected_tables.insert(tbl);
+                        }
+                        cx.notify();
+                    });
+                }
+            };
+            let on_select_all = {
+                let handle = app_handle.clone();
+                move |sel: bool, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        if sel {
+                            for t in &this.active_tables {
+                                this.maintenance_selected_tables.insert(t.name.clone());
+                            }
+                        } else {
+                            this.maintenance_selected_tables.clear();
+                        }
+                        cx.notify();
+                    });
+                }
+            };
+            let on_select_action = {
+                let handle = app_handle.clone();
+                move |action: MaintenanceAction, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.maintenance_selected_action = action;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_toggle_continue = {
+                let handle = app_handle.clone();
+                move |val: bool, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.maintenance_options.continue_on_error = val;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_toggle_full_vac = {
+                let handle = app_handle.clone();
+                move |val: bool, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.maintenance_options.full_vacuum = val;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_toggle_ext_chk = {
+                let handle = app_handle.clone();
+                move |val: bool, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.maintenance_options.extended_check = val;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_start_maint = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.run_maintenance(cx);
+                    });
+                }
+            };
+            let on_abort_maint = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.abort_maintenance(cx);
+                    });
+                }
+            };
+            let on_copy = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.copy_maintenance_logs(cx);
+                    });
+                }
+            };
+            let on_jump_maint = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.maintenance_tab = MaintenanceModalTab::Diagnostics;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_close_maint = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.close_maintenance_modal(cx);
+                    });
+                }
+            };
+
+            Some(
+                MaintenanceModal::new(
+                    self.maintenance_tab,
+                    active_family,
+                    active_db,
+                    self.maintenance_summary.clone(),
+                    self.maintenance_selected_tables.clone(),
+                    self.maintenance_filter_query.clone(),
+                    self.maintenance_selected_action,
+                    self.maintenance_options.clone(),
+                    self.maintenance_is_loading_metrics,
+                    self.maintenance_is_executing,
+                    self.maintenance_progress.clone(),
+                    self.maintenance_logs.clone(),
+                    self.maintenance_exec_summary.clone(),
+                    self.maintenance_error_msg.clone(),
+                    self.maintenance_copied,
+                    self.settings_manager.settings().language,
+                )
+                .on_tab_change(on_tab)
+                .on_refresh_metrics(on_refresh)
+                .on_filter_change(on_filter)
+                .on_toggle_table(on_toggle_table)
+                .on_select_all_tables(on_select_all)
+                .on_select_action(on_select_action)
+                .on_toggle_continue_on_error(on_toggle_continue)
+                .on_toggle_full_vacuum(on_toggle_full_vac)
+                .on_toggle_extended_check(on_toggle_ext_chk)
+                .on_start_maintenance(on_start_maint)
+                .on_abort_maintenance(on_abort_maint)
+                .on_copy_logs(on_copy)
+                .on_jump_to_maintenance(on_jump_maint)
+                .on_close(on_close_maint),
+            )
+        } else {
+            None
+        };
+
         // Settings View component
         let settings_view = SettingsView::new(
             self.settings_manager.settings().clone(),
@@ -10537,7 +11086,9 @@ impl Render for CrabStudioApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &CloseDialog, _, cx| {
-                if this.transfer_modal_open {
+                if this.maintenance_modal_open {
+                    this.close_maintenance_modal(cx);
+                } else if this.transfer_modal_open {
                     this.close_transfer_modal(cx);
                 } else if this.restore_modal_open {
                     this.close_restore_modal(cx);
@@ -10579,7 +11130,9 @@ impl Render for CrabStudioApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
-                if this.transfer_modal_open {
+                if this.maintenance_modal_open {
+                    this.close_maintenance_modal(cx);
+                } else if this.transfer_modal_open {
                     this.close_transfer_modal(cx);
                 } else if this.restore_modal_open {
                     this.close_restore_modal(cx);
@@ -10780,5 +11333,6 @@ impl Render for CrabStudioApp {
             .children(dump_overlay)
             .children(restore_overlay)
             .children(transfer_overlay)
+            .children(maintenance_overlay)
     }
 }
