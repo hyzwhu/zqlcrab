@@ -937,6 +937,8 @@ impl SchemaDiffModal {
 impl RenderOnce for SchemaDiffModal {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
         let dialog = v_flex()
+            .id("schema_diff_modal_card")
+            .occlude()
             .w(px(760.0))
             .max_h(px(640.0))
             .rounded_lg()
@@ -953,6 +955,8 @@ impl RenderOnce for SchemaDiffModal {
             .child(self.render_footer());
 
         div()
+            .id("schema_diff_modal_backdrop")
+            .occlude()
             .absolute()
             .inset_0()
             .bg(rgba(0x00000088))

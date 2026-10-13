@@ -1285,6 +1285,8 @@ impl RenderOnce for MaintenanceModal {
         let footer = self.render_footer(lang);
 
         div()
+            .id("maintenance_modal_backdrop")
+            .occlude()
             .absolute()
             .inset_0()
             .bg(rgba(0x00000088))
@@ -1293,6 +1295,8 @@ impl RenderOnce for MaintenanceModal {
             .flex()
             .child(
                 v_flex()
+                    .id("maintenance_modal_card")
+                    .occlude()
                     .w(px(820.0))
                     .max_h(px(640.0))
                     .bg(ThemeColors::BG_APP)

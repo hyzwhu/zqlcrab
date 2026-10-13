@@ -187,6 +187,8 @@ impl RenderOnce for SnippetEditModal {
         };
 
         let dialog = v_flex()
+            .id("snippet_edit_modal_card")
+            .occlude()
             .w(px(580.0))
             .max_h(px(640.0))
             .rounded_lg()
@@ -362,6 +364,8 @@ impl RenderOnce for SnippetEditModal {
 
         // Modal backdrop overlay
         div()
+            .id("snippet_edit_modal_backdrop")
+            .occlude()
             .absolute()
             .inset_0()
             .bg(rgba(0x00000088))

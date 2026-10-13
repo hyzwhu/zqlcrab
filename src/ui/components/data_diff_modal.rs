@@ -1017,6 +1017,8 @@ impl DataDiffModal {
 impl RenderOnce for DataDiffModal {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let dialog = v_flex()
+            .id("data_diff_modal_card")
+            .occlude()
             .w(px(1040.0))
             .h(px(720.0))
             .rounded_xl()
@@ -1048,6 +1050,8 @@ impl RenderOnce for DataDiffModal {
             .child(self.render_footer());
 
         div()
+            .id("data_diff_modal_backdrop")
+            .occlude()
             .absolute()
             .inset_0()
             .bg(rgba(0x00000088))

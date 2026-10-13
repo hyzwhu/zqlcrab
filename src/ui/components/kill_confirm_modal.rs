@@ -122,6 +122,8 @@ impl RenderOnce for KillConfirmModal {
         };
 
         let dialog = v_flex()
+            .id("kill_confirm_modal_card")
+            .occlude()
             .w(px(520.0))
             .rounded_lg()
             .border_1()
@@ -314,6 +316,8 @@ impl RenderOnce for KillConfirmModal {
             );
 
         div()
+            .id("kill_confirm_modal_backdrop")
+            .occlude()
             .absolute()
             .inset_0()
             .bg(rgba(0x00000088))

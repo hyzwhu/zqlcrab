@@ -220,7 +220,7 @@ impl RenderOnce for SnippetView {
             .prefix(Icon::new(IconName::Search).size(px(14.0)));
 
         // Dialect Filter Pills
-        let mut dialect_pills = h_flex().items_center().gap_1();
+        let mut dialect_pills = h_flex().items_center().gap_1().flex_shrink_0();
         let dialect_options = [
             (None, "All Dialects"),
             (Some(DatabaseFamily::Postgres), "PostgreSQL"),
@@ -233,6 +233,7 @@ impl RenderOnce for SnippetView {
             let handler = self.on_select_dialect.clone();
             let pill = div()
                 .id(ElementId::Name(format!("snip_dia_{}", label).into()))
+                .flex_shrink_0()
                 .px_2()
                 .py_0p5()
                 .rounded_full()
@@ -258,7 +259,7 @@ impl RenderOnce for SnippetView {
         }
 
         // Category Filter Pills
-        let mut category_pills = h_flex().items_center().gap_1();
+        let mut category_pills = h_flex().items_center().gap_1().flex_shrink_0();
         let category_options = [
             (None, "All Categories", "✨"),
             (Some(SnippetCategory::Performance), "Performance", "⚡"),
@@ -273,6 +274,7 @@ impl RenderOnce for SnippetView {
             let handler = self.on_select_category.clone();
             let pill = div()
                 .id(ElementId::Name(format!("snip_cat_{}", label).into()))
+                .flex_shrink_0()
                 .px_2()
                 .py_0p5()
                 .rounded_full()
@@ -297,6 +299,23 @@ impl RenderOnce for SnippetView {
             category_pills = category_pills.child(pill);
         }
 
+        let tabs_scroll = h_flex()
+            .id("snippet_tabs_scroll")
+            .w_full()
+            .min_w_0()
+            .items_center()
+            .gap_2()
+            .overflow_x_scroll()
+            .child(dialect_pills)
+            .child(
+                div()
+                    .h(px(14.0))
+                    .w(px(1.0))
+                    .bg(ThemeColors::BORDER)
+                    .flex_shrink_0(),
+            )
+            .child(category_pills);
+
         let filter_panel = v_flex()
             .w_full()
             .px_4()
@@ -306,15 +325,7 @@ impl RenderOnce for SnippetView {
             .border_color(ThemeColors::BORDER)
             .bg(ThemeColors::BG_APP)
             .child(search_bar)
-            .child(
-                h_flex()
-                    .w_full()
-                    .items_center()
-                    .justify_between()
-                    .gap_2()
-                    .child(dialect_pills)
-                    .child(category_pills),
-            );
+            .child(tabs_scroll);
 
         // 3. Snippet Card List
         let content = if filtered_snippets.is_empty() {

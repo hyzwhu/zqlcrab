@@ -362,6 +362,8 @@ impl RenderOnce for DumpModal {
         let footer = self.render_footer(lang);
 
         div()
+            .id("dump_modal_backdrop")
+            .occlude()
             .absolute()
             .inset_0()
             .bg(rgba(0x00000088))
@@ -370,6 +372,8 @@ impl RenderOnce for DumpModal {
             .flex()
             .child(
                 v_flex()
+                    .id("dump_modal_card")
+                    .occlude()
                     .w(px(720.0))
                     .max_h(px(600.0))
                     .bg(ThemeColors::BG_APP)

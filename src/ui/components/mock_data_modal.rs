@@ -1003,6 +1003,8 @@ impl RenderOnce for MockDataModal {
 
         // Modal backdrop overlay
         div()
+            .id("mock_data_modal_backdrop")
+            .occlude()
             .absolute()
             .inset_0()
             .bg(rgba(0x000000a6))
@@ -1011,6 +1013,8 @@ impl RenderOnce for MockDataModal {
             .justify_center()
             .child(
                 v_flex()
+                    .id("mock_data_modal_card")
+                    .occlude()
                     .w(px(760.0))
                     .max_h(px(680.0))
                     .rounded_xl()

@@ -1309,6 +1309,8 @@ impl RenderOnce for ExportModal {
 
         // Modal backdrop overlay
         div()
+            .id("export_modal_backdrop")
+            .occlude()
             .absolute()
             .inset_0()
             .bg(rgba(0x00000088))
@@ -1317,6 +1319,8 @@ impl RenderOnce for ExportModal {
             .flex()
             .child(
                 v_flex()
+                    .id("export_modal_card")
+                    .occlude()
                     .w(px(720.0))
                     .max_h(px(640.0))
                     .bg(ThemeColors::BG_APP)
