@@ -15,13 +15,14 @@ use gpui_kit::component::{
     Disableable as _, Icon, Sizable as _,
     button::{Button, ButtonVariants as _},
     input::{Editor, EditorState},
+    menu::{DropdownMenu as _, PopupMenuItem},
     resizable::{ResizableState, resizable_panel, v_resizable},
     tab::{Tab, TabBar},
 };
 use gpui_kit::gpui::{
-    AnyElement, App, Entity, FontWeight, InteractiveElement as _, IntoElement, ParentElement,
-    RenderOnce, StatefulInteractiveElement as _, Styled, Window, div, prelude::FluentBuilder as _,
-    px,
+    Anchor, AnyElement, App, Entity, FontWeight, InteractiveElement as _, IntoElement,
+    ParentElement, RenderOnce, StatefulInteractiveElement as _, Styled, Window, div,
+    prelude::FluentBuilder as _, px,
 };
 use std::rc::Rc;
 use std::sync::Arc;
@@ -340,9 +341,7 @@ impl RenderOnce for QueryConsole {
         let mut run_button = Button::new("run_query")
             .ghost()
             .small()
-            .flex_shrink(1.0)
-            .min_w(px(28.0))
-            .overflow_hidden()
+            .flex_shrink_0()
             .icon(IconName::Play)
             .label(run_label)
             .disabled(busy)
@@ -356,9 +355,7 @@ impl RenderOnce for QueryConsole {
         let mut format_button = Button::new("format_sql")
             .ghost()
             .small()
-            .flex_shrink(1.0)
-            .min_w(px(28.0))
-            .overflow_hidden()
+            .flex_shrink_0()
             .icon(IconName::ListIndentIncrease)
             .label(t("console.format", lang))
             .tooltip("Format SQL (Shift+Alt+F)");
@@ -377,9 +374,7 @@ impl RenderOnce for QueryConsole {
         let mut explain_button = Button::new("explain_query")
             .ghost()
             .small()
-            .flex_shrink(1.0)
-            .min_w(px(28.0))
-            .overflow_hidden()
+            .flex_shrink_0()
             .icon(IconName::Activity)
             .label(explain_label)
             .disabled(busy)
@@ -399,9 +394,7 @@ impl RenderOnce for QueryConsole {
         let mut profile_button = Button::new("profile_query")
             .ghost()
             .small()
-            .flex_shrink(1.0)
-            .min_w(px(28.0))
-            .overflow_hidden()
+            .flex_shrink_0()
             .icon(IconName::Gauge)
             .label(profile_label)
             .disabled(busy)
@@ -412,50 +405,56 @@ impl RenderOnce for QueryConsole {
             });
         }
 
-        let mut clear_button = Button::new("clear_query")
+        // Consolidated Snippets & Actions dropdown button
+        let on_snip = self.on_snippets.clone();
+        let on_save_snip = self.on_save_as_snippet.clone();
+        let on_clr = self.on_clear.clone();
+        let snippets_button = Button::new("console_snippets_dropdown")
             .ghost()
             .small()
-            .flex_shrink(1.0)
-            .min_w(px(28.0))
-            .overflow_hidden()
-            .icon(IconName::Trash)
-            .label(t("console.clear", lang))
-            .tooltip("Clear editor");
-        if let Some(on_clear) = self.on_clear {
-            clear_button = clear_button.on_click(move |_, window, cx| {
-                on_clear(window, cx);
-            });
-        }
-
-        let mut snippets_button = Button::new("console_snippets")
-            .ghost()
-            .small()
-            .flex_shrink(1.0)
-            .min_w(px(28.0))
-            .overflow_hidden()
+            .flex_shrink_0()
             .icon(IconName::FileCode)
             .label(t("console.snippets", lang))
-            .tooltip("Browse SQL Snippets & Script Library");
-        if let Some(on_snippets) = self.on_snippets {
-            snippets_button = snippets_button.on_click(move |_, window, cx| {
-                on_snippets(window, cx);
-            });
-        }
+            .tooltip("SQL Snippets & Editor Actions")
+            .dropdown_menu_with_anchor(Anchor::BottomLeft, move |mut menu, _, _| {
+                let on_snip_click = on_snip.clone();
+                let on_save_click = on_save_snip.clone();
+                let on_clr_click = on_clr.clone();
 
-        let mut save_snippet_button = Button::new("console_save_snippet")
-            .ghost()
-            .small()
-            .flex_shrink(1.0)
-            .min_w(px(28.0))
-            .overflow_hidden()
-            .icon(IconName::Bookmark)
-            .label(t("console.save_as_snippet", lang))
-            .tooltip("Save current query as a snippet");
-        if let Some(on_save_as_snippet) = self.on_save_as_snippet {
-            save_snippet_button = save_snippet_button.on_click(move |_, window, cx| {
-                on_save_as_snippet(window, cx);
+                menu = menu.item(
+                    PopupMenuItem::new(t("console.snippets_browse", lang).to_string())
+                        .icon(IconName::FileCode)
+                        .on_click(move |_, window, cx| {
+                            if let Some(ref h) = on_snip_click {
+                                h(window, cx);
+                            }
+                        }),
+                );
+
+                menu = menu.item(
+                    PopupMenuItem::new(t("console.save_as_snippet", lang).to_string())
+                        .icon(IconName::Bookmark)
+                        .on_click(move |_, window, cx| {
+                            if let Some(ref h) = on_save_click {
+                                h(window, cx);
+                            }
+                        }),
+                );
+
+                if on_clr_click.is_some() {
+                    menu = menu.separator().item(
+                        PopupMenuItem::new(t("console.clear", lang).to_string())
+                            .icon(IconName::Trash)
+                            .on_click(move |_, window, cx| {
+                                if let Some(ref h) = on_clr_click {
+                                    h(window, cx);
+                                }
+                            }),
+                    );
+                }
+
+                menu
             });
-        }
 
         let toolbar = h_flex()
             .h(px(36.0))
@@ -467,70 +466,59 @@ impl RenderOnce for QueryConsole {
             .border_b_1()
             .border_color(ThemeColors::BORDER)
             .gap_2()
-            .overflow_hidden()
+            .min_w_0()
             .child(
                 h_flex()
+                    .id("console_toolbar_actions")
                     .items_center()
                     .gap_1()
-                    .flex_shrink(1.0)
+                    .flex_1()
                     .min_w_0()
-                    .overflow_hidden()
+                    .overflow_x_scroll()
                     .child(run_button)
                     .child(format_button)
                     .child(explain_button)
                     .child(profile_button)
                     .child(
                         div()
-                            .h(px(16.0))
+                            .h(px(14.0))
                             .w(px(1.0))
-                            .bg(ThemeColors::BORDER)
                             .mx_1()
+                            .bg(ThemeColors::BORDER)
                             .flex_shrink_0(),
                     )
-                    .child(clear_button)
-                    .child(
-                        div()
-                            .h(px(16.0))
-                            .w(px(1.0))
-                            .bg(ThemeColors::BORDER)
-                            .mx_1()
-                            .flex_shrink_0(),
-                    )
-                    .child(snippets_button)
-                    .child(save_snippet_button),
+                    .child(snippets_button),
             )
-            .child(
-                h_flex()
-                    .items_center()
-                    .gap_2()
-                    .flex_shrink(1.0)
-                    .min_w_0()
-                    .overflow_hidden()
-                    .when_some(self.connection_label.clone(), |this, label| {
-                        this.child(
-                            h_flex()
-                                .items_center()
-                                .gap_1()
-                                .flex_shrink(1.0)
-                                .min_w_0()
-                                .overflow_hidden()
-                                .child(
-                                    Icon::new(IconName::Database)
-                                        .size(px(12.0))
-                                        .text_color(ThemeColors::PRIMARY_LIGHT)
-                                        .flex_shrink_0(),
-                                )
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(ThemeColors::TEXT_MUTED)
-                                        .overflow_hidden()
-                                        .text_ellipsis()
-                                        .child(label),
-                                ),
-                        )
-                    }),
-            );
+            .child(h_flex().items_center().gap_2().flex_shrink_0().when_some(
+                self.connection_label.clone(),
+                |this, label| {
+                    this.child(
+                        h_flex()
+                            .items_center()
+                            .gap_1()
+                            .flex_shrink_0()
+                            .px_1p5()
+                            .py_0p5()
+                            .rounded_sm()
+                            .bg(ThemeColors::BG_SURFACE_ACTIVE)
+                            .child(
+                                Icon::new(IconName::Database)
+                                    .size(px(12.0))
+                                    .text_color(ThemeColors::PRIMARY_LIGHT)
+                                    .flex_shrink_0(),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(ThemeColors::TEXT_MUTED)
+                                    .max_w(px(180.0))
+                                    .overflow_hidden()
+                                    .text_ellipsis()
+                                    .child(label),
+                            ),
+                    )
+                },
+            ));
 
         let error_banner = self.query_error.clone().map(|err| {
             let safe_err =
