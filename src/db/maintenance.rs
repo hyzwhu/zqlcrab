@@ -335,7 +335,7 @@ pub fn generate_storage_query_sql(
                 let escaped = s.replace('\'', "''");
                 format!("n.nspname = '{escaped}'")
             } else {
-                "n.nspname = CURRENT_SCHEMA()".to_string()
+                "n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast') AND n.nspname NOT LIKE 'pg_temp_%'".to_string()
             };
             format!(
                 "SELECT \
@@ -354,18 +354,23 @@ pub fn generate_storage_query_sql(
                 JOIN pg_namespace n ON n.oid = c.relnamespace \
                 LEFT JOIN pg_stat_user_tables s ON s.relid = c.oid \
                 WHERE {schema_cond} \
-                  AND c.relkind = 'r' \
+                  AND c.relkind IN ('r', 'p') \
                 ORDER BY pg_total_relation_size(c.oid) DESC;"
             )
         }
         DatabaseFamily::Sqlite => {
-            // SQLite storage metrics inspect page_count, page_size, freelist_count
+            // SQLite storage metrics inspect page_count, page_size, freelist_count via pragma table-valued functions
             "SELECT 'db_overview', 'SQLite', \
-                (PRAGMA_PAGE_COUNT() * PRAGMA_PAGE_SIZE()), \
-                (PRAGMA_PAGE_COUNT() - PRAGMA_FREELIST_COUNT()) * PRAGMA_PAGE_SIZE(), \
-                0, \
-                (PRAGMA_FREELIST_COUNT() * PRAGMA_PAGE_SIZE()), \
-                0, 0, NULL, NULL, NULL;"
+                (page_count * page_size) AS total_size, \
+                ((page_count - freelist_count) * page_size) AS data_size, \
+                0 AS index_size, \
+                (freelist_count * page_size) AS free_size, \
+                0 AS row_count, \
+                0 AS avg_row_size, \
+                NULL AS collation, \
+                NULL AS last_vacuum, \
+                NULL AS last_analyze \
+                FROM pragma_page_count(), pragma_page_size(), pragma_freelist_count();"
                 .to_string()
         }
     }
@@ -763,5 +768,16 @@ mod tests {
 
         let err_log = parse_maintenance_result(MaintenanceAction::CheckIntegrity, "users", &err_res, 5);
         assert_eq!(err_log.status, MaintenanceStatus::Error);
+    }
+
+    #[test]
+    fn test_sqlite_storage_query() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let sql = generate_storage_query_sql(DatabaseFamily::Sqlite, None, None);
+        let stmt = conn.prepare(&sql);
+        assert!(stmt.is_ok(), "SQLite storage query prepare failed: {:?}", stmt.err());
+        let mut stmt = stmt.unwrap();
+        let mut rows = stmt.query([]).unwrap();
+        assert!(rows.next().unwrap().is_some());
     }
 }

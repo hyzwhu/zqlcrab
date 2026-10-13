@@ -5678,7 +5678,7 @@ impl CrabStudioApp {
         let destination = config.destination;
         let file_path = self.dump_file_path.clone();
 
-        let _ = cx.spawn(async move |this, cx: &mut AsyncApp| {
+        cx.spawn(async move |this, cx: &mut AsyncApp| {
             let start = std::time::Instant::now();
             let total_tables = target_tables.len();
             let mut payloads = Vec::with_capacity(total_tables);
@@ -5785,7 +5785,8 @@ impl CrabStudioApp {
                 }
                 cx.notify();
             });
-        });
+        })
+        .detach();
     }
 
     /// Open generated dump SQL in a query console tab
@@ -5895,7 +5896,7 @@ impl CrabStudioApp {
 
         let options = self.restore_options.clone();
 
-        let _ = cx.spawn(async move |this, cx: &mut AsyncApp| {
+        cx.spawn(async move |this, cx: &mut AsyncApp| {
             let start = std::time::Instant::now();
             let total = statements.len();
             let mut succeeded = 0;
@@ -6013,7 +6014,8 @@ impl CrabStudioApp {
                 ));
                 cx.notify();
             });
-        });
+        })
+        .detach();
     }
 
     /// Open the Cross-Database Data Transfer Wizard modal
@@ -6183,7 +6185,7 @@ impl CrabStudioApp {
         });
         cx.notify();
 
-        let _ = cx.spawn(async move |this, cx: &mut AsyncApp| {
+        cx.spawn(async move |this, cx: &mut AsyncApp| {
             let start = std::time::Instant::now();
 
             // Connect or reuse source connection
@@ -6532,7 +6534,8 @@ impl CrabStudioApp {
                 ));
                 cx.notify();
             });
-        });
+        })
+        .detach();
     }
 
     // -------------------------------------------------------------------------
@@ -6589,12 +6592,18 @@ impl CrabStudioApp {
         let database = conn.config.database.clone();
         let active_tbl_names: Vec<String> = self.active_tables.iter().map(|t| t.name.clone()).collect();
 
-        let _ = cx.spawn(async move |this, cx: &mut AsyncApp| {
+        let active_tables_fallback = self.active_tables.clone();
+
+        cx.spawn(async move |this, cx: &mut AsyncApp| {
             let sql = generate_storage_query_sql(family, Some(&database), None);
-            let query_res = conn_clone.execute_query(&sql).await;
+            let query_res = tokio::time::timeout(
+                std::time::Duration::from_secs(12),
+                conn_clone.execute_query(&sql),
+            )
+            .await;
 
             match query_res {
-                Ok(res) => {
+                Ok(Ok(res)) => {
                     let mut tables = parse_storage_query_result(family, &res);
 
                     // For SQLite, generate fallback metrics for known active tables if overview only
@@ -6645,6 +6654,28 @@ impl CrabStudioApp {
                         }
                     }
 
+                    // Fallback to active tables if dialect query returned zero rows but user has tables
+                    if tables.is_empty() && !active_tables_fallback.is_empty() {
+                        tables = active_tables_fallback
+                            .iter()
+                            .map(|t| TableStorageMetrics {
+                                table_name: t.name.clone(),
+                                schema: t.schema.clone(),
+                                engine: Some("Standard".to_string()),
+                                total_size_bytes: 0,
+                                data_size_bytes: 0,
+                                index_size_bytes: 0,
+                                free_size_bytes: 0,
+                                row_count: 0,
+                                avg_row_size_bytes: 0,
+                                dead_tuples: None,
+                                collation: None,
+                                last_vacuum: None,
+                                last_analyze: None,
+                            })
+                            .collect();
+                    }
+
                     let summary = DatabaseStorageMetricsSummary::from_tables(tables);
                     let _ = this.update(cx, |app, cx| {
                         app.maintenance_summary = Some(summary);
@@ -6652,15 +6683,23 @@ impl CrabStudioApp {
                         cx.notify();
                     });
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     let _ = this.update(cx, |app, cx| {
                         app.maintenance_error_msg = Some(format!("Failed to query storage metrics: {e}"));
                         app.maintenance_is_loading_metrics = false;
                         cx.notify();
                     });
                 }
+                Err(_) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.maintenance_error_msg = Some("Storage metrics query timed out after 12s".to_string());
+                        app.maintenance_is_loading_metrics = false;
+                        cx.notify();
+                    });
+                }
             }
-        });
+        })
+        .detach();
     }
 
     pub fn run_maintenance(&mut self, cx: &mut Context<Self>) {
@@ -6704,7 +6743,7 @@ impl CrabStudioApp {
             percentage: 0.0,
         });
 
-        let _ = cx.spawn(async move |this, cx: &mut AsyncApp| {
+        cx.spawn(async move |this, cx: &mut AsyncApp| {
             let start = std::time::Instant::now();
             let mut succeeded = 0;
             let mut warnings = 0;
@@ -6803,7 +6842,8 @@ impl CrabStudioApp {
                 ));
                 cx.notify();
             });
-        });
+        })
+        .detach();
     }
 
     pub fn abort_maintenance(&mut self, cx: &mut Context<Self>) {
