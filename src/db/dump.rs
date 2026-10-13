@@ -242,7 +242,9 @@ mod tests {
         };
 
         let sql = generate_database_dump_sql(&config, &[table]);
-        assert!(sql.contains("SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0"));
+        assert!(
+            sql.contains("SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0")
+        );
         assert!(sql.contains("DROP TABLE IF EXISTS `orders`;"));
         assert!(!sql.contains("START TRANSACTION;"));
         assert!(sql.contains("SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS"));

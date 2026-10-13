@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum RestoreErrorPolicy {
     #[default]
-    StopOnError,     // Immediately abort on first failure
-    ContinueAndLog,  // Continue executing remaining statements and log failures
+    StopOnError, // Immediately abort on first failure
+    ContinueAndLog, // Continue executing remaining statements and log failures
 }
 
 impl RestoreErrorPolicy {
@@ -100,7 +100,11 @@ pub fn split_sql_script(sql: &str) -> Vec<String> {
 
     while i < len {
         let ch = chars[i];
-        let next_ch = if i + 1 < len { Some(chars[i + 1]) } else { None };
+        let next_ch = if i + 1 < len {
+            Some(chars[i + 1])
+        } else {
+            None
+        };
 
         // 1. Line comment handling (-- or #)
         if in_line_comment {

@@ -5,9 +5,8 @@
 //! 2. Maintenance & Diagnostics Wizard: Dialect-specific maintenance operations (Optimize / Vacuum, Integrity Check, Analyze Statistics, Rebuild Indexes, Checksum), real-time progress, and live audit logs.
 
 use crate::db::maintenance::{
-    format_bytes, DatabaseStorageMetricsSummary, MaintenanceAction, MaintenanceLogEntry,
-    MaintenanceOptions, MaintenanceProgress, MaintenanceStatus, MaintenanceSummary,
-    TableStorageMetrics,
+    DatabaseStorageMetricsSummary, MaintenanceAction, MaintenanceLogEntry, MaintenanceOptions,
+    MaintenanceProgress, MaintenanceStatus, MaintenanceSummary, TableStorageMetrics, format_bytes,
 };
 use crate::db::types::DatabaseFamily;
 use crate::settings::AppLanguage;
@@ -16,9 +15,9 @@ use crate::ui::theme::{ThemeColors, ThemeToken};
 use gpui_kit::assets::IconName;
 use gpui_kit::base::{h_flex, v_flex};
 use gpui_kit::component::{
+    Disableable as _, Icon, Sizable as _,
     button::{Button, ButtonVariants as _},
     spinner::Spinner,
-    Disableable as _, Icon, Sizable as _,
 };
 use gpui_kit::gpui::{
     AnyElement, App, ElementId, FontWeight, InteractiveElement as _, IntoElement, ParentElement,
@@ -524,13 +523,15 @@ impl MaintenanceModal {
             );
         }
 
-        content
-            .child(kpi_row)
-            .child(toolbar)
-            .child(table_rows)
+        content.child(kpi_row).child(toolbar).child(table_rows)
     }
 
-    fn render_kpi_card(&self, label: &str, value: String, accent_color: ThemeToken) -> impl IntoElement {
+    fn render_kpi_card(
+        &self,
+        label: &str,
+        value: String,
+        accent_color: ThemeToken,
+    ) -> impl IntoElement {
         v_flex()
             .flex_1()
             .min_w_0()
@@ -576,11 +577,23 @@ impl MaintenanceModal {
             .font_weight(FontWeight::BOLD)
             .text_color(ThemeColors::TEXT_MUTED)
             .child(div().w(px(32.0)).child(""))
-            .child(div().w(px(180.0)).child(t("maintenance.col_table_name", lang)))
+            .child(
+                div()
+                    .w(px(180.0))
+                    .child(t("maintenance.col_table_name", lang)),
+            )
             .child(div().w(px(100.0)).child(t("maintenance.col_engine", lang)))
-            .child(div().w(px(90.0)).child(t("maintenance.col_total_size", lang)))
+            .child(
+                div()
+                    .w(px(90.0))
+                    .child(t("maintenance.col_total_size", lang)),
+            )
             .child(div().w(px(160.0)).child(t("maintenance.col_ratio", lang)))
-            .child(div().w(px(80.0)).child(t("maintenance.col_row_count", lang)))
+            .child(
+                div()
+                    .w(px(80.0))
+                    .child(t("maintenance.col_row_count", lang)),
+            )
             .child(div().flex_1().child(t("maintenance.col_free_bloat", lang)));
 
         let mut rows = v_flex()
@@ -644,23 +657,21 @@ impl MaintenanceModal {
                     .border_t_1()
                     .border_color(ThemeColors::BORDER)
                     .child(
-                        div()
-                            .w(px(32.0))
-                            .child(
-                                Button::new(format!("chk_{}", tbl.table_name))
-                                    .ghost()
-                                    .xsmall()
-                                    .icon(if is_checked {
-                                        IconName::Check
-                                    } else {
-                                        IconName::Circle
-                                    })
-                                    .on_click(move |_, window, cx| {
-                                        if let Some(ref h) = on_toggle {
-                                            h(tbl_name.clone(), window, cx);
-                                        }
-                                    }),
-                            ),
+                        div().w(px(32.0)).child(
+                            Button::new(format!("chk_{}", tbl.table_name))
+                                .ghost()
+                                .xsmall()
+                                .icon(if is_checked {
+                                    IconName::Check
+                                } else {
+                                    IconName::Circle
+                                })
+                                .on_click(move |_, window, cx| {
+                                    if let Some(ref h) = on_toggle {
+                                        h(tbl_name.clone(), window, cx);
+                                    }
+                                }),
+                        ),
                     )
                     .child(
                         h_flex()
@@ -840,15 +851,11 @@ impl MaintenanceModal {
                             h_flex()
                                 .items_center()
                                 .gap_1p5()
-                                .child(
-                                    Icon::new(icon)
-                                        .size(px(14.0))
-                                        .text_color(if is_sel {
-                                            ThemeColors::PRIMARY_LIGHT
-                                        } else {
-                                            ThemeColors::TEXT_MUTED
-                                        }),
-                                )
+                                .child(Icon::new(icon).size(px(14.0)).text_color(if is_sel {
+                                    ThemeColors::PRIMARY_LIGHT
+                                } else {
+                                    ThemeColors::TEXT_MUTED
+                                }))
                                 .child(
                                     div()
                                         .text_xs()
@@ -1094,10 +1101,7 @@ impl MaintenanceModal {
         // 5. Live audit log stream
         let log_stream = self.render_audit_logs(lang);
 
-        let mut content = v_flex()
-            .size_full()
-            .p_4()
-            .gap_3();
+        let mut content = v_flex().size_full().p_4().gap_3();
 
         if let Some(ref err) = self.error_message {
             content = content.child(
@@ -1206,54 +1210,48 @@ impl MaintenanceModal {
             .border_t_1()
             .border_color(ThemeColors::BORDER)
             .bg(ThemeColors::BG_SURFACE)
-            .child(
-                if let Some(ref summary) = self.maintenance_summary {
-                    h_flex()
-                        .items_center()
-                        .gap_3()
-                        .text_xs()
-                        .child(
-                            div()
-                                .text_color(ThemeColors::TEXT_MUTED)
-                                .child(format!(
-                                    "{}: {}ms",
-                                    t("maintenance.total_time", lang),
-                                    summary.total_duration_ms
-                                )),
-                        )
-                        .child(
-                            div()
-                                .font_weight(FontWeight::BOLD)
-                                .text_color(ThemeColors::SUCCESS)
-                                .child(format!(
-                                    "{} {}",
-                                    summary.succeeded,
-                                    t("maintenance.passed", lang)
-                                )),
-                        )
-                        .child(
-                            div()
-                                .font_weight(FontWeight::BOLD)
-                                .text_color(if summary.failed > 0 {
-                                    ThemeColors::ERROR
-                                } else {
-                                    ThemeColors::TEXT_MUTED
-                                })
-                                .child(format!(
-                                    "{} {}",
-                                    summary.failed,
-                                    t("maintenance.failed", lang)
-                                )),
-                        )
-                } else {
-                    h_flex().child(
+            .child(if let Some(ref summary) = self.maintenance_summary {
+                h_flex()
+                    .items_center()
+                    .gap_3()
+                    .text_xs()
+                    .child(div().text_color(ThemeColors::TEXT_MUTED).child(format!(
+                        "{}: {}ms",
+                        t("maintenance.total_time", lang),
+                        summary.total_duration_ms
+                    )))
+                    .child(
                         div()
-                            .text_xs()
-                            .text_color(ThemeColors::TEXT_MUTED)
-                            .child(t("maintenance.ready_hint", lang)),
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(ThemeColors::SUCCESS)
+                            .child(format!(
+                                "{} {}",
+                                summary.succeeded,
+                                t("maintenance.passed", lang)
+                            )),
                     )
-                },
-            )
+                    .child(
+                        div()
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(if summary.failed > 0 {
+                                ThemeColors::ERROR
+                            } else {
+                                ThemeColors::TEXT_MUTED
+                            })
+                            .child(format!(
+                                "{} {}",
+                                summary.failed,
+                                t("maintenance.failed", lang)
+                            )),
+                    )
+            } else {
+                h_flex().child(
+                    div()
+                        .text_xs()
+                        .text_color(ThemeColors::TEXT_MUTED)
+                        .child(t("maintenance.ready_hint", lang)),
+                )
+            })
             .child(
                 Button::new("maintenance_close_bottom_btn")
                     .outline()

@@ -375,7 +375,9 @@ fn translate_en(key: &'static str) -> &'static str {
         "db_menu.restore_database" => "Restore from SQL Script...",
         "table_menu.dump_table" => "Dump Table (SQL)...",
         "dump_modal.title" => "Database & Table Dump Wizard",
-        "dump_modal.subtitle" => "Export schema DDL, constraints, and data records into standard SQL scripts",
+        "dump_modal.subtitle" => {
+            "Export schema DDL, constraints, and data records into standard SQL scripts"
+        }
         "dump_modal.step_select" => "1. Select Tables",
         "dump_modal.step_options" => "2. Dump Options",
         "dump_modal.step_destination" => "3. Destination",
@@ -404,7 +406,9 @@ fn translate_en(key: &'static str) -> &'static str {
 
         // SQL Script Restore Wizard
         "restore_modal.title" => "SQL Script Restore & Batch Runner",
-        "restore_modal.subtitle" => "Parse and execute SQL batch scripts with live progress and error isolation",
+        "restore_modal.subtitle" => {
+            "Parse and execute SQL batch scripts with live progress and error isolation"
+        }
         "restore_modal.select_file" => "Select SQL Script File",
         "restore_modal.browse" => "Browse...",
         "restore_modal.no_file" => "No file selected",
@@ -431,7 +435,9 @@ fn translate_en(key: &'static str) -> &'static str {
         "db_menu.transfer_database" => "Data Transfer Wizard...",
         "table_menu.transfer_table" => "Transfer Table...",
         "transfer_modal.title" => "Cross-Database Data Transfer Wizard",
-        "transfer_modal.subtitle" => "Transfer table schemas and records across databases and connections with live audit",
+        "transfer_modal.subtitle" => {
+            "Transfer table schemas and records across databases and connections with live audit"
+        }
         "transfer_modal.step_source_target" => "1. Source & Target",
         "transfer_modal.step_tables" => "2. Tables & Mapping",
         "transfer_modal.step_options" => "3. Options",
@@ -468,13 +474,17 @@ fn translate_en(key: &'static str) -> &'static str {
         "transfer_modal.copy_logs" => "Copy Audit Log",
         "transfer_modal.logs_copied" => "Audit Log Copied!",
         "transfer_modal.no_tables" => "No tables selected for transfer",
-        "transfer_modal.same_source_target_warning" => "Source and target database cannot be identical",
+        "transfer_modal.same_source_target_warning" => {
+            "Source and target database cannot be identical"
+        }
 
         // Database Maintenance & Diagnostics
         "db_menu.maintenance_database" => "Storage & Maintenance Wizard...",
         "table_menu.maintenance" => "Maintain & Optimize Table...",
         "maintenance.title" => "Storage Capacity Analysis & Maintenance Wizard",
-        "maintenance.subtitle" => "Inspect physical disk footprint, analyze bloat metrics, and run dialect-specific maintenance diagnostics",
+        "maintenance.subtitle" => {
+            "Inspect physical disk footprint, analyze bloat metrics, and run dialect-specific maintenance diagnostics"
+        }
         "maintenance.tab_storage" => "Storage Capacity Analysis",
         "maintenance.tab_diagnostics" => "Maintenance & Diagnostics",
         "maintenance.kpi_total_size" => "Total Database Footprint",
@@ -497,15 +507,25 @@ fn translate_en(key: &'static str) -> &'static str {
         "maintenance.loading_metrics" => "Querying database storage statistics...",
         "maintenance.no_tables_found" => "No matching tables found",
         "maintenance.action_optimize_title" => "Optimize / Vacuum",
-        "maintenance.action_optimize_desc" => "Reclaim unused disk space, defragment pages, and shrink file allocation",
+        "maintenance.action_optimize_desc" => {
+            "Reclaim unused disk space, defragment pages, and shrink file allocation"
+        }
         "maintenance.action_check_title" => "Integrity Check",
-        "maintenance.action_check_desc" => "Verify structural and B-Tree page consistency for corruption",
+        "maintenance.action_check_desc" => {
+            "Verify structural and B-Tree page consistency for corruption"
+        }
         "maintenance.action_analyze_title" => "Analyze Statistics",
-        "maintenance.action_analyze_desc" => "Collect and refresh optimizer query distribution statistics",
+        "maintenance.action_analyze_desc" => {
+            "Collect and refresh optimizer query distribution statistics"
+        }
         "maintenance.action_reindex_title" => "Rebuild Indexes",
-        "maintenance.action_reindex_desc" => "Reconstruct fragmented or damaged index trees to improve query performance",
+        "maintenance.action_reindex_desc" => {
+            "Reconstruct fragmented or damaged index trees to improve query performance"
+        }
         "maintenance.action_checksum_title" => "Checksum Verification",
-        "maintenance.action_checksum_desc" => "Calculate cryptographic or CRC block checksums across rows",
+        "maintenance.action_checksum_desc" => {
+            "Calculate cryptographic or CRC block checksums across rows"
+        }
         "maintenance.all_tables" => "All Tables in Database",
         "maintenance.tables_selected" => "Tables Selected",
         "maintenance.opt_continue_on_error" => "Continue on error",
@@ -517,11 +537,15 @@ fn translate_en(key: &'static str) -> &'static str {
         "maintenance.btn_copy_logs" => "Copy Audit Logs",
         "maintenance.btn_copied" => "Logs Copied!",
         "maintenance.processing_table" => "Processing Table",
-        "maintenance.no_logs_yet" => "Select maintenance action and click 'Run Maintenance Tasks' to begin diagnostics",
+        "maintenance.no_logs_yet" => {
+            "Select maintenance action and click 'Run Maintenance Tasks' to begin diagnostics"
+        }
         "maintenance.total_time" => "Total Execution Time",
         "maintenance.passed" => "Passed",
         "maintenance.failed" => "Failed",
-        "maintenance.ready_hint" => "Ready to inspect storage allocation or run table maintenance diagnostics.",
+        "maintenance.ready_hint" => {
+            "Ready to inspect storage allocation or run table maintenance diagnostics."
+        }
         "maintenance.btn_close" => "Close",
 
         // Query execution profiler
@@ -540,7 +564,9 @@ fn translate_en(key: &'static str) -> &'static str {
         "profile.col_details" => "Engine / I/O Details",
         "profile.btn_copy_profile" => "Copy Profile",
         "profile.copied" => "Profile Copied!",
-        "profile.no_profile_hint" => "Click 'Profile' (⌘⇧P) in the toolbar to capture execution timeline & resource metrics.",
+        "profile.no_profile_hint" => {
+            "Click 'Profile' (⌘⇧P) in the toolbar to capture execution timeline & resource metrics."
+        }
         "profile.profiling_hint" => "Executing query & collecting timeline breakdown...",
 
         // Fallback
@@ -952,7 +978,9 @@ fn translate_zh(key: &'static str) -> &'static str {
         "db_menu.transfer_database" => "数据传输与迁移向导...",
         "table_menu.transfer_table" => "传输数据表...",
         "transfer_modal.title" => "跨库数据传输与迁移向导",
-        "transfer_modal.subtitle" => "在不同数据库或连接间迁移表结构与数据，支持方言类型转换与实时审计",
+        "transfer_modal.subtitle" => {
+            "在不同数据库或连接间迁移表结构与数据，支持方言类型转换与实时审计"
+        }
         "transfer_modal.step_source_target" => "1. 源与目标配置",
         "transfer_modal.step_tables" => "2. 表映射与范围",
         "transfer_modal.step_options" => "3. 传输配置选项",
@@ -995,7 +1023,9 @@ fn translate_zh(key: &'static str) -> &'static str {
         "db_menu.maintenance_database" => "存储容量分析与智能运维体检向导...",
         "table_menu.maintenance" => "库表维护与体检...",
         "maintenance.title" => "库表存储容量分析与智能运维体检向导",
-        "maintenance.subtitle" => "深度检查物理磁盘占用、碎片与空间膨胀指标，支持各方言定制化一键健康体检",
+        "maintenance.subtitle" => {
+            "深度检查物理磁盘占用、碎片与空间膨胀指标，支持各方言定制化一键健康体检"
+        }
         "maintenance.tab_storage" => "存储容量深度分析",
         "maintenance.tab_diagnostics" => "智能运维与健康体检",
         "maintenance.kpi_total_size" => "数据库总磁盘占用",
@@ -1018,7 +1048,9 @@ fn translate_zh(key: &'static str) -> &'static str {
         "maintenance.loading_metrics" => "正在读取数据库底层物理存储分配...",
         "maintenance.no_tables_found" => "未找到符合条件的数据表",
         "maintenance.action_optimize_title" => "空间收缩/整理 (Optimize)",
-        "maintenance.action_optimize_desc" => "回收未使用的磁盘空间，消除数据碎片并释放物理存储空间",
+        "maintenance.action_optimize_desc" => {
+            "回收未使用的磁盘空间，消除数据碎片并释放物理存储空间"
+        }
         "maintenance.action_check_title" => "完整性校验 (Integrity Check)",
         "maintenance.action_check_desc" => "检查数据表内部 B-Tree 结构及存储完整性，发现潜在损坏",
         "maintenance.action_analyze_title" => "统计信息收集 (Analyze)",
@@ -1061,7 +1093,9 @@ fn translate_zh(key: &'static str) -> &'static str {
         "profile.col_details" => "引擎与 I/O 详情",
         "profile.btn_copy_profile" => "复制画像",
         "profile.copied" => "画像已复制！",
-        "profile.no_profile_hint" => "点击工具栏中的'分析画像' (⌘⇧P) 采集查询阶段时序与资源消耗指标。",
+        "profile.no_profile_hint" => {
+            "点击工具栏中的'分析画像' (⌘⇧P) 采集查询阶段时序与资源消耗指标。"
+        }
         "profile.profiling_hint" => "正在执行查询并采集各阶段时序明细...",
 
         // Fallback
@@ -1204,18 +1238,9 @@ mod tests {
             t("db_menu.maintenance_database", AppLanguage::ZhCn),
             "存储容量分析与智能运维体检向导..."
         );
-        assert_eq!(
-            t("console.profile", AppLanguage::En),
-            "Profile"
-        );
-        assert_eq!(
-            t("console.profile", AppLanguage::ZhCn),
-            "分析画像"
-        );
-        assert_eq!(
-            t("profile.kpi_total_duration", AppLanguage::ZhCn),
-            "总耗时"
-        );
+        assert_eq!(t("console.profile", AppLanguage::En), "Profile");
+        assert_eq!(t("console.profile", AppLanguage::ZhCn), "分析画像");
+        assert_eq!(t("profile.kpi_total_duration", AppLanguage::ZhCn), "总耗时");
         assert_eq!(
             t("profile.kpi_bottleneck", AppLanguage::En),
             "Bottleneck Stage"

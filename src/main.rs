@@ -17,9 +17,10 @@ use gpui_kit::gpui::{
 use ui::app::{
     AboutZqlcrab, AddNewRow, CheckForUpdates, CloseDialog, CloseWindow, CrabStudioApp,
     DeleteGridRow, DuplicateGridRow, ExplainQuery, FocusGridFilter, FormatSql, MinimizeWindow,
-    NewConnection, NewQueryTab, OpenDocs, OpenGithub, OpenSettings, ProfileQuery, Quit, RefreshTables,
-    ReportIssue, RunQuery, SaveGridChanges, SelectConsoleTab, SelectGridTab, SelectHistoryTab,
-    SelectSchemaTab, ToggleActivityBar, ToggleFullscreen, ToggleStatusBar, ZoomWindow,
+    NewConnection, NewQueryTab, OpenDocs, OpenGithub, OpenSettings, ProfileQuery, Quit,
+    RefreshTables, ReportIssue, RunQuery, SaveGridChanges, SelectConsoleTab, SelectGridTab,
+    SelectHistoryTab, SelectSchemaTab, ToggleActivityBar, ToggleFullscreen, ToggleStatusBar,
+    ZoomWindow,
 };
 
 #[cfg(target_os = "macos")]

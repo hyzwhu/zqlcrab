@@ -369,7 +369,10 @@ impl TransferModal {
             self.source_conn_name.clone()
         };
 
-        let src_db_label = self.source_db.clone().unwrap_or_else(|| "Select Database...".to_string());
+        let src_db_label = self
+            .source_db
+            .clone()
+            .unwrap_or_else(|| "Select Database...".to_string());
 
         let tgt_conn_label = if self.target_conn_name.is_empty() {
             "Select Connection...".to_string()
@@ -377,7 +380,10 @@ impl TransferModal {
             self.target_conn_name.clone()
         };
 
-        let tgt_db_label = self.target_db.clone().unwrap_or_else(|| "Select Database...".to_string());
+        let tgt_db_label = self
+            .target_db
+            .clone()
+            .unwrap_or_else(|| "Select Database...".to_string());
 
         let conns_clone1 = conns.clone();
         let src_conn_btn = Button::new("transfer_src_conn_btn")
@@ -518,15 +524,11 @@ impl TransferModal {
                     )
                     .child(
                         // Center Arrow
-                        h_flex()
-                            .items_center()
-                            .justify_center()
-                            .px_2()
-                            .child(
-                                Icon::new(IconName::ArrowRight)
-                                    .size(px(22.0))
-                                    .text_color(ThemeColors::PRIMARY_LIGHT),
-                            ),
+                        h_flex().items_center().justify_center().px_2().child(
+                            Icon::new(IconName::ArrowRight)
+                                .size(px(22.0))
+                                .text_color(ThemeColors::PRIMARY_LIGHT),
+                        ),
                     )
                     .child(
                         // Target Box
@@ -611,12 +613,7 @@ impl TransferModal {
                                 .size(px(14.0))
                                 .text_color(ThemeColors::ERROR),
                         )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(ThemeColors::ERROR)
-                                .child(err),
-                        ),
+                        .child(div().text_xs().text_color(ThemeColors::ERROR).child(err)),
                 )
             })
     }
@@ -818,16 +815,13 @@ impl TransferModal {
             list = list.child(row_item);
         }
 
-        v_flex()
-            .size_full()
-            .child(toolbar)
-            .child(
-                v_flex()
-                    .id("transfer_table_scroll")
-                    .flex_1()
-                    .overflow_y_scroll()
-                    .child(list),
-            )
+        v_flex().size_full().child(toolbar).child(
+            v_flex()
+                .id("transfer_table_scroll")
+                .flex_1()
+                .overflow_y_scroll()
+                .child(list),
+        )
     }
 
     fn render_options_step(&self, lang: AppLanguage) -> impl IntoElement {
@@ -847,33 +841,34 @@ impl TransferModal {
         let on_batch = self.on_change_batch_size.clone();
         let cur_batch = self.options.batch_size;
 
-        let render_checkbox_btn = |id: &'static str,
-                                   is_checked: bool,
-                                   label: &'static str,
-                                   handler: Option<Rc<dyn Fn(bool, &mut Window, &mut App) + 'static>>| {
-            let next_val = !is_checked;
-            let mut btn = Button::new(id)
-                .small()
-                .w_full()
-                .icon(if is_checked {
-                    IconName::Check
+        let render_checkbox_btn =
+            |id: &'static str,
+             is_checked: bool,
+             label: &'static str,
+             handler: Option<Rc<dyn Fn(bool, &mut Window, &mut App) + 'static>>| {
+                let next_val = !is_checked;
+                let mut btn = Button::new(id)
+                    .small()
+                    .w_full()
+                    .icon(if is_checked {
+                        IconName::Check
+                    } else {
+                        IconName::Circle
+                    })
+                    .label(label);
+
+                if is_checked {
+                    btn = btn.primary();
                 } else {
-                    IconName::Circle
-                })
-                .label(label);
+                    btn = btn.outline();
+                }
 
-            if is_checked {
-                btn = btn.primary();
-            } else {
-                btn = btn.outline();
-            }
+                if let Some(h) = handler {
+                    btn = btn.on_click(move |_, window, cx| h(next_val, window, cx));
+                }
 
-            if let Some(h) = handler {
-                btn = btn.on_click(move |_, window, cx| h(next_val, window, cx));
-            }
-
-            btn
-        };
+                btn
+            };
 
         let batch_sizes = [100, 200, 500, 1000];
         let mut batch_btns = h_flex().gap_2();
@@ -979,23 +974,19 @@ impl TransferModal {
                         .justify_between()
                         .items_center()
                         .child(
-                            h_flex()
-                                .items_center()
-                                .gap_2()
-                                .child(Spinner::new())
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .font_weight(FontWeight::BOLD)
-                                        .text_color(ThemeColors::PRIMARY_LIGHT)
-                                        .child(format!(
-                                            "Table {}/{} ({:.1}%) - {}",
-                                            prog.current_table_idx + 1,
-                                            prog.total_tables,
-                                            prog.percentage,
-                                            prog.current_table_name
-                                        )),
-                                ),
+                            h_flex().items_center().gap_2().child(Spinner::new()).child(
+                                div()
+                                    .text_xs()
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(ThemeColors::PRIMARY_LIGHT)
+                                    .child(format!(
+                                        "Table {}/{} ({:.1}%) - {}",
+                                        prog.current_table_idx + 1,
+                                        prog.total_tables,
+                                        prog.percentage,
+                                        prog.current_table_name
+                                    )),
+                            ),
                         )
                         .child(
                             div()
@@ -1157,12 +1148,7 @@ impl TransferModal {
                             .text_color(color)
                             .child(prefix),
                     )
-                    .child(
-                        div()
-                            .flex_1()
-                            .text_color(color)
-                            .child(log.message.clone()),
-                    ),
+                    .child(div().flex_1().text_color(color).child(log.message.clone())),
             );
         }
 
@@ -1213,10 +1199,9 @@ impl TransferModal {
             .border_color(ThemeColors::BORDER)
             .child(
                 // Left side: Step info or copy log
-                h_flex()
-                    .items_center()
-                    .gap_2()
-                    .when(is_exec_step && (is_running || has_summary), |this| {
+                h_flex().items_center().gap_2().when(
+                    is_exec_step && (is_running || has_summary),
+                    |this| {
                         this.child(
                             Button::new("transfer_copy_log_btn")
                                 .small()
@@ -1237,7 +1222,8 @@ impl TransferModal {
                                     }
                                 }),
                         )
-                    }),
+                    },
+                ),
             )
             .child(
                 // Right side: navigation / action buttons
@@ -1269,23 +1255,24 @@ impl TransferModal {
                                 }),
                         )
                     })
-                    .when(!is_running && self.step != TransferModalStep::Execution, |this| {
-                        let mut btn = Button::new("transfer_start_btn")
-                            .small()
-                            .primary()
-                            .icon(IconName::Play)
-                            .label(t("transfer_modal.btn_transfer", lang));
-                        if !can_start {
-                            btn = btn.disabled(true);
-                        }
-                        this.child(
-                            btn.on_click(move |_, window, cx| {
+                    .when(
+                        !is_running && self.step != TransferModalStep::Execution,
+                        |this| {
+                            let mut btn = Button::new("transfer_start_btn")
+                                .small()
+                                .primary()
+                                .icon(IconName::Play)
+                                .label(t("transfer_modal.btn_transfer", lang));
+                            if !can_start {
+                                btn = btn.disabled(true);
+                            }
+                            this.child(btn.on_click(move |_, window, cx| {
                                 if let Some(ref h) = on_start {
                                     h(window, cx);
                                 }
-                            }),
-                        )
-                    }),
+                            }))
+                        },
+                    ),
             )
     }
 }
@@ -1371,8 +1358,12 @@ impl RenderOnce for TransferModal {
             ));
 
         let body: AnyElement = match self.step {
-            TransferModalStep::SourceTarget => self.render_source_target_step(lang).into_any_element(),
-            TransferModalStep::TableMapping => self.render_table_mapping_step(lang).into_any_element(),
+            TransferModalStep::SourceTarget => {
+                self.render_source_target_step(lang).into_any_element()
+            }
+            TransferModalStep::TableMapping => {
+                self.render_table_mapping_step(lang).into_any_element()
+            }
             TransferModalStep::Options => self.render_options_step(lang).into_any_element(),
             TransferModalStep::Execution => self.render_execution_step(lang).into_any_element(),
         };

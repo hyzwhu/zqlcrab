@@ -170,7 +170,11 @@ impl QueryProfileReport {
         let total_us = if metrics.total_duration_us > 0 {
             metrics.total_duration_us
         } else {
-            stages.iter().map(|s| s.duration_us).sum::<u64>().max(client_elapsed_ms * 1000)
+            stages
+                .iter()
+                .map(|s| s.duration_us)
+                .sum::<u64>()
+                .max(client_elapsed_ms * 1000)
         };
         metrics.total_duration_us = total_us;
 
@@ -214,7 +218,10 @@ impl QueryProfileReport {
             md.push_str(&format!("- **Execution Time**: {:.2} ms\n", exec_ms));
         }
         if let Some(ratio) = self.metrics.buffer_hit_ratio() {
-            md.push_str(&format!("- **Buffer Cache Hit Ratio**: {:.1}%\n", ratio * 100.0));
+            md.push_str(&format!(
+                "- **Buffer Cache Hit Ratio**: {:.1}%\n",
+                ratio * 100.0
+            ));
         }
         if let Some(ref b) = self.bottleneck_stage {
             md.push_str(&format!("- **Bottleneck Stage**: `{}`\n", b));
@@ -259,11 +266,26 @@ pub fn parse_mysql_profile_result(qr: &QueryResult) -> Vec<ProfileStage> {
     let mut stages = Vec::new();
     let mut current_offset_us = 0u64;
 
-    let col_status = qr.columns.iter().position(|c| c.eq_ignore_ascii_case("status") || c.eq_ignore_ascii_case("state"));
-    let col_duration = qr.columns.iter().position(|c| c.eq_ignore_ascii_case("duration"));
-    let col_cpu_user = qr.columns.iter().position(|c| c.eq_ignore_ascii_case("cpu_user"));
-    let col_cpu_sys = qr.columns.iter().position(|c| c.eq_ignore_ascii_case("cpu_system"));
-    let col_block_in = qr.columns.iter().position(|c| c.eq_ignore_ascii_case("block_ops_in"));
+    let col_status = qr
+        .columns
+        .iter()
+        .position(|c| c.eq_ignore_ascii_case("status") || c.eq_ignore_ascii_case("state"));
+    let col_duration = qr
+        .columns
+        .iter()
+        .position(|c| c.eq_ignore_ascii_case("duration"));
+    let col_cpu_user = qr
+        .columns
+        .iter()
+        .position(|c| c.eq_ignore_ascii_case("cpu_user"));
+    let col_cpu_sys = qr
+        .columns
+        .iter()
+        .position(|c| c.eq_ignore_ascii_case("cpu_system"));
+    let col_block_in = qr
+        .columns
+        .iter()
+        .position(|c| c.eq_ignore_ascii_case("block_ops_in"));
 
     for (idx, row) in qr.rows.iter().enumerate() {
         let name = col_status
@@ -287,7 +309,13 @@ pub fn parse_mysql_profile_result(qr: &QueryResult) -> Vec<ProfileStage> {
         let duration_us = (duration_secs * 1_000_000.0).round().max(1.0) as u64;
         let category = ProfileCategory::from_stage_name(&name);
 
-        let mut stage = ProfileStage::new(format!("stage_{idx}"), name, category, current_offset_us, duration_us);
+        let mut stage = ProfileStage::new(
+            format!("stage_{idx}"),
+            name,
+            category,
+            current_offset_us,
+            duration_us,
+        );
 
         if let Some(i) = col_cpu_user {
             if let Some(QueryValue::Float(f)) = row.get(i) {
@@ -323,21 +351,41 @@ pub fn parse_postgres_profile_result(
     // Check if JSON format
     if let Ok(val) = serde_json::from_str::<serde_json::Value>(raw_text) {
         if let Some(arr) = val.as_array().and_then(|a| a.first()) {
-            let plan_time_ms = arr.get("Planning Time").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let exec_time_ms = arr.get("Execution Time").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let plan_time_ms = arr
+                .get("Planning Time")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0);
+            let exec_time_ms = arr
+                .get("Execution Time")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0);
 
             metrics.planning_time_us = Some((plan_time_ms * 1000.0) as u64);
             metrics.execution_time_us = Some((exec_time_ms * 1000.0) as u64);
-            metrics.total_duration_us = ((plan_time_ms + exec_time_ms) * 1000.0).max(client_elapsed_ms as f64 * 1000.0) as u64;
+            metrics.total_duration_us = ((plan_time_ms + exec_time_ms) * 1000.0)
+                .max(client_elapsed_ms as f64 * 1000.0)
+                as u64;
 
             let mut offset = 0u64;
             let plan_us = metrics.planning_time_us.unwrap_or(100);
-            stages.push(ProfileStage::new("planning", "Query Planning & Optimization", ProfileCategory::Optimization, offset, plan_us));
+            stages.push(ProfileStage::new(
+                "planning",
+                "Query Planning & Optimization",
+                ProfileCategory::Optimization,
+                offset,
+                plan_us,
+            ));
             offset += plan_us;
 
             if let Some(plan) = arr.get("Plan") {
-                let node_type = plan.get("Node Type").and_then(|v| v.as_str()).unwrap_or("Query Execution Engine");
-                let actual_total = plan.get("Actual Total Time").and_then(|v| v.as_f64()).unwrap_or(exec_time_ms);
+                let node_type = plan
+                    .get("Node Type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Query Execution Engine");
+                let actual_total = plan
+                    .get("Actual Total Time")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(exec_time_ms);
                 let exec_us = (actual_total * 1000.0) as u64;
 
                 let hit_blocks = plan.get("Shared Hit Blocks").and_then(|v| v.as_u64());
@@ -345,7 +393,13 @@ pub fn parse_postgres_profile_result(
                 metrics.buffer_hits = hit_blocks;
                 metrics.buffer_reads = read_blocks;
 
-                let mut exec_stage = ProfileStage::new("execution_root", node_type, ProfileCategory::Execution, offset, exec_us);
+                let mut exec_stage = ProfileStage::new(
+                    "execution_root",
+                    node_type,
+                    ProfileCategory::Execution,
+                    offset,
+                    exec_us,
+                );
                 if let (Some(h), Some(r)) = (hit_blocks, read_blocks) {
                     exec_stage.details = Some(format!("Shared Buffers: {h} hit, {r} read"));
                 }
@@ -355,7 +409,13 @@ pub fn parse_postgres_profile_result(
 
             let client_fetch_us = (client_elapsed_ms * 1000).saturating_sub(offset);
             if client_fetch_us > 100 {
-                stages.push(ProfileStage::new("transmission", "Network Fetch & Serialization", ProfileCategory::Transmission, offset, client_fetch_us));
+                stages.push(ProfileStage::new(
+                    "transmission",
+                    "Network Fetch & Serialization",
+                    ProfileCategory::Transmission,
+                    offset,
+                    client_fetch_us,
+                ));
             }
 
             return (stages, metrics);
@@ -386,11 +446,19 @@ pub fn parse_postgres_profile_result(
             }
         } else if trimmed.contains("Buffers: shared hit=") {
             if let Some(part) = trimmed.split("shared hit=").nth(1) {
-                let num = part.split_whitespace().next().unwrap_or("0").trim_end_matches(',');
+                let num = part
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("0")
+                    .trim_end_matches(',');
                 hit_blocks += num.parse::<u64>().unwrap_or(0);
             }
             if let Some(part) = trimmed.split("read=").nth(1) {
-                let num = part.split_whitespace().next().unwrap_or("0").trim_end_matches(',');
+                let num = part
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("0")
+                    .trim_end_matches(',');
                 read_blocks += num.parse::<u64>().unwrap_or(0);
             }
         }
@@ -405,10 +473,22 @@ pub fn parse_postgres_profile_result(
     metrics.total_duration_us = (plan_us + exec_us).max(client_elapsed_ms * 1000);
 
     let mut offset = 0u64;
-    stages.push(ProfileStage::new("planning", "Query Planning & Catalog Lookup", ProfileCategory::Optimization, offset, plan_us.max(50)));
+    stages.push(ProfileStage::new(
+        "planning",
+        "Query Planning & Catalog Lookup",
+        ProfileCategory::Optimization,
+        offset,
+        plan_us.max(50),
+    ));
     offset += plan_us.max(50);
 
-    let mut exec_stage = ProfileStage::new("execution", "Query Plan Execution", ProfileCategory::Execution, offset, exec_us.max(100));
+    let mut exec_stage = ProfileStage::new(
+        "execution",
+        "Query Plan Execution",
+        ProfileCategory::Execution,
+        offset,
+        exec_us.max(100),
+    );
     if hit_blocks > 0 || read_blocks > 0 {
         exec_stage.details = Some(format!("Buffers: {hit_blocks} hit, {read_blocks} read"));
     }
@@ -417,7 +497,13 @@ pub fn parse_postgres_profile_result(
 
     let client_fetch_us = (client_elapsed_ms * 1000).saturating_sub(offset);
     if client_fetch_us > 100 {
-        stages.push(ProfileStage::new("transmission", "Client Stream & Buffer", ProfileCategory::Transmission, offset, client_fetch_us));
+        stages.push(ProfileStage::new(
+            "transmission",
+            "Client Stream & Buffer",
+            ProfileCategory::Transmission,
+            offset,
+            client_fetch_us,
+        ));
     }
 
     (stages, metrics)
@@ -434,7 +520,8 @@ pub fn build_synthetic_profile(
     let mut stages = Vec::new();
 
     // Divide execution into proportional phases based on SQL characteristics
-    let is_simple_select = query_sql.trim().to_uppercase().starts_with("SELECT") && !query_sql.to_uppercase().contains("JOIN");
+    let is_simple_select = query_sql.trim().to_uppercase().starts_with("SELECT")
+        && !query_sql.to_uppercase().contains("JOIN");
 
     let (p_parse, p_plan, p_exec, _p_fetch) = if is_simple_select {
         (0.08, 0.12, 0.55, 0.25)
@@ -513,11 +600,26 @@ mod tests {
 
     #[test]
     fn test_category_classification() {
-        assert_eq!(ProfileCategory::from_stage_name("starting"), ProfileCategory::Compilation);
-        assert_eq!(ProfileCategory::from_stage_name("optimizing"), ProfileCategory::Optimization);
-        assert_eq!(ProfileCategory::from_stage_name("executing"), ProfileCategory::Execution);
-        assert_eq!(ProfileCategory::from_stage_name("sending data"), ProfileCategory::Transmission);
-        assert_eq!(ProfileCategory::from_stage_name("closing tables"), ProfileCategory::CleanUp);
+        assert_eq!(
+            ProfileCategory::from_stage_name("starting"),
+            ProfileCategory::Compilation
+        );
+        assert_eq!(
+            ProfileCategory::from_stage_name("optimizing"),
+            ProfileCategory::Optimization
+        );
+        assert_eq!(
+            ProfileCategory::from_stage_name("executing"),
+            ProfileCategory::Execution
+        );
+        assert_eq!(
+            ProfileCategory::from_stage_name("sending data"),
+            ProfileCategory::Transmission
+        );
+        assert_eq!(
+            ProfileCategory::from_stage_name("closing tables"),
+            ProfileCategory::CleanUp
+        );
     }
 
     #[test]

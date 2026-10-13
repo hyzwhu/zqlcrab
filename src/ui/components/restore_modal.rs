@@ -493,67 +493,69 @@ impl RestoreModal {
         let cur_policy = self.options.error_policy;
         let on_pol = self.on_change_policy.clone();
 
-        let render_policy_btn = |policy: RestoreErrorPolicy, id: &'static str, label: &'static str| {
-            let is_sel = cur_policy == policy;
-            let on_pol_click = on_pol.clone();
+        let render_policy_btn =
+            |policy: RestoreErrorPolicy, id: &'static str, label: &'static str| {
+                let is_sel = cur_policy == policy;
+                let on_pol_click = on_pol.clone();
 
-            let mut btn = Button::new(id)
-                .small()
-                .w_full()
-                .icon(if is_sel {
-                    IconName::Check
+                let mut btn = Button::new(id)
+                    .small()
+                    .w_full()
+                    .icon(if is_sel {
+                        IconName::Check
+                    } else {
+                        IconName::Circle
+                    })
+                    .label(label);
+
+                if is_sel {
+                    btn = btn.primary();
                 } else {
-                    IconName::Circle
-                })
-                .label(label);
+                    btn = btn.outline();
+                }
 
-            if is_sel {
-                btn = btn.primary();
-            } else {
-                btn = btn.outline();
-            }
-
-            if let Some(h) = on_pol_click {
-                btn = btn.on_click(move |_, window, cx| {
-                    h(policy, window, cx);
-                });
-            }
-            btn
-        };
+                if let Some(h) = on_pol_click {
+                    btn = btn.on_click(move |_, window, cx| {
+                        h(policy, window, cx);
+                    });
+                }
+                btn
+            };
 
         let on_tx = self.on_toggle_transaction.clone();
         let cur_tx = self.options.wrap_in_transaction;
         let on_fk = self.on_toggle_fk_checks.clone();
         let cur_fk = self.options.disable_foreign_keys;
 
-        let render_checkbox_btn = |id: &'static str,
-                                   is_checked: bool,
-                                   label: &'static str,
-                                   handler: Option<Rc<dyn Fn(bool, &mut Window, &mut App) + 'static>>| {
-            let next_val = !is_checked;
-            let mut btn = Button::new(id)
-                .small()
-                .w_full()
-                .icon(if is_checked {
-                    IconName::Check
+        let render_checkbox_btn =
+            |id: &'static str,
+             is_checked: bool,
+             label: &'static str,
+             handler: Option<Rc<dyn Fn(bool, &mut Window, &mut App) + 'static>>| {
+                let next_val = !is_checked;
+                let mut btn = Button::new(id)
+                    .small()
+                    .w_full()
+                    .icon(if is_checked {
+                        IconName::Check
+                    } else {
+                        IconName::Circle
+                    })
+                    .label(label);
+
+                if is_checked {
+                    btn = btn.primary();
                 } else {
-                    IconName::Circle
-                })
-                .label(label);
+                    btn = btn.outline();
+                }
 
-            if is_checked {
-                btn = btn.primary();
-            } else {
-                btn = btn.outline();
-            }
-
-            if let Some(h) = handler {
-                btn = btn.on_click(move |_, window, cx| {
-                    h(next_val, window, cx);
-                });
-            }
-            btn
-        };
+                if let Some(h) = handler {
+                    btn = btn.on_click(move |_, window, cx| {
+                        h(next_val, window, cx);
+                    });
+                }
+                btn
+            };
 
         v_flex()
             .size_full()
@@ -608,22 +610,16 @@ impl RestoreModal {
                         .justify_between()
                         .items_center()
                         .child(
-                            h_flex()
-                                .items_center()
-                                .gap_2()
-                                .child(Spinner::new())
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .font_weight(FontWeight::BOLD)
-                                        .text_color(ThemeColors::PRIMARY_LIGHT)
-                                        .child(format!(
-                                            "Statement {} of {} ({:.1}%)",
-                                            prog.current_statement,
-                                            prog.total_statements,
-                                            prog.percent
-                                        )),
-                                ),
+                            h_flex().items_center().gap_2().child(Spinner::new()).child(
+                                div()
+                                    .text_xs()
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(ThemeColors::PRIMARY_LIGHT)
+                                    .child(format!(
+                                        "Statement {} of {} ({:.1}%)",
+                                        prog.current_statement, prog.total_statements, prog.percent
+                                    )),
+                            ),
                         )
                         .child(
                             h_flex()

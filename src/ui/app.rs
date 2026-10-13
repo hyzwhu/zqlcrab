@@ -28,13 +28,13 @@ use crate::db::maintenance::{
     parse_storage_query_result,
 };
 use crate::db::manager::ConnectionManager;
-use crate::db::profile::{
-    QueryProfileReport, build_synthetic_profile, parse_mysql_profile_result,
-    parse_postgres_profile_result,
-};
 use crate::db::mock_data::{
     MockColumnConfig, MockGeneratorType, MockProgress, MockResult, execute_mock_seeding,
     generate_mock_preview, initialize_column_configs,
+};
+use crate::db::profile::{
+    QueryProfileReport, build_synthetic_profile, parse_mysql_profile_result,
+    parse_postgres_profile_result,
 };
 use crate::db::restore::{
     RestoreErrorPolicy, RestoreOptions, RestoreProgress, RestoreSummary, SqlScriptAnalysis,
@@ -69,9 +69,10 @@ use crate::ui::components::{
     ConsoleBottomTab, DataDiffFilterTab, DataDiffModal, DataGrid, DiffFilterTab, DumpModal,
     DumpModalStep, ErDiagramView, ExplainViewMode, ExportDestination, ExportModal,
     ExportSuccessInfo, ExportWizardStep, ImportModal, ImportWizardStep, KillConfirmModal,
-    MaintenanceModal, MaintenanceModalTab, MockDataModal, MockWizardStep, QueryConsole, QueryHistoryView, QueryTabHeader, RestoreModal,
-    RestoreModalStep, SchemaDiffModal, SchemaViewer, SessionsView, SettingsTab, SettingsView,
-    Sidebar, SnippetEditModal, SnippetView, SqlReviewModal, TransferModal, TransferModalStep,
+    MaintenanceModal, MaintenanceModalTab, MockDataModal, MockWizardStep, QueryConsole,
+    QueryHistoryView, QueryTabHeader, RestoreModal, RestoreModalStep, SchemaDiffModal,
+    SchemaViewer, SessionsView, SettingsTab, SettingsView, Sidebar, SnippetEditModal, SnippetView,
+    SqlReviewModal, TransferModal, TransferModalStep,
     create_table_modal::{CreateTableColumnState, CreateTableIndexState, CreateTableModal},
     data_grid::GridCellCoord,
     schema_viewer::SchemaEditColumnState,
@@ -79,7 +80,6 @@ use crate::ui::components::{
 use crate::ui::i18n::t;
 use crate::ui::theme::ThemeColors;
 use chrono::Utc;
-use std::collections::HashSet;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::{h_flex, v_flex};
 use gpui_kit::component::{
@@ -93,6 +93,7 @@ use gpui_kit::gpui::{
     IntoElement, ParentElement, Render, ScrollHandle, Styled, Window, div, img, point, prelude::*,
     px,
 };
+use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::{Arc, RwLock};
 use uuid::Uuid;
@@ -1979,7 +1980,8 @@ impl CrabStudioApp {
                     match (q_res, profile_res) {
                         (Ok(qr), Ok(pr)) if !pr.rows.is_empty() => {
                             let stages = parse_mysql_profile_result(&pr);
-                            let total_duration_us = stages.iter().map(|s| s.duration_us).sum::<u64>();
+                            let total_duration_us =
+                                stages.iter().map(|s| s.duration_us).sum::<u64>();
                             let metrics = crate::db::profile::ProfileResourceMetrics {
                                 total_duration_us,
                                 planning_time_us: None,
@@ -1998,22 +2000,33 @@ impl CrabStudioApp {
                                 client_ms,
                             ))
                         }
-                        (Ok(qr), _) => {
-                            Ok(build_synthetic_profile(&query_sql, family, client_ms, qr.rows.len()))
-                        }
+                        (Ok(qr), _) => Ok(build_synthetic_profile(
+                            &query_sql,
+                            family,
+                            client_ms,
+                            qr.rows.len(),
+                        )),
                         (Err(e), _) => Err(e.to_string()),
                     }
                 }
                 DatabaseFamily::Postgres => {
                     // Try EXPLAIN (ANALYZE, BUFFERS, TIMING, SUMMARY, FORMAT JSON)
-                    let explain_analyze_json = format!("EXPLAIN (ANALYZE, BUFFERS, TIMING, SUMMARY, FORMAT JSON) {query_sql}");
+                    let explain_analyze_json = format!(
+                        "EXPLAIN (ANALYZE, BUFFERS, TIMING, SUMMARY, FORMAT JSON) {query_sql}"
+                    );
                     let res = conn.execute_query(&explain_analyze_json).await;
                     let client_ms = start.elapsed().as_millis() as u64;
 
                     match res {
                         Ok(qr) => {
-                            let raw_json = qr.rows.first().and_then(|r| r.first()).map(|v| v.to_display_string()).unwrap_or_default();
-                            let (stages, metrics) = parse_postgres_profile_result(&raw_json, client_ms);
+                            let raw_json = qr
+                                .rows
+                                .first()
+                                .and_then(|r| r.first())
+                                .map(|v| v.to_display_string())
+                                .unwrap_or_default();
+                            let (stages, metrics) =
+                                parse_postgres_profile_result(&raw_json, client_ms);
                             Ok(QueryProfileReport::new(
                                 query_sql.clone(),
                                 family,
@@ -2024,7 +2037,8 @@ impl CrabStudioApp {
                         }
                         Err(_) => {
                             // Text format fallback
-                            let explain_analyze_text = format!("EXPLAIN (ANALYZE, BUFFERS, TIMING, SUMMARY) {query_sql}");
+                            let explain_analyze_text =
+                                format!("EXPLAIN (ANALYZE, BUFFERS, TIMING, SUMMARY) {query_sql}");
                             match conn.execute_query(&explain_analyze_text).await {
                                 Ok(qr) => {
                                     let mut full_text = String::new();
@@ -2034,7 +2048,8 @@ impl CrabStudioApp {
                                             full_text.push('\n');
                                         }
                                     }
-                                    let (stages, metrics) = parse_postgres_profile_result(&full_text, client_ms);
+                                    let (stages, metrics) =
+                                        parse_postgres_profile_result(&full_text, client_ms);
                                     Ok(QueryProfileReport::new(
                                         query_sql.clone(),
                                         family,
@@ -2053,7 +2068,12 @@ impl CrabStudioApp {
                     let q_res = conn.execute_query(&query_sql).await;
                     let client_ms = start.elapsed().as_millis() as u64;
                     match q_res {
-                        Ok(qr) => Ok(build_synthetic_profile(&query_sql, family, client_ms, qr.rows.len())),
+                        Ok(qr) => Ok(build_synthetic_profile(
+                            &query_sql,
+                            family,
+                            client_ms,
+                            qr.rows.len(),
+                        )),
                         Err(e) => Err(e.to_string()),
                     }
                 }
@@ -5600,7 +5620,11 @@ impl CrabStudioApp {
 
         let def_filename = format!(
             "{}_dump_{}.sql",
-            if db_name.is_empty() { "database" } else { &db_name },
+            if db_name.is_empty() {
+                "database"
+            } else {
+                &db_name
+            },
             chrono::Local::now().format("%Y%m%d_%H%M%S")
         );
         self.dump_file_path = dirs::document_dir()
@@ -5764,7 +5788,9 @@ impl CrabStudioApp {
                 match dest_res {
                     Ok(_) => {
                         if destination == DumpDestination::Clipboard {
-                            cx.write_to_clipboard(gpui_kit::gpui::ClipboardItem::new_string(dump_sql.clone()));
+                            cx.write_to_clipboard(gpui_kit::gpui::ClipboardItem::new_string(
+                                dump_sql.clone(),
+                            ));
                             app.dump_copied = true;
                         }
 
@@ -5797,7 +5823,12 @@ impl CrabStudioApp {
         cx: &mut Context<Self>,
     ) {
         self.dump_modal_open = false;
-        self.create_query_tab(Some("database_dump.sql".to_string()), Some(&sql), window, cx);
+        self.create_query_tab(
+            Some("database_dump.sql".to_string()),
+            Some(&sql),
+            window,
+            cx,
+        );
         self.status_message = Some("Opened database dump SQL in Query Console".to_string());
         cx.notify();
     }
@@ -6133,7 +6164,8 @@ impl CrabStudioApp {
             .cloned();
 
         let (Some(src_cfg), Some(tgt_cfg)) = (src_config, tgt_config) else {
-            self.transfer_error_msg = Some("Selected connection configuration not found".to_string());
+            self.transfer_error_msg =
+                Some("Selected connection configuration not found".to_string());
             cx.notify();
             return;
         };
@@ -6590,7 +6622,8 @@ impl CrabStudioApp {
         let conn_clone = conn.clone();
         let family = conn.config.db_type.family();
         let database = conn.config.database.clone();
-        let active_tbl_names: Vec<String> = self.active_tables.iter().map(|t| t.name.clone()).collect();
+        let active_tbl_names: Vec<String> =
+            self.active_tables.iter().map(|t| t.name.clone()).collect();
 
         let active_tables_fallback = self.active_tables.clone();
 
@@ -6618,7 +6651,8 @@ impl CrabStudioApp {
 
                         for t_name in &active_tbl_names {
                             let cnt_sql = format!("SELECT count(*) FROM \"{t_name}\";");
-                            let cnt = if let Ok(cnt_res) = conn_clone.execute_query(&cnt_sql).await {
+                            let cnt = if let Ok(cnt_res) = conn_clone.execute_query(&cnt_sql).await
+                            {
                                 cnt_res
                                     .rows
                                     .first()
@@ -6685,14 +6719,16 @@ impl CrabStudioApp {
                 }
                 Ok(Err(e)) => {
                     let _ = this.update(cx, |app, cx| {
-                        app.maintenance_error_msg = Some(format!("Failed to query storage metrics: {e}"));
+                        app.maintenance_error_msg =
+                            Some(format!("Failed to query storage metrics: {e}"));
                         app.maintenance_is_loading_metrics = false;
                         cx.notify();
                     });
                 }
                 Err(_) => {
                     let _ = this.update(cx, |app, cx| {
-                        app.maintenance_error_msg = Some("Storage metrics query timed out after 12s".to_string());
+                        app.maintenance_error_msg =
+                            Some("Storage metrics query timed out after 12s".to_string());
                         app.maintenance_is_loading_metrics = false;
                         cx.notify();
                     });
@@ -6751,7 +6787,9 @@ impl CrabStudioApp {
             let mut logs = Vec::new();
 
             for (idx, tbl) in target_tables.iter().enumerate() {
-                let is_exec = this.read_with(cx, |app, _| app.maintenance_is_executing).unwrap_or(false);
+                let is_exec = this
+                    .read_with(cx, |app, _| app.maintenance_is_executing)
+                    .unwrap_or(false);
                 if !is_exec {
                     break;
                 }
@@ -6801,7 +6839,9 @@ impl CrabStudioApp {
                     }
                 }
 
-                if !tbl_has_err && tbl_entry.as_ref().map(|e| e.status) == Some(MaintenanceStatus::Success) {
+                if !tbl_has_err
+                    && tbl_entry.as_ref().map(|e| e.status) == Some(MaintenanceStatus::Success)
+                {
                     succeeded += 1;
                 }
 
@@ -8025,7 +8065,11 @@ impl Render for CrabStudioApp {
             let handle = app_handle.clone();
             move |table, _, cx| {
                 handle.update(cx, |this, cx| {
-                    this.open_maintenance_modal(Some(table.name), Some(MaintenanceModalTab::Diagnostics), cx);
+                    this.open_maintenance_modal(
+                        Some(table.name),
+                        Some(MaintenanceModalTab::Diagnostics),
+                        cx,
+                    );
                 });
             }
         })
@@ -8452,7 +8496,9 @@ impl Render for CrabStudioApp {
                                         let md = rep.format_as_markdown();
                                         cx.write_to_clipboard(ClipboardItem::new_string(md));
                                         this.profile_copied = true;
-                                        this.status_message = Some("Copied Execution Profile to clipboard".to_string());
+                                        this.status_message = Some(
+                                            "Copied Execution Profile to clipboard".to_string(),
+                                        );
                                         cx.notify();
                                     }
                                 }

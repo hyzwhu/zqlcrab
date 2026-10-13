@@ -6,20 +6,16 @@
 //! 3. Tabular Stage Breakdown with Category, Start Offset, Duration, Ratio, and CPU/IO Details.
 //! 4. One-click Copy Formatted Execution Profile to Clipboard.
 
-use crate::db::profile::{format_duration_us, ProfileCategory, QueryProfileReport};
+use crate::db::profile::{ProfileCategory, QueryProfileReport, format_duration_us};
 use crate::settings::AppLanguage;
 use crate::ui::i18n::t;
 use crate::ui::theme::{ThemeColors, ThemeToken};
 use gpui_kit::assets::IconName;
 use gpui_kit::base::{h_flex, v_flex};
-use gpui_kit::component::{
-    button::Button,
-    spinner::Spinner,
-    Icon, Sizable as _,
-};
+use gpui_kit::component::{Icon, Sizable as _, button::Button, spinner::Spinner};
 use gpui_kit::gpui::{
-    App, FontWeight, InteractiveElement as _, IntoElement, ParentElement,
-    RenderOnce, StatefulInteractiveElement as _, Styled, Window, div, px, rgba,
+    App, FontWeight, InteractiveElement as _, IntoElement, ParentElement, RenderOnce,
+    StatefulInteractiveElement as _, Styled, Window, div, px, rgba,
 };
 use std::rc::Rc;
 
@@ -74,7 +70,12 @@ impl ProfilePanel {
         self
     }
 
-    fn render_kpi_card(&self, label: &str, value: String, accent_color: ThemeToken) -> impl IntoElement {
+    fn render_kpi_card(
+        &self,
+        label: &str,
+        value: String,
+        accent_color: ThemeToken,
+    ) -> impl IntoElement {
         v_flex()
             .flex_1()
             .min_w_0()
@@ -270,13 +271,7 @@ impl ProfilePanel {
                         .w(px(220.0))
                         .items_center()
                         .gap_1p5()
-                        .child(
-                            div()
-                                .w(px(6.0))
-                                .h(px(6.0))
-                                .rounded_full()
-                                .bg(accent),
-                        )
+                        .child(div().w(px(6.0)).h(px(6.0)).rounded_full().bg(accent))
                         .child(
                             div()
                                 .text_xs()
@@ -403,38 +398,49 @@ impl RenderOnce for ProfilePanel {
                 format!("{:.2} ms", report.metrics.total_duration_ms()),
                 ThemeColors::PRIMARY_LIGHT,
             ))
-            .child(self.render_kpi_card(
-                t("profile.kpi_planning_time", lang),
-                report
-                    .metrics
-                    .planning_time_ms()
-                    .map(|ms| format!("{ms:.2} ms"))
-                    .unwrap_or_else(|| "-".to_string()),
-                ThemeColors::WARNING,
-            ))
-            .child(self.render_kpi_card(
-                t("profile.kpi_execution_time", lang),
-                report
-                    .metrics
-                    .execution_time_ms()
-                    .map(|ms| format!("{ms:.2} ms"))
-                    .unwrap_or_else(|| "-".to_string()),
-                ThemeColors::SUCCESS,
-            ))
-            .child(self.render_kpi_card(
-                t("profile.kpi_buffer_hits", lang),
-                report
-                    .metrics
-                    .buffer_hit_ratio()
-                    .map(|r| format!("{:.1}%", r * 100.0))
-                    .unwrap_or_else(|| "100.0%".to_string()),
-                ThemeColors::PRIMARY_BORDER,
-            ))
-            .child(self.render_kpi_card(
-                t("profile.kpi_bottleneck", lang),
-                report.bottleneck_stage.clone().unwrap_or_else(|| "-".to_string()),
-                ThemeColors::ERROR,
-            ));
+            .child(
+                self.render_kpi_card(
+                    t("profile.kpi_planning_time", lang),
+                    report
+                        .metrics
+                        .planning_time_ms()
+                        .map(|ms| format!("{ms:.2} ms"))
+                        .unwrap_or_else(|| "-".to_string()),
+                    ThemeColors::WARNING,
+                ),
+            )
+            .child(
+                self.render_kpi_card(
+                    t("profile.kpi_execution_time", lang),
+                    report
+                        .metrics
+                        .execution_time_ms()
+                        .map(|ms| format!("{ms:.2} ms"))
+                        .unwrap_or_else(|| "-".to_string()),
+                    ThemeColors::SUCCESS,
+                ),
+            )
+            .child(
+                self.render_kpi_card(
+                    t("profile.kpi_buffer_hits", lang),
+                    report
+                        .metrics
+                        .buffer_hit_ratio()
+                        .map(|r| format!("{:.1}%", r * 100.0))
+                        .unwrap_or_else(|| "100.0%".to_string()),
+                    ThemeColors::PRIMARY_BORDER,
+                ),
+            )
+            .child(
+                self.render_kpi_card(
+                    t("profile.kpi_bottleneck", lang),
+                    report
+                        .bottleneck_stage
+                        .clone()
+                        .unwrap_or_else(|| "-".to_string()),
+                    ThemeColors::ERROR,
+                ),
+            );
 
         // Toolbar
         let on_copy_action = self.on_copy.clone();

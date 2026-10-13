@@ -17,9 +17,9 @@ use gpui_kit::component::{
     tooltip::Tooltip,
 };
 use gpui_kit::gpui::{
-    Anchor, App, ClipboardItem, ElementId, Entity, FontWeight, InteractiveElement as _, IntoElement,
-    ParentElement, RenderOnce, ScrollHandle, StatefulInteractiveElement as _, Styled, Window, div,
-    point, prelude::*, px, rgba,
+    Anchor, App, ClipboardItem, ElementId, Entity, FontWeight, InteractiveElement as _,
+    IntoElement, ParentElement, RenderOnce, ScrollHandle, StatefulInteractiveElement as _, Styled,
+    Window, div, point, prelude::*, px, rgba,
 };
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -937,20 +937,27 @@ impl RenderOnce for DataGrid {
                     let formats = [
                         (ExportFormat::Csv, IconName::FileText, "CSV (*.csv)"),
                         (ExportFormat::Json, IconName::Code, "JSON (*.json)"),
-                        (ExportFormat::Markdown, IconName::BookOpen, "Markdown (*.md)"),
-                        (ExportFormat::SqlInsert, IconName::Database, "SQL INSERT (*.sql)"),
+                        (
+                            ExportFormat::Markdown,
+                            IconName::BookOpen,
+                            "Markdown (*.md)",
+                        ),
+                        (
+                            ExportFormat::SqlInsert,
+                            IconName::Database,
+                            "SQL INSERT (*.sql)",
+                        ),
                     ];
                     for (fmt, icon, label) in formats {
                         let sel = on_exp.clone();
-                        menu = menu.item(
-                            PopupMenuItem::new(label.to_string())
-                                .icon(icon)
-                                .on_click(move |_, window, cx| {
+                        menu =
+                            menu.item(PopupMenuItem::new(label.to_string()).icon(icon).on_click(
+                                move |_, window, cx| {
                                     if let Some(ref h) = sel {
                                         h(fmt, window, cx);
                                     }
-                                }),
-                        );
+                                },
+                            ));
                     }
                     menu
                 })

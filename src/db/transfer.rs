@@ -162,9 +162,7 @@ pub fn map_column_type(
                 || upper.contains("NUMERIC")
             {
                 "REAL".to_string()
-            } else if upper.contains("BLOB")
-                || upper.contains("BYTEA")
-                || upper.contains("BINARY")
+            } else if upper.contains("BLOB") || upper.contains("BYTEA") || upper.contains("BINARY")
             {
                 "BLOB".to_string()
             } else {
@@ -241,7 +239,8 @@ pub fn map_column_type(
                 "JSONB".to_string()
             } else if upper.contains("JSON") {
                 "JSON".to_string()
-            } else if upper.contains("BLOB") || upper.contains("BYTEA") || upper.contains("BINARY") {
+            } else if upper.contains("BLOB") || upper.contains("BYTEA") || upper.contains("BINARY")
+            {
                 "BYTEA".to_string()
             } else if upper.contains("VARCHAR") || upper.contains("CHARACTER VARYING") {
                 if upper.contains('(') {
@@ -275,9 +274,9 @@ pub fn generate_create_table_ddl(
     // In SQLite, if there's a single integer primary key, it can be defined inline as INTEGER PRIMARY KEY
     let is_single_int_pk_sqlite = to_family == DatabaseFamily::Sqlite
         && pks.len() == 1
-        && columns
-            .iter()
-            .any(|c| c.name == pks[0] && (c.data_type.to_lowercase().contains("int") || c.is_auto_increment));
+        && columns.iter().any(|c| {
+            c.name == pks[0] && (c.data_type.to_lowercase().contains("int") || c.is_auto_increment)
+        });
 
     for col in columns {
         let quoted_col = quote_ident(&col.name, to_family);
@@ -334,9 +333,14 @@ pub fn generate_truncate_table_ddl(target_table: &str, family: DatabaseFamily) -
 }
 
 /// Returns SQL commands to disable and re-enable foreign key constraint checks.
-pub fn generate_foreign_keys_toggle(family: DatabaseFamily) -> (Option<&'static str>, Option<&'static str>) {
+pub fn generate_foreign_keys_toggle(
+    family: DatabaseFamily,
+) -> (Option<&'static str>, Option<&'static str>) {
     match family {
-        DatabaseFamily::Sqlite => (Some("PRAGMA foreign_keys = OFF;"), Some("PRAGMA foreign_keys = ON;")),
+        DatabaseFamily::Sqlite => (
+            Some("PRAGMA foreign_keys = OFF;"),
+            Some("PRAGMA foreign_keys = ON;"),
+        ),
         DatabaseFamily::MySql => (
             Some("SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0;"),
             Some("SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS;"),
@@ -379,26 +383,74 @@ mod tests {
 
     #[test]
     fn test_map_column_type_to_sqlite() {
-        assert_eq!(map_column_type("BIGINT", DatabaseFamily::Postgres, DatabaseFamily::Sqlite), "INTEGER");
-        assert_eq!(map_column_type("DOUBLE PRECISION", DatabaseFamily::Postgres, DatabaseFamily::Sqlite), "REAL");
-        assert_eq!(map_column_type("BYTEA", DatabaseFamily::Postgres, DatabaseFamily::Sqlite), "BLOB");
-        assert_eq!(map_column_type("VARCHAR(255)", DatabaseFamily::MySql, DatabaseFamily::Sqlite), "TEXT");
+        assert_eq!(
+            map_column_type("BIGINT", DatabaseFamily::Postgres, DatabaseFamily::Sqlite),
+            "INTEGER"
+        );
+        assert_eq!(
+            map_column_type(
+                "DOUBLE PRECISION",
+                DatabaseFamily::Postgres,
+                DatabaseFamily::Sqlite
+            ),
+            "REAL"
+        );
+        assert_eq!(
+            map_column_type("BYTEA", DatabaseFamily::Postgres, DatabaseFamily::Sqlite),
+            "BLOB"
+        );
+        assert_eq!(
+            map_column_type(
+                "VARCHAR(255)",
+                DatabaseFamily::MySql,
+                DatabaseFamily::Sqlite
+            ),
+            "TEXT"
+        );
     }
 
     #[test]
     fn test_map_column_type_to_mysql() {
-        assert_eq!(map_column_type("INTEGER", DatabaseFamily::Sqlite, DatabaseFamily::MySql), "INT");
-        assert_eq!(map_column_type("TEXT", DatabaseFamily::Sqlite, DatabaseFamily::MySql), "LONGTEXT");
-        assert_eq!(map_column_type("REAL", DatabaseFamily::Sqlite, DatabaseFamily::MySql), "DOUBLE");
-        assert_eq!(map_column_type("BOOLEAN", DatabaseFamily::Postgres, DatabaseFamily::MySql), "TINYINT(1)");
+        assert_eq!(
+            map_column_type("INTEGER", DatabaseFamily::Sqlite, DatabaseFamily::MySql),
+            "INT"
+        );
+        assert_eq!(
+            map_column_type("TEXT", DatabaseFamily::Sqlite, DatabaseFamily::MySql),
+            "LONGTEXT"
+        );
+        assert_eq!(
+            map_column_type("REAL", DatabaseFamily::Sqlite, DatabaseFamily::MySql),
+            "DOUBLE"
+        );
+        assert_eq!(
+            map_column_type("BOOLEAN", DatabaseFamily::Postgres, DatabaseFamily::MySql),
+            "TINYINT(1)"
+        );
     }
 
     #[test]
     fn test_map_column_type_to_postgres() {
-        assert_eq!(map_column_type("INT", DatabaseFamily::MySql, DatabaseFamily::Postgres), "INTEGER");
-        assert_eq!(map_column_type("TINYINT(1)", DatabaseFamily::MySql, DatabaseFamily::Postgres), "BOOLEAN");
-        assert_eq!(map_column_type("LONGBLOB", DatabaseFamily::MySql, DatabaseFamily::Postgres), "BYTEA");
-        assert_eq!(map_column_type("DATETIME", DatabaseFamily::MySql, DatabaseFamily::Postgres), "TIMESTAMP");
+        assert_eq!(
+            map_column_type("INT", DatabaseFamily::MySql, DatabaseFamily::Postgres),
+            "INTEGER"
+        );
+        assert_eq!(
+            map_column_type(
+                "TINYINT(1)",
+                DatabaseFamily::MySql,
+                DatabaseFamily::Postgres
+            ),
+            "BOOLEAN"
+        );
+        assert_eq!(
+            map_column_type("LONGBLOB", DatabaseFamily::MySql, DatabaseFamily::Postgres),
+            "BYTEA"
+        );
+        assert_eq!(
+            map_column_type("DATETIME", DatabaseFamily::MySql, DatabaseFamily::Postgres),
+            "TIMESTAMP"
+        );
     }
 
     #[test]
@@ -424,7 +476,14 @@ mod tests {
             },
         ];
         let pks = vec!["id".to_string()];
-        let ddl = generate_create_table_ddl("users", &cols, &pks, DatabaseFamily::MySql, DatabaseFamily::Sqlite, true);
+        let ddl = generate_create_table_ddl(
+            "users",
+            &cols,
+            &pks,
+            DatabaseFamily::MySql,
+            DatabaseFamily::Sqlite,
+            true,
+        );
         assert!(ddl.contains("CREATE TABLE IF NOT EXISTS \"users\""));
         assert!(ddl.contains("\"id\" INTEGER PRIMARY KEY AUTOINCREMENT"));
         assert!(ddl.contains("\"username\" TEXT NOT NULL"));
@@ -453,7 +512,14 @@ mod tests {
             },
         ];
         let pks = vec!["user_id".to_string()];
-        let ddl = generate_create_table_ddl("accounts", &cols, &pks, DatabaseFamily::Sqlite, DatabaseFamily::Postgres, false);
+        let ddl = generate_create_table_ddl(
+            "accounts",
+            &cols,
+            &pks,
+            DatabaseFamily::Sqlite,
+            DatabaseFamily::Postgres,
+            false,
+        );
         assert!(ddl.contains("CREATE TABLE \"accounts\""));
         assert!(ddl.contains("\"user_id\" INTEGER NOT NULL"));
         assert!(ddl.contains("PRIMARY KEY (\"user_id\")"));
@@ -462,11 +528,26 @@ mod tests {
 
     #[test]
     fn test_generate_drop_and_truncate_ddl() {
-        assert_eq!(generate_drop_table_ddl("users", DatabaseFamily::Sqlite), "DROP TABLE IF EXISTS \"users\";");
-        assert_eq!(generate_drop_table_ddl("users", DatabaseFamily::Postgres), "DROP TABLE IF EXISTS \"users\" CASCADE;");
-        assert_eq!(generate_truncate_table_ddl("users", DatabaseFamily::Sqlite), "DELETE FROM \"users\";");
-        assert_eq!(generate_truncate_table_ddl("users", DatabaseFamily::MySql), "TRUNCATE TABLE `users`;");
-        assert_eq!(generate_truncate_table_ddl("users", DatabaseFamily::Postgres), "TRUNCATE TABLE \"users\" CASCADE;");
+        assert_eq!(
+            generate_drop_table_ddl("users", DatabaseFamily::Sqlite),
+            "DROP TABLE IF EXISTS \"users\";"
+        );
+        assert_eq!(
+            generate_drop_table_ddl("users", DatabaseFamily::Postgres),
+            "DROP TABLE IF EXISTS \"users\" CASCADE;"
+        );
+        assert_eq!(
+            generate_truncate_table_ddl("users", DatabaseFamily::Sqlite),
+            "DELETE FROM \"users\";"
+        );
+        assert_eq!(
+            generate_truncate_table_ddl("users", DatabaseFamily::MySql),
+            "TRUNCATE TABLE `users`;"
+        );
+        assert_eq!(
+            generate_truncate_table_ddl("users", DatabaseFamily::Postgres),
+            "TRUNCATE TABLE \"users\" CASCADE;"
+        );
     }
 
     #[test]

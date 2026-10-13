@@ -4,7 +4,7 @@
 //! (data size, index size, free/bloat space, row counts) and automated
 //! table maintenance operations (VACUUM / OPTIMIZE, CHECK, ANALYZE, REINDEX, CHECKSUM).
 
-use crate::db::types::{quote_ident, DatabaseFamily, QueryResult, QueryValue};
+use crate::db::types::{DatabaseFamily, QueryResult, QueryValue, quote_ident};
 use serde::{Deserialize, Serialize};
 
 /// Formats raw byte size into a human-readable display string (B, KB, MB, GB, TB).
@@ -169,7 +169,10 @@ impl MaintenanceAction {
             Self::CheckIntegrity => true,
             Self::Analyze => true,
             Self::RebuildIndex => true,
-            Self::Checksum => matches!(family, DatabaseFamily::MySql | DatabaseFamily::Postgres | DatabaseFamily::Sqlite),
+            Self::Checksum => matches!(
+                family,
+                DatabaseFamily::MySql | DatabaseFamily::Postgres | DatabaseFamily::Sqlite
+            ),
         }
     }
 
@@ -389,7 +392,10 @@ pub fn parse_storage_query_result(
                 if row.is_empty() {
                     continue;
                 }
-                let table_name = row.first().map(|v| v.to_display_string()).unwrap_or_default();
+                let table_name = row
+                    .first()
+                    .map(|v| v.to_display_string())
+                    .unwrap_or_default();
                 if table_name.is_empty() {
                     continue;
                 }
@@ -426,7 +432,10 @@ pub fn parse_storage_query_result(
                 if row.is_empty() {
                     continue;
                 }
-                let table_name = row.first().map(|v| v.to_display_string()).unwrap_or_default();
+                let table_name = row
+                    .first()
+                    .map(|v| v.to_display_string())
+                    .unwrap_or_default();
                 if table_name.is_empty() {
                     continue;
                 }
@@ -463,7 +472,10 @@ pub fn parse_storage_query_result(
                 if row.is_empty() {
                     continue;
                 }
-                let table_name = row.first().map(|v| v.to_display_string()).unwrap_or_default();
+                let table_name = row
+                    .first()
+                    .map(|v| v.to_display_string())
+                    .unwrap_or_default();
                 let engine = row.get(1).and_then(qv_to_opt_string);
                 let total_size_bytes = row.get(2).map(qv_to_u64).unwrap_or(0);
                 let data_size_bytes = row.get(3).map(qv_to_u64).unwrap_or(0);
@@ -714,35 +726,73 @@ mod tests {
     fn test_generate_maintenance_sql() {
         let opts = MaintenanceOptions::default();
 
-        let mysql_opt = generate_maintenance_sql(MaintenanceAction::Optimize, "users", DatabaseFamily::MySql, &opts, None);
+        let mysql_opt = generate_maintenance_sql(
+            MaintenanceAction::Optimize,
+            "users",
+            DatabaseFamily::MySql,
+            &opts,
+            None,
+        );
         assert_eq!(mysql_opt, vec!["OPTIMIZE TABLE `users`;"]);
 
-        let pg_opt = generate_maintenance_sql(MaintenanceAction::Optimize, "users", DatabaseFamily::Postgres, &opts, Some("public"));
+        let pg_opt = generate_maintenance_sql(
+            MaintenanceAction::Optimize,
+            "users",
+            DatabaseFamily::Postgres,
+            &opts,
+            Some("public"),
+        );
         assert_eq!(pg_opt, vec!["VACUUM (ANALYZE) \"public\".\"users\";"]);
 
         let pg_opt_full = generate_maintenance_sql(
             MaintenanceAction::Optimize,
             "users",
             DatabaseFamily::Postgres,
-            &MaintenanceOptions { full_vacuum: true, ..opts },
+            &MaintenanceOptions {
+                full_vacuum: true,
+                ..opts
+            },
             None,
         );
         assert_eq!(pg_opt_full, vec!["VACUUM FULL \"users\";"]);
 
-        let sqlite_opt = generate_maintenance_sql(MaintenanceAction::Optimize, "users", DatabaseFamily::Sqlite, &opts, None);
+        let sqlite_opt = generate_maintenance_sql(
+            MaintenanceAction::Optimize,
+            "users",
+            DatabaseFamily::Sqlite,
+            &opts,
+            None,
+        );
         assert_eq!(sqlite_opt, vec!["VACUUM;"]);
 
-        let mysql_chk = generate_maintenance_sql(MaintenanceAction::CheckIntegrity, "orders", DatabaseFamily::MySql, &opts, None);
+        let mysql_chk = generate_maintenance_sql(
+            MaintenanceAction::CheckIntegrity,
+            "orders",
+            DatabaseFamily::MySql,
+            &opts,
+            None,
+        );
         assert_eq!(mysql_chk, vec!["CHECK TABLE `orders` EXTENDED;"]);
 
-        let sqlite_chk = generate_maintenance_sql(MaintenanceAction::CheckIntegrity, "orders", DatabaseFamily::Sqlite, &opts, None);
+        let sqlite_chk = generate_maintenance_sql(
+            MaintenanceAction::CheckIntegrity,
+            "orders",
+            DatabaseFamily::Sqlite,
+            &opts,
+            None,
+        );
         assert_eq!(sqlite_chk, vec!["PRAGMA integrity_check(\"orders\");"]);
     }
 
     #[test]
     fn test_parse_maintenance_result_status() {
         let ok_res = QueryResult {
-            columns: vec!["Table".to_string(), "Op".to_string(), "Msg_type".to_string(), "Msg_text".to_string()],
+            columns: vec![
+                "Table".to_string(),
+                "Op".to_string(),
+                "Msg_type".to_string(),
+                "Msg_text".to_string(),
+            ],
             column_types: vec!["string".to_string(); 4],
             rows: vec![vec![
                 QueryValue::String("mydb.users".to_string()),
@@ -761,12 +811,15 @@ mod tests {
         let err_res = QueryResult {
             columns: vec!["status".to_string()],
             column_types: vec!["string".to_string()],
-            rows: vec![vec![QueryValue::String("*** ERROR: corrupted page 42 ***".to_string())]],
+            rows: vec![vec![QueryValue::String(
+                "*** ERROR: corrupted page 42 ***".to_string(),
+            )]],
             rows_affected: None,
             execution_time_ms: Some(5),
         };
 
-        let err_log = parse_maintenance_result(MaintenanceAction::CheckIntegrity, "users", &err_res, 5);
+        let err_log =
+            parse_maintenance_result(MaintenanceAction::CheckIntegrity, "users", &err_res, 5);
         assert_eq!(err_log.status, MaintenanceStatus::Error);
     }
 
@@ -775,7 +828,11 @@ mod tests {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         let sql = generate_storage_query_sql(DatabaseFamily::Sqlite, None, None);
         let stmt = conn.prepare(&sql);
-        assert!(stmt.is_ok(), "SQLite storage query prepare failed: {:?}", stmt.err());
+        assert!(
+            stmt.is_ok(),
+            "SQLite storage query prepare failed: {:?}",
+            stmt.err()
+        );
         let mut stmt = stmt.unwrap();
         let mut rows = stmt.query([]).unwrap();
         assert!(rows.next().unwrap().is_some());

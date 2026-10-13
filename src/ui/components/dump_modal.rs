@@ -496,16 +496,13 @@ impl DumpModal {
             }
         }
 
-        v_flex()
-            .size_full()
-            .child(toolbar)
-            .child(
-                v_flex()
-                    .id("dump_tables_scroll")
-                    .flex_1()
-                    .overflow_y_scroll()
-                    .child(list),
-            )
+        v_flex().size_full().child(toolbar).child(
+            v_flex()
+                .id("dump_tables_scroll")
+                .flex_1()
+                .overflow_y_scroll()
+                .child(list),
+        )
     }
 
     #[allow(clippy::type_complexity)]
@@ -570,34 +567,35 @@ impl DumpModal {
         let on_comments = self.on_toggle_comments.clone();
         let cur_comments = self.config.options.include_comments;
 
-        let render_checkbox_btn = |id: &'static str,
-                                   is_checked: bool,
-                                   label: &'static str,
-                                   handler: Option<Rc<dyn Fn(bool, &mut Window, &mut App) + 'static>>| {
-            let next_val = !is_checked;
-            let mut btn = Button::new(id)
-                .small()
-                .w_full()
-                .icon(if is_checked {
-                    IconName::Check
+        let render_checkbox_btn =
+            |id: &'static str,
+             is_checked: bool,
+             label: &'static str,
+             handler: Option<Rc<dyn Fn(bool, &mut Window, &mut App) + 'static>>| {
+                let next_val = !is_checked;
+                let mut btn = Button::new(id)
+                    .small()
+                    .w_full()
+                    .icon(if is_checked {
+                        IconName::Check
+                    } else {
+                        IconName::Circle
+                    })
+                    .label(label);
+
+                if is_checked {
+                    btn = btn.primary();
                 } else {
-                    IconName::Circle
-                })
-                .label(label);
+                    btn = btn.outline();
+                }
 
-            if is_checked {
-                btn = btn.primary();
-            } else {
-                btn = btn.outline();
-            }
-
-            if let Some(h) = handler {
-                btn = btn.on_click(move |_, window, cx| {
-                    h(next_val, window, cx);
-                });
-            }
-            btn
-        };
+                if let Some(h) = handler {
+                    btn = btn.on_click(move |_, window, cx| {
+                        h(next_val, window, cx);
+                    });
+                }
+                btn
+            };
 
         let cur_batch = self.config.options.batch_size;
         let on_batch = self.on_change_batch_size.clone();
@@ -608,50 +606,38 @@ impl DumpModal {
             .label(format!("{cur_batch} rows"))
             .dropdown_menu(move |mut menu, _window, _cx| {
                 let b_handler = on_batch.clone();
-                menu = menu.item(
-                    PopupMenuItem::new("100 rows per INSERT")
-                        .on_click({
-                            let h = b_handler.clone();
-                            move |_, window, cx| {
-                                if let Some(ref h) = h {
-                                    h(100, window, cx);
-                                }
-                            }
-                        }),
-                );
-                menu = menu.item(
-                    PopupMenuItem::new("200 rows per INSERT")
-                        .on_click({
-                            let h = b_handler.clone();
-                            move |_, window, cx| {
-                                if let Some(ref h) = h {
-                                    h(200, window, cx);
-                                }
-                            }
-                        }),
-                );
-                menu = menu.item(
-                    PopupMenuItem::new("500 rows per INSERT")
-                        .on_click({
-                            let h = b_handler.clone();
-                            move |_, window, cx| {
-                                if let Some(ref h) = h {
-                                    h(500, window, cx);
-                                }
-                            }
-                        }),
-                );
-                menu = menu.item(
-                    PopupMenuItem::new("1000 rows per INSERT")
-                        .on_click({
-                            let h = b_handler;
-                            move |_, window, cx| {
-                                if let Some(ref h) = h {
-                                    h(1000, window, cx);
-                                }
-                            }
-                        }),
-                );
+                menu = menu.item(PopupMenuItem::new("100 rows per INSERT").on_click({
+                    let h = b_handler.clone();
+                    move |_, window, cx| {
+                        if let Some(ref h) = h {
+                            h(100, window, cx);
+                        }
+                    }
+                }));
+                menu = menu.item(PopupMenuItem::new("200 rows per INSERT").on_click({
+                    let h = b_handler.clone();
+                    move |_, window, cx| {
+                        if let Some(ref h) = h {
+                            h(200, window, cx);
+                        }
+                    }
+                }));
+                menu = menu.item(PopupMenuItem::new("500 rows per INSERT").on_click({
+                    let h = b_handler.clone();
+                    move |_, window, cx| {
+                        if let Some(ref h) = h {
+                            h(500, window, cx);
+                        }
+                    }
+                }));
+                menu = menu.item(PopupMenuItem::new("1000 rows per INSERT").on_click({
+                    let h = b_handler;
+                    move |_, window, cx| {
+                        if let Some(ref h) = h {
+                            h(1000, window, cx);
+                        }
+                    }
+                }));
                 menu
             });
 
@@ -819,22 +805,18 @@ impl DumpModal {
                         .justify_between()
                         .items_center()
                         .child(
-                            h_flex()
-                                .items_center()
-                                .gap_2()
-                                .child(Spinner::new())
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .font_weight(FontWeight::BOLD)
-                                        .text_color(ThemeColors::PRIMARY_LIGHT)
-                                        .child(format!(
-                                            "Table {} / {}: {}",
-                                            prog.current_table_index,
-                                            prog.total_tables,
-                                            prog.current_table_name
-                                        )),
-                                ),
+                            h_flex().items_center().gap_2().child(Spinner::new()).child(
+                                div()
+                                    .text_xs()
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(ThemeColors::PRIMARY_LIGHT)
+                                    .child(format!(
+                                        "Table {} / {}: {}",
+                                        prog.current_table_index,
+                                        prog.total_tables,
+                                        prog.current_table_name
+                                    )),
+                            ),
                         )
                         .child(
                             div()
