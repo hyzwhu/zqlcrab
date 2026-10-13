@@ -10,14 +10,14 @@ use gpui_kit::component::{
     Icon, Sizable as _,
     button::{Button, ButtonVariants as _},
     input::{Input, InputState},
-    menu::{ContextMenuExt as _, PopupMenu, PopupMenuItem},
+    menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem},
     resizable::{ResizableState, h_resizable, resizable_panel},
     scroll::{ScrollableElement as _, ScrollbarAxis},
     table::{Table, TableBody, TableCell, TableHead, TableHeader, TableRow},
     tooltip::Tooltip,
 };
 use gpui_kit::gpui::{
-    App, ClipboardItem, ElementId, Entity, FontWeight, InteractiveElement as _, IntoElement,
+    Anchor, App, ClipboardItem, ElementId, Entity, FontWeight, InteractiveElement as _, IntoElement,
     ParentElement, RenderOnce, ScrollHandle, StatefulInteractiveElement as _, Styled, Window, div,
     point, prelude::*, px, rgba,
 };
@@ -922,66 +922,37 @@ impl RenderOnce for DataGrid {
             &[]
         };
 
-        // Export handlers
+        // Unified Export dropdown button
         let on_exp = self.on_export.clone();
-        let export_csv_btn = {
+        let export_btn = {
             let on_exp = on_exp.clone();
-            Button::new("export_csv")
+            Button::new("export_dropdown_btn")
                 .ghost()
                 .xsmall()
-                .flex_shrink(1.0)
-                .min_w(px(26.0))
-                .overflow_hidden()
-                .tooltip("Export / Copy CSV")
-                .icon(IconName::FileText)
-                .child("CSV")
-                .when_some(on_exp, |btn, handler| {
-                    btn.on_click(move |_, window, cx| handler(ExportFormat::Csv, window, cx))
-                })
-        };
-
-        let export_json_btn = {
-            let on_exp = on_exp.clone();
-            Button::new("export_json")
-                .ghost()
-                .xsmall()
-                .flex_shrink(1.0)
-                .min_w(px(26.0))
-                .overflow_hidden()
-                .tooltip("Export / Copy JSON")
-                .child("JSON")
-                .when_some(on_exp, |btn, handler| {
-                    btn.on_click(move |_, window, cx| handler(ExportFormat::Json, window, cx))
-                })
-        };
-
-        let export_md_btn = {
-            let on_exp = on_exp.clone();
-            Button::new("export_md")
-                .ghost()
-                .xsmall()
-                .flex_shrink(1.0)
-                .min_w(px(26.0))
-                .overflow_hidden()
-                .tooltip("Export / Copy Markdown")
-                .child("MD")
-                .when_some(on_exp, |btn, handler| {
-                    btn.on_click(move |_, window, cx| handler(ExportFormat::Markdown, window, cx))
-                })
-        };
-
-        let export_sql_btn = {
-            let on_exp = on_exp.clone();
-            Button::new("export_sql")
-                .ghost()
-                .xsmall()
-                .flex_shrink(1.0)
-                .min_w(px(26.0))
-                .overflow_hidden()
-                .tooltip("Export / Copy SQL Inserts")
-                .child("SQL")
-                .when_some(on_exp, |btn, handler| {
-                    btn.on_click(move |_, window, cx| handler(ExportFormat::SqlInsert, window, cx))
+                .flex_shrink_0()
+                .icon(IconName::Download)
+                .label("Export")
+                .tooltip("Export / Copy Table Data")
+                .dropdown_menu_with_anchor(Anchor::BottomRight, move |mut menu, _, _| {
+                    let formats = [
+                        (ExportFormat::Csv, IconName::FileText, "CSV (*.csv)"),
+                        (ExportFormat::Json, IconName::Code, "JSON (*.json)"),
+                        (ExportFormat::Markdown, IconName::BookOpen, "Markdown (*.md)"),
+                        (ExportFormat::SqlInsert, IconName::Database, "SQL INSERT (*.sql)"),
+                    ];
+                    for (fmt, icon, label) in formats {
+                        let sel = on_exp.clone();
+                        menu = menu.item(
+                            PopupMenuItem::new(label.to_string())
+                                .icon(icon)
+                                .on_click(move |_, window, cx| {
+                                    if let Some(ref h) = sel {
+                                        h(fmt, window, cx);
+                                    }
+                                }),
+                        );
+                    }
+                    menu
                 })
         };
 
@@ -990,12 +961,10 @@ impl RenderOnce for DataGrid {
             Button::new("grid_import_btn")
                 .ghost()
                 .xsmall()
-                .flex_shrink(1.0)
-                .min_w(px(26.0))
-                .overflow_hidden()
+                .flex_shrink_0()
                 .tooltip("Import Data (CSV / SQL)")
                 .icon(IconName::Upload)
-                .child("Import")
+                .label("Import")
                 .when_some(on_imp, |btn, handler| {
                     btn.on_click(move |_, window, cx| handler(window, cx))
                 })
@@ -1006,12 +975,10 @@ impl RenderOnce for DataGrid {
             Button::new("grid_data_diff_btn")
                 .ghost()
                 .xsmall()
-                .flex_shrink(1.0)
-                .min_w(px(26.0))
-                .overflow_hidden()
+                .flex_shrink_0()
                 .tooltip("Compare Table Data...")
                 .icon(IconName::ListOrdered)
-                .child("Diff")
+                .label("Diff")
                 .when_some(on_diff, |btn, handler| {
                     btn.on_click(move |_, window, cx| handler(window, cx))
                 })
@@ -1024,6 +991,7 @@ impl RenderOnce for DataGrid {
             let mut btn = Button::new("prev_page")
                 .ghost()
                 .xsmall()
+                .flex_shrink_0()
                 .icon(IconName::ChevronLeft)
                 .tooltip("Previous Page");
             if !is_disabled {
@@ -1044,6 +1012,7 @@ impl RenderOnce for DataGrid {
             let mut btn = Button::new("next_page")
                 .ghost()
                 .xsmall()
+                .flex_shrink_0()
                 .icon(IconName::ChevronRight)
                 .tooltip("Next Page");
             if !is_disabled {
@@ -1065,9 +1034,7 @@ impl RenderOnce for DataGrid {
             Button::new("toggle_inspector_toolbar_btn")
                 .ghost()
                 .xsmall()
-                .flex_shrink(1.0)
-                .min_w(px(26.0))
-                .overflow_hidden()
+                .flex_shrink_0()
                 .icon(IconName::PanelRight)
                 .label(if is_open { "Hide Details" } else { "Details" })
                 .tooltip("Toggle Cell & Row Details Inspector")
@@ -1150,9 +1117,7 @@ impl RenderOnce for DataGrid {
                                 Button::new("quick_copy_toolbar_btn")
                                     .ghost()
                                     .xsmall()
-                                    .flex_shrink(1.0)
-                                    .min_w(px(24.0))
-                                    .overflow_hidden()
+                                    .flex_shrink_0()
                                     .icon(IconName::Copy)
                                     .label("Copy")
                                     .tooltip("Copy selected cell value")
@@ -1600,21 +1565,14 @@ impl RenderOnce for DataGrid {
                 h_flex()
                     .items_center()
                     .gap_2()
-                    .flex_shrink(1.0)
-                    .min_w_0()
-                    .overflow_hidden()
-                    // Export Actions
+                    .flex_shrink_0()
+                    // Action Buttons (Export Dropdown, Import, Diff)
                     .child(
                         h_flex()
                             .items_center()
                             .gap_1()
-                            .flex_shrink(1.0)
-                            .min_w_0()
-                            .overflow_hidden()
-                            .child(export_csv_btn)
-                            .child(export_json_btn)
-                            .child(export_md_btn)
-                            .child(export_sql_btn)
+                            .flex_shrink_0()
+                            .child(export_btn)
                             .child(import_btn)
                             .child(data_diff_btn),
                     )
@@ -1636,6 +1594,7 @@ impl RenderOnce for DataGrid {
                                 div()
                                     .text_xs()
                                     .text_color(ThemeColors::TEXT_MUTED)
+                                    .flex_shrink_0()
                                     .child(format!("{}/{}", current_page + 1, total_pages)),
                             )
                             .child(next_page_btn),
