@@ -1,17 +1,20 @@
-## 🦀 zqlcrab v0.1.12
+## 🦀 zqlcrab v0.1.13
 
 Fast, lightweight, GPU-accelerated database desktop client built with Rust & GPUI.
 
 ### 📋 Changelog
 
-#### v0.1.12 Release Highlights:
-- 🛠️ **Fix Infinite Loading Spinner in Storage Capacity Analyzer & Maintenance Wizard (修复库表维护与存储容量分析向导无限转圈)**:
-  - **GPUI Task Lifecycle & RAII Cancellation Fix (`.detach()`)**:
-    - Resolved a critical GPUI background task lifecycle bug where asynchronous queries spawned via `cx.spawn(...)` without `.detach()` were immediately cancelled and dropped by RAII cleanup when the enclosing statement finished.
-    - Ensured that `refresh_maintenance_metrics`, `run_maintenance`, `start_dump_execution`, `execute_restore_batch`, and `start_transfer_execution` run to completion and properly update UI loading states (`is_loading = false`).
-  - **12s Timeout & Graceful Metadata Fallback**:
-    - Wrapped catalog metrics retrieval in a 12-second asynchronous timeout (`tokio::time::timeout`), guaranteeing the wizard UI never freezes indefinitely on network latency or catalog locks.
-    - Added automatic fallback to cached schema table metadata when system catalog access is restricted or tables are empty.
-  - **Multi-Engine Dialect & Pragma Compatibility**:
-    - Corrected SQLite storage metrics query using standard table-valued functions (`FROM pragma_page_count(), pragma_page_size(), pragma_freelist_count()`), resolving the `no such function: PRAGMA_PAGE_SIZE` query failure.
-    - Expanded PostgreSQL storage scanning across all non-system namespaces and partitioned tables (`relkind IN ('r', 'p')`).
+#### v0.1.13 Release Highlights:
+- 🖱️ **Horizontal Scrolling for SQL Snippets & Script Filter Tabs (SQL 代码片段库标签栏支持左右滑动)**:
+  - **Fluid Horizontal Scroll Container**:
+    - Resolved filter pill clipping where dialect and category filter tabs overflowed the container on smaller windows/displays without the ability to scroll.
+    - Assigned unique ElementId (`snippet_tabs_scroll`), `min_w_0()`, and `overflow_x_scroll()` to enable horizontal gesture navigation via trackpad swipes and mouse wheel scrolling.
+  - **Flex-Shrink Protection & Visual Separation**:
+    - Applied `.flex_shrink_0()` to each dialect and category pill, preventing pill deformation, text truncation, or cramped button layouts.
+    - Added an aesthetic vertical divider between dialect filters and category filters for enhanced visual hierarchy.
+- 🛡️ **Modal Scroll Event Isolation & Hit-Test Occlusion (弹窗上下滑动事件隔离，防止背景视图联动滑动)**:
+  - **GPUI Hit-Test Occlusion (`.occlude()`)**:
+    - Fixed a scroll event propagation issue where scrolling vertically inside the Storage Capacity Analysis & Maintenance Wizard modal simultaneously triggered scrolling on the underlying view (e.g., SQL Snippets list, Data Grid, or Query Editor).
+    - Added `.id(...).occlude()` to modal backdrop overlays and modal cards, terminating GPUI hit-test traversal (`HitboxBehavior::BlockMouse`) and preventing events from leaking to background layers.
+  - **Universal Dialog Shielding**:
+    - Standardized modal occlusion across all application wizards and dialogs: Storage Maintenance Wizard, Database Dump, Restore, Data Transfer, Mock Data Generator, Schema Diff, Data Diff, Kill Session Confirm, Snippet Editor, and Export Dialog.
