@@ -961,6 +961,7 @@ impl RenderOnce for Sidebar {
                         .flex_1()
                         .min_w_0()
                         .text_xs()
+                        .line_height(px(20.0))
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(ThemeColors::TEXT_PRIMARY)
                         .overflow_hidden()
@@ -1003,8 +1004,9 @@ impl RenderOnce for Sidebar {
             let conn_item = h_flex()
                 .id(ElementId::Name(format!("conn_item_{}", conn.id).into()))
                 .w_full()
+                .h(px(28.0))
+                .min_h(px(28.0))
                 .px_2()
-                .py_0p5()
                 .rounded_md()
                 .items_center()
                 .justify_between()
@@ -1254,7 +1256,7 @@ impl RenderOnce for Sidebar {
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
-                    .gap_0p5()
+                    .gap(px(1.5))
                     .p_1();
 
                 for (schema, (tables, views)) in grouped {
@@ -1265,8 +1267,9 @@ impl RenderOnce for Sidebar {
                             .id(ElementId::Name(format!("schema_folder_{}", schema).into()))
                             .w_full()
                             .min_w_0()
+                            .h(px(26.0))
+                            .min_h(px(26.0))
                             .px_2()
-                            .py_1()
                             .items_center()
                             .gap_1p5()
                             .tooltip(move |window, cx| {
@@ -1274,7 +1277,7 @@ impl RenderOnce for Sidebar {
                             })
                             .child(
                                 Icon::new(IconName::Folder)
-                                    .size(px(13.0))
+                                    .size(px(14.0))
                                     .flex_shrink_0()
                                     .text_color(ThemeColors::PRIMARY_LIGHT),
                             )
@@ -1285,6 +1288,7 @@ impl RenderOnce for Sidebar {
                                     .overflow_hidden()
                                     .text_ellipsis()
                                     .text_xs()
+                                    .line_height(px(18.0))
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(ThemeColors::TEXT_PRIMARY)
                                     .child(schema_label),
@@ -1381,9 +1385,9 @@ impl RenderOnce for Sidebar {
         };
 
         v_flex()
-            .w(px(260.0))
-            .min_w(px(260.0))
-            .max_w(px(260.0))
+            .w(px(280.0))
+            .min_w(px(280.0))
+            .max_w(px(320.0))
             .flex_shrink_0()
             .h_full()
             .bg(ThemeColors::BG_APP)
@@ -1421,8 +1425,9 @@ fn group_header(
 
     h_flex()
         .w_full()
+        .h(px(26.0))
+        .min_h(px(26.0))
         .px_2()
-        .py_1()
         .items_center()
         .justify_between()
         .child(
@@ -1536,6 +1541,8 @@ fn table_row(
                 .flex_shrink_0()
                 .text_color(if is_selected {
                     ThemeColors::TEXT_PRIMARY
+                } else if tbl.is_view() {
+                    ThemeColors::PRIMARY_LIGHT
                 } else {
                     ThemeColors::SUCCESS
                 }),
@@ -1547,6 +1554,12 @@ fn table_row(
                 .overflow_hidden()
                 .text_ellipsis()
                 .text_xs()
+                .line_height(px(20.0))
+                .font_weight(if is_selected {
+                    FontWeight::MEDIUM
+                } else {
+                    FontWeight::NORMAL
+                })
                 .text_color(ThemeColors::TEXT_PRIMARY)
                 .child(tbl.name.clone()),
         );
@@ -1554,7 +1567,7 @@ fn table_row(
     let actions_area = h_flex()
         .flex_shrink_0()
         .items_center()
-        .gap_0p5()
+        .gap(px(1.0))
         .child(
             Button::new(ElementId::Name(format!("quick_sel_{}", info.name).into()))
                 .ghost()
@@ -1594,11 +1607,11 @@ fn table_row(
         .id(ElementId::Name(row_id.into()))
         .w_full()
         .min_w_0()
-        .overflow_hidden()
-        .py_1()
+        .h(px(28.0))
+        .min_h(px(28.0))
         .px_2()
-        .pl_6()
-        .rounded_sm()
+        .pl(px(18.0))
+        .rounded_md()
         .items_center()
         .justify_between()
         .gap_1()
