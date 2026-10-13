@@ -1,34 +1,17 @@
-## 🦀 zqlcrab v0.1.10
+## 🦀 zqlcrab v0.1.11
 
 Fast, lightweight, GPU-accelerated database desktop client built with Rust & GPUI.
 
 ### 📋 Changelog
 
-#### v0.1.10 Release Highlights:
-- ⏱️ **Visual SQL Query Profiler & Resource Timeline Panel (SQL 查询执行画像与资源时序耗时分析)**:
-  - **Multi-Dialect Execution Engine & Resource Metrics Extraction**:
-    - **MySQL Native Profiling**: Orchestrates `SET profiling = 1`, runs query statement events, captures `SHOW PROFILE ALL FOR QUERY ...`, parsing execution status stages, CPU user/system times, and block I/O operations (`Block_ops_in`, `Block_ops_out`).
-    - **PostgreSQL Buffer & Plan Analysis**: Dispatches `EXPLAIN (ANALYZE, BUFFERS, TIMING, SUMMARY, FORMAT JSON/TEXT)`, analyzing execution vs. planning times, buffer cache hits vs. reads (`Shared Hit Blocks`, `Shared Read Blocks`), and node execution latency.
-    - **SQLite & Synthetic Client Pipeline**: Measures high-resolution microsecond client execution phases (Syntax Parsing & AST Validation, Cost-based Query Planning, Virtual Machine Engine Step Execution, Row Stream & Buffering).
-  - **Console Bottom Pane 3-Tab Architecture**:
-    - Seamless bottom navigation across 3 specialized views: `Results` (Data Grid), `Execution Plan` (EXPLAIN Visual Tree & Cost Breakdown), and `Profile` (Resource Timeline & Gantt Waterfall).
-    - Top toolbar action button `Profile` (`⌘⇧P` / `Ctrl+Shift+P`) with loading animation and status feedback.
-  - **Visual Waterfall Timeline & Gantt Chart Visualization**:
-    - Microsecond time scale markers across the query timeline (0 ms, 25%, 50%, 75%, 100%).
-    - Proportional horizontal execution bars color-coded by category:
-      - Green (`ThemeColors::SUCCESS`) for Data Transmission & Fetch.
-      - Blue (`ThemeColors::PRIMARY_LIGHT`) for Engine Execution.
-      - Orange (`ThemeColors::WARNING`) for Optimizer & Statistics.
-      - Red (`ThemeColors::ERROR`) alert for bottleneck stages consuming >35% of query latency.
-    - Rich interactive tooltips displaying exact microsecond duration, percentage of total time, start offset, and engine details.
-  - **Top KPI Summary Metrics Cards**:
-    - *Total Duration*: Overall query latency in milliseconds and microseconds.
-    - *Planning Time*: Time spent in compilation, catalog lookup, and AST optimization.
-    - *Execution Time*: Time spent in engine virtual machine execution.
-    - *Buffer Cache Hit Ratio*: Shared memory buffer hit ratio percentage (e.g. `100.0%`).
-    - *Bottleneck Stage*: Heaviest query stage highlighted with badge.
-  - **Tabular Execution Breakdown & Export**:
-    - Tabular breakdown listing stage index, stage name, category badge, start offset, duration (ms), proportion ratio (%), and detailed I/O / buffer attributes.
-    - One-click copy formatted execution profile to system clipboard as a structured Markdown report.
-  - **Complete Bilingual Localization**:
-    - Comprehensive English and Simplified Chinese (简体中文) translations across all KPI metrics, stage categories, toolbar actions, and tooltips.
+#### v0.1.11 Release Highlights:
+- 🎨 **Sidebar Table List & Underscore Typography Optimization (侧边栏对象树排版与下划线渲染优化)**:
+  - **Fixed Underscore Visibility & Vertical Bounds Clipping**:
+    - Resolved font baseline descender clipping where underscores (`_`) and letters with descenders (`g`, `p`, `q`, `y`) in snake_case table and connection names (e.g., `lato_analyst`) were truncated by tight layout bounds and `overflow_hidden`.
+    - Explicitly configured line height (`line_height: 20px`) across table and connection items, guaranteeing pristine rendering of underscores and special characters.
+  - **Comfortable Standard Row Height & Breathing Room**:
+    - Upgraded table row height from the cramped ~20px to the standard desktop IDE height `28px` (`min_h: 28px`), providing balanced vertical breathing room and ergonomic spacing.
+    - Standardized schema folder and group header rows to `26px` with subtle list gaps (`gap: 1.5px`) to eliminate dense visual crowding.
+  - **Refined Sidebar Aesthetics & Horizontal Space**:
+    - Expanded default sidebar width from 260px to 280px (with stretch range up to 320px) to drastically reduce ellipsis truncation for longer table identifiers.
+    - Optimized tree indentation to `18px`, compacting quick action button clusters while elevating row hover and active selection styling with smooth `rounded_md` corners.
