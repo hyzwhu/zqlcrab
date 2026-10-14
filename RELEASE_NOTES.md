@@ -1,14 +1,15 @@
-## 🦀 zqlcrab v0.1.14
+## 🦀 zqlcrab v0.1.15
 
 Fast, lightweight, GPU-accelerated database desktop client built with Rust & GPUI.
 
 ### 📋 Changelog
 
-#### v0.1.14 Release Highlights:
-- 📊 **Data Grid Toolbar Optimization & Export Dropdown Menu (数据表格底部工具栏防挤压与导出动作下拉菜单化)**:
-  - **Unified Export Dropdown Menu**:
-    - Replaced individual, horizontal export action buttons (CSV, JSON, Markdown, SQL) with a consolidated, space-efficient `Export` dropdown menu button.
-    - Each export format option is clearly labeled with its dedicated file icon (`CSV (*.csv)`, `JSON (*.json)`, `Markdown (*.md)`, `SQL INSERT (*.sql)`).
+#### v0.1.15 Release Highlights:
+- ⚡ **Query Console Toolbar Optimization & Snippets Dropdown (SQL控制台工具栏响应式防挤压与下拉菜单整合)**:
+  - **Unified Snippets & Actions Dropdown Menu**:
+    - Consolidated multiple separate buttons (`Snippets`, `Save as Snippet`, `Clear`) into a compact, space-efficient `Snippets` dropdown menu button.
+    - Quick access to browsing the SQL snippets library (`📁 Browse Snippet Library`), saving the current query (`🔖 Save as Snippet`), and clearing the query editor (`🗑️ Clear SQL Editor`).
   - **Responsive Flex Layout Protection**:
-    - Wrapped action groups and pagination elements with `.flex_shrink_0()` to eliminate layout overlap or button truncation on narrower windows and split views.
-    - Preserved immediate access to Import and Table Data Diff actions while keeping page navigation indicators crisp and aligned.
+    - Applied `.flex_shrink_0()` to core action buttons (`Run`, `Format`, `Explain`, `Profile`, and `Snippets`) to eliminate button truncation, distorted margins, or label overlap on narrower screens or split-view panels.
+    - Added an `overflow_x_scroll()` gesture-friendly container for the left action group, ensuring smooth horizontal scrolling even in ultra-compact views.
+    - Protected the right-side active database connection badge with flex-shrink protection and text ellipsis.
