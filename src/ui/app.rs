@@ -408,6 +408,7 @@ pub struct CrabStudioApp {
     sessions: Vec<SessionInfo>,
     sessions_search_input: Entity<InputState>,
     sessions_auto_refresh_secs: u32,
+    sessions_refresh_generation: usize,
     sessions_is_refreshing: bool,
     kill_confirm_modal: Option<(SessionInfo, KillAction, String)>,
 
@@ -910,6 +911,7 @@ impl CrabStudioApp {
             sessions: Vec::new(),
             sessions_search_input,
             sessions_auto_refresh_secs: 0,
+            sessions_refresh_generation: 0,
             sessions_is_refreshing: false,
             kill_confirm_modal: None,
             schema_diff_modal_open: false,
@@ -1254,6 +1256,7 @@ impl CrabStudioApp {
 
                         // Sync autocomplete metadata cache
                         if let Ok(mut cache) = app.sql_metadata_cache.write() {
+                            cache.clear();
                             cache.set_family(Some(db_family));
                             if let Some(ref db) = db_name {
                                 cache.set_databases(vec![db.clone()]);
@@ -4201,6 +4204,13 @@ impl CrabStudioApp {
         self.import_modal_open = false;
         self.import_is_executing = false;
         self.import_error = None;
+        self.import_csv_preview = None;
+        self.import_sql_preview = None;
+        self.import_mappings.clear();
+        self.import_table_columns.clear();
+        self.import_available_tables.clear();
+        self.import_progress = None;
+        self.import_result = None;
         cx.notify();
     }
 
@@ -4635,6 +4645,10 @@ impl CrabStudioApp {
         self.export_modal_open = false;
         self.export_is_executing = false;
         self.export_error = None;
+        self.export_preview_content = None;
+        self.export_success_info = None;
+        self.export_ddl_cache = None;
+        self.export_available_tables.clear();
         cx.notify();
     }
 
@@ -5004,6 +5018,12 @@ impl CrabStudioApp {
         self.mock_modal_open = false;
         self.mock_is_executing = false;
         self.mock_error = None;
+        self.mock_preview_headers.clear();
+        self.mock_preview_rows.clear();
+        self.mock_columns.clear();
+        self.mock_available_tables.clear();
+        self.mock_progress = None;
+        self.mock_result = None;
         cx.notify();
     }
 
@@ -5225,6 +5245,13 @@ impl CrabStudioApp {
     pub fn close_schema_diff(&mut self, cx: &mut Context<Self>) {
         self.schema_diff_modal_open = false;
         self.schema_diff_copied = false;
+        self.schema_diff_source_cols.clear();
+        self.schema_diff_source_indexes.clear();
+        self.schema_diff_target_cols.clear();
+        self.schema_diff_target_indexes.clear();
+        self.schema_diff_report = SchemaDiffReport::default();
+        self.schema_diff_script = MigrationScript::default();
+        self.schema_diff_available_tables.clear();
         cx.notify();
     }
 
@@ -5403,6 +5430,14 @@ impl CrabStudioApp {
     pub fn close_data_diff(&mut self, cx: &mut Context<Self>) {
         self.data_diff_modal_open = false;
         self.data_diff_copied = false;
+        self.data_diff_source_cols.clear();
+        self.data_diff_target_cols.clear();
+        self.data_diff_source_rows.clear();
+        self.data_diff_target_rows.clear();
+        self.data_diff_available_tables.clear();
+        self.data_diff_report =
+            DataDiffReport::empty(String::new(), String::new(), DatabaseFamily::Postgres);
+        self.data_diff_script = DataSyncScript::default();
         cx.notify();
     }
 
@@ -5638,6 +5673,10 @@ impl CrabStudioApp {
     pub fn close_dump_modal(&mut self, cx: &mut Context<Self>) {
         self.dump_modal_open = false;
         self.dump_is_exporting = false;
+        self.dump_available_tables.clear();
+        self.dump_selected_tables.clear();
+        self.dump_progress = None;
+        self.dump_summary = None;
         cx.notify();
     }
 
@@ -5852,6 +5891,12 @@ impl CrabStudioApp {
     pub fn close_restore_modal(&mut self, cx: &mut Context<Self>) {
         self.restore_modal_open = false;
         self.restore_is_executing = false;
+        self.restore_file_path = None;
+        self.restore_analysis = None;
+        self.restore_summary = None;
+        self.restore_progress = None;
+        self.restore_logs.clear();
+        self.restore_error_msg = None;
         cx.notify();
     }
 
@@ -6136,6 +6181,11 @@ impl CrabStudioApp {
     pub fn close_transfer_modal(&mut self, cx: &mut Context<Self>) {
         self.transfer_modal_open = false;
         self.transfer_is_running = false;
+        self.transfer_tables.clear();
+        self.transfer_progress = None;
+        self.transfer_logs.clear();
+        self.transfer_summary = None;
+        self.transfer_error_msg = None;
         cx.notify();
     }
 
@@ -6221,8 +6271,8 @@ impl CrabStudioApp {
             let start = std::time::Instant::now();
 
             // Connect or reuse source connection
-            let src_conn = if let Some(ref active) = active_opt && active.id == src_cfg.id {
-                active.clone()
+            let (src_conn, src_is_temp) = if let Some(ref active) = active_opt && active.id == src_cfg.id {
+                (active.clone(), false)
             } else {
                 let conn = ActiveConnection::new(src_cfg.clone());
                 if let Err(e) = conn.connect().await {
@@ -6237,15 +6287,18 @@ impl CrabStudioApp {
                     });
                     return;
                 }
-                conn
+                (conn, true)
             };
 
             // Connect or reuse target connection
-            let tgt_conn = if let Some(ref active) = active_opt && active.id == tgt_cfg.id {
-                active.clone()
+            let (tgt_conn, tgt_is_temp) = if let Some(ref active) = active_opt && active.id == tgt_cfg.id {
+                (active.clone(), false)
             } else {
                 let conn = ActiveConnection::new(tgt_cfg.clone());
                 if let Err(e) = conn.connect().await {
+                    if src_is_temp {
+                        let _ = src_conn.disconnect().await;
+                    }
                     let _ = this.update(cx, |app, cx| {
                         app.transfer_is_running = false;
                         app.transfer_error_msg = Some(format!("Failed to connect to target: {e}"));
@@ -6257,7 +6310,7 @@ impl CrabStudioApp {
                     });
                     return;
                 }
-                conn
+                (conn, true)
             };
 
             let src_family = src_cfg.db_type.family();
@@ -6566,6 +6619,14 @@ impl CrabStudioApp {
                 ));
                 cx.notify();
             });
+
+            // Disconnect temporary connections to release resources, connection pools and background tasks
+            if src_is_temp {
+                let _ = src_conn.disconnect().await;
+            }
+            if tgt_is_temp {
+                let _ = tgt_conn.disconnect().await;
+            }
         })
         .detach();
     }
@@ -6606,6 +6667,12 @@ impl CrabStudioApp {
     pub fn close_maintenance_modal(&mut self, cx: &mut Context<Self>) {
         self.maintenance_modal_open = false;
         self.maintenance_is_executing = false;
+        self.maintenance_summary = None;
+        self.maintenance_progress = None;
+        self.maintenance_exec_summary = None;
+        self.maintenance_logs.clear();
+        self.maintenance_selected_tables.clear();
+        self.maintenance_error_msg = None;
         cx.notify();
     }
 
@@ -7103,6 +7170,8 @@ impl CrabStudioApp {
     /// Set auto-refresh interval for active session monitor
     pub fn set_sessions_auto_refresh(&mut self, secs: u32, cx: &mut Context<Self>) {
         self.sessions_auto_refresh_secs = secs;
+        self.sessions_refresh_generation = self.sessions_refresh_generation.wrapping_add(1);
+        let cur_gen = self.sessions_refresh_generation;
         cx.notify();
 
         if secs > 0 {
@@ -7111,7 +7180,8 @@ impl CrabStudioApp {
                 loop {
                     tokio::time::sleep(std::time::Duration::from_secs(secs as u64)).await;
                     let should_continue = handle.update(cx, |app, cx| {
-                        if app.sessions_auto_refresh_secs != secs
+                        if app.sessions_refresh_generation != cur_gen
+                            || app.sessions_auto_refresh_secs != secs
                             || app.active_nav != ActivityNav::Sessions
                         {
                             return false;
@@ -9135,6 +9205,7 @@ impl Render for CrabStudioApp {
                     move |_: &mut Window, cx: &mut App| {
                         handle.update(cx, |this, cx| {
                             this.sql_review_modal_open = false;
+                            this.sql_review_plan = None;
                             this.sql_review_error = None;
                             cx.notify();
                         });
@@ -10224,6 +10295,8 @@ impl Render for CrabStudioApp {
                                 }
                                 ActivityNav::Sessions => {
                                     if this.active_nav == ActivityNav::Sessions {
+                                        this.sessions_refresh_generation =
+                                            this.sessions_refresh_generation.wrapping_add(1);
                                         this.active_nav =
                                             if this.active_tab == WorkspaceTab::QueryConsole {
                                                 ActivityNav::Console
@@ -11433,6 +11506,7 @@ impl Render for CrabStudioApp {
                     cx.notify();
                 } else if this.sql_review_modal_open {
                     this.sql_review_modal_open = false;
+                    this.sql_review_plan = None;
                     this.sql_review_error = None;
                     cx.notify();
                 } else if this.grid_modal_open {
@@ -11477,6 +11551,7 @@ impl Render for CrabStudioApp {
                     cx.notify();
                 } else if this.sql_review_modal_open {
                     this.sql_review_modal_open = false;
+                    this.sql_review_plan = None;
                     this.sql_review_error = None;
                     cx.notify();
                 } else if this.grid_modal_open {
@@ -11491,6 +11566,8 @@ impl Render for CrabStudioApp {
                     this.active_nav = ActivityNav::Databases;
                     cx.notify();
                 } else if this.active_nav == ActivityNav::Sessions {
+                    this.sessions_refresh_generation =
+                        this.sessions_refresh_generation.wrapping_add(1);
                     this.active_nav = ActivityNav::Databases;
                     cx.notify();
                 } else if this.active_tab == WorkspaceTab::QueryConsole && this.query_tabs.len() > 1

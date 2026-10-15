@@ -761,6 +761,23 @@ pub fn split_sql_statements(sql: &str) -> Vec<&str> {
     stmts
 }
 
+impl Drop for MysqlAdapter {
+    fn drop(&mut self) {
+        if let Some(pool) = self.pool.take() {
+            // Disconnect pool asynchronously to release open sockets and worker tasks
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async move {
+                    let _ = pool.disconnect().await;
+                });
+            } else {
+                let _ = crate::db::runtime::tokio_runtime().spawn(async move {
+                    let _ = pool.disconnect().await;
+                });
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

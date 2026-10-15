@@ -49,6 +49,7 @@ pub fn format_pg_error(e: &tokio_postgres::Error) -> String {
 pub struct PostgresAdapter {
     config: ConnectionConfig,
     client: Option<Arc<Mutex<Client>>>,
+    conn_task: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl PostgresAdapter {
@@ -56,6 +57,7 @@ impl PostgresAdapter {
         Self {
             config,
             client: None,
+            conn_task: None,
         }
     }
 
@@ -165,18 +167,27 @@ impl DatabaseAdapter for PostgresAdapter {
             .await
             .map_err(|e| DbError::connection(format!("Failed to connect to PostgreSQL: {e}")))?;
 
-        // Spawn connection poller on tokio runtime
-        tokio::spawn(async move {
+        // Abort any existing connection poller task if reconnecting
+        if let Some(task) = self.conn_task.take() {
+            task.abort();
+        }
+
+        // Spawn connection poller on tokio runtime and track its JoinHandle to avoid task leaks
+        let conn_task = tokio::spawn(async move {
             if let Err(e) = connection.await {
                 eprintln!("PostgreSQL connection error: {e}");
             }
         });
 
+        self.conn_task = Some(conn_task);
         self.client = Some(Arc::new(Mutex::new(client)));
         Ok(())
     }
 
     async fn disconnect(&mut self) -> DbResult<()> {
+        if let Some(task) = self.conn_task.take() {
+            task.abort();
+        }
         self.client = None;
         Ok(())
     }
@@ -777,6 +788,14 @@ fn first_sql_keyword(sql: &str) -> String {
         .unwrap_or("")
         .trim_matches(|c: char| !c.is_ascii_alphanumeric())
         .to_string()
+}
+
+impl Drop for PostgresAdapter {
+    fn drop(&mut self) {
+        if let Some(task) = self.conn_task.take() {
+            task.abort();
+        }
+    }
 }
 
 #[cfg(test)]

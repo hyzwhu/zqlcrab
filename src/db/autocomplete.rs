@@ -40,6 +40,9 @@ impl SqlMetadataCache {
     }
 
     pub fn set_tables(&mut self, tables: Vec<TableInfo>) {
+        let valid_names: std::collections::HashSet<String> =
+            tables.iter().map(|t| t.name.to_lowercase()).collect();
+        self.columns_by_table.retain(|k, _| valid_names.contains(k));
         self.tables = tables;
     }
 
@@ -785,5 +788,48 @@ mod tests {
         );
         assert!(!res_exact.is_empty());
         assert_eq!(res_exact[0].label, "SELECT");
+    }
+
+    #[test]
+    fn test_cache_prune_and_clear_prevents_memory_leak() {
+        let mut cache = SqlMetadataCache::default();
+        cache.set_family(Some(DatabaseFamily::Sqlite));
+        cache.set_tables(vec![
+            TableInfo {
+                name: "t1".to_string(),
+                schema: None,
+                table_type: "TABLE".to_string(),
+                comment: None,
+                row_count_estimate: None,
+            },
+            TableInfo {
+                name: "t2".to_string(),
+                schema: None,
+                table_type: "TABLE".to_string(),
+                comment: None,
+                row_count_estimate: None,
+            },
+        ]);
+        cache.set_columns_for_table("t1", vec![]);
+        cache.set_columns_for_table("t2", vec![]);
+        assert_eq!(cache.columns_by_table.len(), 2);
+
+        // Update tables without t1 (t1 was dropped)
+        cache.set_tables(vec![TableInfo {
+            name: "t2".to_string(),
+            schema: None,
+            table_type: "TABLE".to_string(),
+            comment: None,
+            row_count_estimate: None,
+        }]);
+        assert_eq!(cache.columns_by_table.len(), 1);
+        assert!(cache.columns_by_table.contains_key("t2"));
+        assert!(!cache.columns_by_table.contains_key("t1"));
+
+        // Clear everything
+        cache.clear();
+        assert_eq!(cache.columns_by_table.len(), 0);
+        assert_eq!(cache.tables.len(), 0);
+        assert_eq!(cache.family, None);
     }
 }

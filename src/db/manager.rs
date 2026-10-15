@@ -186,9 +186,9 @@ impl ConnectionManager {
     pub async fn test_config(&self, config: ConnectionConfig) -> DbResult<ConnectionStatus> {
         let conn = ActiveConnection::new(config);
         conn.connect().await?;
-        let status = conn.test_connection().await?;
+        let status = conn.test_connection().await;
         let _ = conn.disconnect().await;
-        Ok(status)
+        status
     }
 }
 
