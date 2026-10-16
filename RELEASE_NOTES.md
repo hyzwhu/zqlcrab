@@ -1,15 +1,22 @@
-## 🦀 zqlcrab v0.1.15
+## 🦀 zqlcrab v0.1.16
 
 Fast, lightweight, GPU-accelerated database desktop client built with Rust & GPUI.
 
 ### 📋 Changelog
 
-#### v0.1.15 Release Highlights:
-- ⚡ **Query Console Toolbar Optimization & Snippets Dropdown (SQL控制台工具栏响应式防挤压与下拉菜单整合)**:
-  - **Unified Snippets & Actions Dropdown Menu**:
-    - Consolidated multiple separate buttons (`Snippets`, `Save as Snippet`, `Clear`) into a compact, space-efficient `Snippets` dropdown menu button.
-    - Quick access to browsing the SQL snippets library (`📁 Browse Snippet Library`), saving the current query (`🔖 Save as Snippet`), and clearing the query editor (`🗑️ Clear SQL Editor`).
-  - **Responsive Flex Layout Protection**:
-    - Applied `.flex_shrink_0()` to core action buttons (`Run`, `Format`, `Explain`, `Profile`, and `Snippets`) to eliminate button truncation, distorted margins, or label overlap on narrower screens or split-view panels.
-    - Added an `overflow_x_scroll()` gesture-friendly container for the left action group, ensuring smooth horizontal scrolling even in ultra-compact views.
-    - Protected the right-side active database connection badge with flex-shrink protection and text ellipsis.
+#### v0.1.16 Release Highlights:
+- 🛡️ **Comprehensive Memory & Resource Leak Elimination (全栈内存与资源泄漏隐患彻底根除与优化)**:
+  - **PostgreSQL Connection Task Lifecycle Management**:
+    - Tracked background connection poller `JoinHandle` in `PostgresAdapter`.
+    - Proactively aborted poller tasks on `disconnect()` and implemented RAII `Drop` to guarantee no lingering Tokio tasks or unclosed sockets.
+  - **MySQL Connection Pool Async Teardown via RAII**:
+    - Implemented `Drop for MysqlAdapter` to safely and asynchronously disconnect unclosed connection pools on the Tokio runtime when dropped.
+  - **Guaranteed Connection Teardown in Error Paths**:
+    - Fixed `ConnectionManager::test_config` to ensure `disconnect().await` is executed on both success and error branches.
+    - Tracked temporary connections during cross-database data transfers (`start_transfer_execution`) to guarantee source/target temporary connections are always closed.
+  - **Generation-Token Loop Cancellation in Sessions View**:
+    - Introduced generation token verification in the sessions auto-refresh background task to terminate outdated polling loops immediately when switching navigation tabs.
+  - **Autocomplete Metadata Cache Pruning & Multi-DB Isolation**:
+    - Automatically pruned dropped table column mappings from `SqlMetadataCache` and cleared metadata cache upon switching active database connections to prevent memory accumulation.
+  - **Eager Memory Deallocation on Modal Dismissal**:
+    - Explicitly cleared and released large row matrices, AST syntax trees, raw SQL dump scripts, and review plans upon closing tool modals (Data Diff, Schema Diff, Mock Data, SQL Dump/Restore, Maintenance).
