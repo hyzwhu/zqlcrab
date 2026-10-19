@@ -1,6 +1,6 @@
 //! Sidebar navigation displaying saved connection profiles and database schema tree.
 
-use crate::db::types::{ConnectionConfig, DatabaseFamily, TableInfo};
+use crate::db::types::{ConnectionConfig, DatabaseFamily, EnvironmentTag, TableInfo};
 use crate::settings::AppLanguage;
 use crate::ui::i18n::t;
 use crate::ui::theme::ThemeColors;
@@ -43,6 +43,7 @@ struct TableActionCallbacks {
     on_maintenance: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_truncate: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_drop: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
+    is_read_only: bool,
 }
 
 #[derive(IntoElement)]
@@ -550,7 +551,7 @@ impl Sidebar {
         // Import Data... / 导入数据...
         let import_handler = actions.on_import.clone();
         let tbl_import = info.clone();
-        if !is_view {
+        if !is_view && !actions.is_read_only {
             menu = menu.item(
                 PopupMenuItem::new(t("table_menu.import_data", lang))
                     .icon(IconName::Upload)
@@ -602,7 +603,7 @@ impl Sidebar {
         );
 
         // Generate Mock Data... / 生成模拟测试数据...
-        if !is_view {
+        if !is_view && !actions.is_read_only {
             let mock_handler = actions.on_mock_data.clone();
             let tbl_mock = info.clone();
             menu = menu.item(
@@ -716,7 +717,7 @@ impl Sidebar {
         menu = menu.separator();
 
         // 7. Truncate Table... (tables only, not views)
-        if !is_view {
+        if !is_view && !actions.is_read_only {
             let trunc_handler = actions.on_truncate.clone();
             let tbl_trunc = info.clone();
             let trunc_icon = Icon::new(IconName::RotateCcw).text_color(ThemeColors::WARNING);
@@ -736,25 +737,27 @@ impl Sidebar {
         }
 
         // 8. Drop Table... / Drop View...
-        let drop_handler = actions.on_drop.clone();
-        let tbl_drop = info.clone();
-        let drop_label = if is_view {
-            t("table_menu.drop_view", lang)
-        } else {
-            t("table_menu.drop", lang)
-        };
-        let drop_icon = Icon::new(IconName::Trash).text_color(ThemeColors::ERROR);
-        menu = menu.item(
-            PopupMenuItem::element(move |_, _| {
-                div().text_color(ThemeColors::ERROR).child(drop_label)
-            })
-            .icon(drop_icon)
-            .on_click(move |_, window, cx| {
-                if let Some(ref handler) = drop_handler {
-                    handler(tbl_drop.clone(), window, cx);
-                }
-            }),
-        );
+        if !actions.is_read_only {
+            let drop_handler = actions.on_drop.clone();
+            let tbl_drop = info.clone();
+            let drop_label = if is_view {
+                t("table_menu.drop_view", lang)
+            } else {
+                t("table_menu.drop", lang)
+            };
+            let drop_icon = Icon::new(IconName::Trash).text_color(ThemeColors::ERROR);
+            menu = menu.item(
+                PopupMenuItem::element(move |_, _| {
+                    div().text_color(ThemeColors::ERROR).child(drop_label)
+                })
+                .icon(drop_icon)
+                .on_click(move |_, window, cx| {
+                    if let Some(ref handler) = drop_handler {
+                        handler(tbl_drop.clone(), window, cx);
+                    }
+                }),
+            );
+        }
 
         menu
     }
@@ -968,16 +971,33 @@ impl RenderOnce for Sidebar {
                         .text_ellipsis()
                         .child(conn.name.clone()),
                 )
-                .when(conn.environment.is_production(), |this| {
-                    this.child(
-                        div()
-                            .px_1()
-                            .rounded_sm()
-                            .bg(ThemeColors::ERROR)
-                            .text_color(ThemeColors::TEXT_PRIMARY)
-                            .child("PROD"),
-                    )
-                })
+                .when(
+                    !matches!(conn.environment, EnvironmentTag::Development),
+                    |this| {
+                        let (bg, text) = match conn.environment {
+                            EnvironmentTag::Production => {
+                                (ThemeColors::ERROR, ThemeColors::TEXT_PRIMARY)
+                            }
+                            EnvironmentTag::Staging => {
+                                (ThemeColors::WARNING, ThemeColors::TEXT_PRIMARY)
+                            }
+                            EnvironmentTag::Testing => {
+                                (ThemeColors::PRIMARY_BORDER, ThemeColors::TEXT_PRIMARY)
+                            }
+                            EnvironmentTag::Development => {
+                                (ThemeColors::BG_SURFACE_ACTIVE, ThemeColors::TEXT_MUTED)
+                            }
+                        };
+                        this.child(
+                            div()
+                                .px_1()
+                                .rounded_sm()
+                                .bg(bg)
+                                .text_color(text)
+                                .child(conn.environment.display_name()),
+                        )
+                    },
+                )
                 .when(conn.is_read_only, |this| {
                     this.child(
                         div()
@@ -1068,6 +1088,13 @@ impl RenderOnce for Sidebar {
                 .cloned()
                 .collect()
         };
+
+        let active_is_read_only = self
+            .connections
+            .iter()
+            .find(|c| Some(c.id.as_str()) == self.active_connection_id.as_deref())
+            .map(|c| c.is_read_only)
+            .unwrap_or(false);
 
         let active_family = self
             .connections
@@ -1220,9 +1247,9 @@ impl RenderOnce for Sidebar {
                 h_flex()
                     .items_center()
                     .gap_1()
-                    .child(create_tbl_btn)
+                    .when(!active_is_read_only, |this| this.child(create_tbl_btn))
                     .child(dump_db_btn)
-                    .child(restore_db_btn)
+                    .when(!active_is_read_only, |this| this.child(restore_db_btn))
                     .child(transfer_db_btn)
                     .child(maintenance_db_btn)
                     .child(
@@ -1299,7 +1326,11 @@ impl RenderOnce for Sidebar {
                         "TABLES",
                         tables.len(),
                         IconName::Table,
-                        self.on_create_table.clone(),
+                        if active_is_read_only {
+                            None
+                        } else {
+                            self.on_create_table.clone()
+                        },
                     ));
                     let tbl_actions = TableActionCallbacks {
                         on_select: self.on_select_table.clone(),
@@ -1320,6 +1351,7 @@ impl RenderOnce for Sidebar {
                         on_maintenance: self.on_maintenance_table.clone(),
                         on_truncate: self.on_truncate_table.clone(),
                         on_drop: self.on_drop_table.clone(),
+                        is_read_only: active_is_read_only,
                     };
 
                     for tbl in &tables {

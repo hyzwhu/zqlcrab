@@ -1,22 +1,21 @@
-## 🦀 zqlcrab v0.1.16
+## 🦀 zqlcrab v0.1.17
 
 Fast, lightweight, GPU-accelerated database desktop client built with Rust & GPUI.
 
 ### 📋 Changelog
 
-#### v0.1.16 Release Highlights:
-- 🛡️ **Comprehensive Memory & Resource Leak Elimination (全栈内存与资源泄漏隐患彻底根除与优化)**:
-  - **PostgreSQL Connection Task Lifecycle Management**:
-    - Tracked background connection poller `JoinHandle` in `PostgresAdapter`.
-    - Proactively aborted poller tasks on `disconnect()` and implemented RAII `Drop` to guarantee no lingering Tokio tasks or unclosed sockets.
-  - **MySQL Connection Pool Async Teardown via RAII**:
-    - Implemented `Drop for MysqlAdapter` to safely and asynchronously disconnect unclosed connection pools on the Tokio runtime when dropped.
-  - **Guaranteed Connection Teardown in Error Paths**:
-    - Fixed `ConnectionManager::test_config` to ensure `disconnect().await` is executed on both success and error branches.
-    - Tracked temporary connections during cross-database data transfers (`start_transfer_execution`) to guarantee source/target temporary connections are always closed.
-  - **Generation-Token Loop Cancellation in Sessions View**:
-    - Introduced generation token verification in the sessions auto-refresh background task to terminate outdated polling loops immediately when switching navigation tabs.
-  - **Autocomplete Metadata Cache Pruning & Multi-DB Isolation**:
-    - Automatically pruned dropped table column mappings from `SqlMetadataCache` and cleared metadata cache upon switching active database connections to prevent memory accumulation.
-  - **Eager Memory Deallocation on Modal Dismissal**:
-    - Explicitly cleared and released large row matrices, AST syntax trees, raw SQL dump scripts, and review plans upon closing tool modals (Data Diff, Schema Diff, Mock Data, SQL Dump/Restore, Maintenance).
+#### v0.1.17 Release Highlights:
+- 🛡️ **Production Safeguard & Read-Only Connection Protection (生产环境安全保护与只读连接模式)**:
+  - **Comprehensive Multi-Tier Environment Classification**:
+    - Added full environment classification (`DEV`, `TEST`, `STAGE`, `PROD`) across connection configs and profiles.
+    - Integrated segmented environment selector and dedicated Read-Only Protection toggle into `ConnectionDialog`.
+    - Added prominent theme-coded environment badges across TitleBar, StatusBar, and Sidebar connection lists.
+  - **Lexical Safety Analysis & Production Risk Interceptor**:
+    - Implemented `QuerySafetyValidator::detect_production_risk` detecting `DROP TABLE/DATABASE/VIEW`, `TRUNCATE TABLE`, `ALTER TABLE`, and unbounded `DELETE`/`UPDATE` operations missing `WHERE` clauses.
+    - Introduced high-visibility `ProductionSafeguardModal` with red warning banners, risk diagnosis, target database info, syntax preview, and double-confirmation flow.
+  - **Strict Read-Only Connection Guarding**:
+    - Pre-flight blocked mutating and destructive DDL/DML statements (`DROP`, `DELETE`, `UPDATE`, `INSERT`, `ALTER`, etc.) on read-only connections with descriptive explanations.
+    - Contextually hidden destructive UI operations (`Create Table`, `Restore Database`, `Import Data`, `Mock Data`, `Truncate Table`, `Drop Table/View`) in the sidebar toolbar and table context menus when active connection is read-only.
+  - **Enhanced Destructive Action Confirmations**:
+    - Upgraded `ConfirmDialog` and `SqlReviewModal` with production-aware warning banners and high-risk badges when targeting production databases.
+    - Added full bilingual (English & 简体中文) localization for safeguard dialogs and environment configurations.

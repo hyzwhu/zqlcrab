@@ -154,6 +154,59 @@ impl QuerySafetyValidator {
         None
     }
 
+    /// Identify whether a statement represents a high-risk destructive action in production environments.
+    ///
+    /// Detects:
+    /// - DROP TABLE, DROP DATABASE, DROP SCHEMA, DROP VIEW
+    /// - TRUNCATE TABLE
+    /// - ALTER TABLE (schema change on production)
+    /// - Unbounded DELETE or UPDATE without a WHERE clause
+    pub fn detect_production_risk(sql: &str) -> Option<&'static str> {
+        let cleaned = Self::clean_sql(sql);
+        let upper = cleaned.to_uppercase();
+
+        let words: Vec<&str> = upper
+            .split(|c: char| c.is_whitespace() || c == ';' || c == '(' || c == ')')
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        if words.is_empty() {
+            return None;
+        }
+
+        let first = words[0];
+
+        if first == "DROP" {
+            return Some(
+                "DROP statement: Permanently destroys database object and all stored data",
+            );
+        }
+
+        if first == "TRUNCATE" {
+            return Some(
+                "TRUNCATE statement: Instantly empties and purges all records in the table",
+            );
+        }
+
+        if first == "ALTER" && words.get(1) == Some(&"TABLE") {
+            return Some("ALTER TABLE statement: Modifies live schema definition on production");
+        }
+
+        if (first == "DELETE" || first == "UPDATE") && !words.contains(&"WHERE") {
+            if first == "DELETE" {
+                return Some(
+                    "Unbounded DELETE: Lacks a WHERE clause and will delete all rows from the table",
+                );
+            } else {
+                return Some(
+                    "Unbounded UPDATE: Lacks a WHERE clause and will modify all rows in the table",
+                );
+            }
+        }
+
+        None
+    }
+
     /// Validate a SQL statement against connection safety policy.
     pub fn validate_query(sql: &str, is_read_only: bool) -> DbResult<()> {
         if is_read_only && Self::is_mutating_or_ddl(sql) {
@@ -252,5 +305,23 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn test_production_risk_detection() {
+        assert!(QuerySafetyValidator::detect_production_risk("DROP TABLE customers").is_some());
+        assert!(QuerySafetyValidator::detect_production_risk("TRUNCATE TABLE logs").is_some());
+        assert!(
+            QuerySafetyValidator::detect_production_risk(
+                "ALTER TABLE accounts ADD COLUMN status INT"
+            )
+            .is_some()
+        );
+        assert!(QuerySafetyValidator::detect_production_risk("DELETE FROM users").is_some());
+        assert!(
+            QuerySafetyValidator::detect_production_risk("DELETE FROM users WHERE id = 10")
+                .is_none()
+        );
+        assert!(QuerySafetyValidator::detect_production_risk("SELECT * FROM users").is_none());
     }
 }

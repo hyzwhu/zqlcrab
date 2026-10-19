@@ -570,6 +570,29 @@ fn translate_en(key: &'static str) -> &'static str {
         }
         "profile.profiling_hint" => "Executing query & collecting timeline breakdown...",
 
+        // Common
+        "common.cancel" => "Cancel",
+
+        // Environment & Safeguard
+        "conn.environment" => "Environment",
+        "conn.env_dev" => "Development",
+        "conn.env_test" => "Testing",
+        "conn.env_stage" => "Staging",
+        "conn.env_prod" => "Production",
+        "conn.env_prod_hint" => "Production database with high-risk safeguard confirmation",
+        "conn.read_only" => "Read-Only Protection",
+        "conn.read_only_hint" => "Block destructive queries (DROP, DELETE, UPDATE, TRUNCATE)",
+
+        "safeguard.modal_title" => "Production Safeguard Interception",
+        "safeguard.target_database" => "Target Database",
+        "safeguard.warning_desc" => {
+            "You are executing a mutation or high-risk statement on a LIVE PRODUCTION database. This action may modify or permanently delete critical data records."
+        }
+        "safeguard.detected_risk" => "Detected High-Risk Pattern:",
+        "safeguard.statement_to_run" => "SQL Statement to Execute:",
+        "safeguard.esc_to_cancel" => "Press Esc to cancel safely",
+        "safeguard.btn_confirm_execute" => "Confirm & Execute in Production",
+
         // Fallback
         _ => key,
     }
@@ -1100,6 +1123,29 @@ fn translate_zh(key: &'static str) -> &'static str {
         }
         "profile.profiling_hint" => "正在执行查询并采集各阶段时序明细...",
 
+        // Common
+        "common.cancel" => "取消",
+
+        // Environment & Safeguard
+        "conn.environment" => "环境标识",
+        "conn.env_dev" => "开发环境",
+        "conn.env_test" => "测试环境",
+        "conn.env_stage" => "预发布环境",
+        "conn.env_prod" => "生产环境",
+        "conn.env_prod_hint" => "线上生产数据库，执行破坏性或全表变更将触发强二次确认拦截",
+        "conn.read_only" => "只读保护模式",
+        "conn.read_only_hint" => "阻断一切写入与破坏性变更语句 (DROP, DELETE, UPDATE, TRUNCATE 等)",
+
+        "safeguard.modal_title" => "生产环境安全拦截与确认",
+        "safeguard.target_database" => "目标数据库环境",
+        "safeguard.warning_desc" => {
+            "您正在对【生产环境】执行具有潜在破坏性或高风险的 SQL 变更。此操作可能会修改或永久销毁线上真实业务数据。"
+        }
+        "safeguard.detected_risk" => "检测到的高危特征：",
+        "safeguard.statement_to_run" => "即将执行的 SQL 语句：",
+        "safeguard.esc_to_cancel" => "按 Esc 键安全取消",
+        "safeguard.btn_confirm_execute" => "确认在生产环境执行",
+
         // Fallback
         _ => translate_en(key),
     }
@@ -1247,5 +1293,17 @@ mod tests {
             t("profile.kpi_bottleneck", AppLanguage::En),
             "Bottleneck Stage"
         );
+        assert_eq!(
+            t("safeguard.modal_title", AppLanguage::En),
+            "Production Safeguard Interception"
+        );
+        assert_eq!(
+            t("safeguard.modal_title", AppLanguage::ZhCn),
+            "生产环境安全拦截与确认"
+        );
+        assert_eq!(t("conn.environment", AppLanguage::En), "Environment");
+        assert_eq!(t("conn.environment", AppLanguage::ZhCn), "环境标识");
+        assert_eq!(t("conn.read_only", AppLanguage::En), "Read-Only Protection");
+        assert_eq!(t("conn.read_only", AppLanguage::ZhCn), "只读保护模式");
     }
 }

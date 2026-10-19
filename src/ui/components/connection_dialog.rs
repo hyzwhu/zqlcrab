@@ -1,6 +1,6 @@
 //! Connection profile modal dialog for creating and configuring database connections.
 
-use crate::db::types::{DatabaseFamily, DatabaseType};
+use crate::db::types::{DatabaseFamily, DatabaseType, EnvironmentTag};
 use crate::ui::theme::ThemeColors;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::{h_flex, v_flex};
@@ -71,11 +71,13 @@ pub struct ConnectionDialog {
     database_input: Entity<InputState>,
     user_input: Entity<InputState>,
     pass_input: Entity<InputState>,
+    environment: EnvironmentTag,
     is_read_only: bool,
     is_testing: bool,
     is_editing: bool,
     test_result: Option<Result<String, String>>,
     on_select_type: Option<Rc<dyn Fn(DatabaseType, &mut Window, &mut App) + 'static>>,
+    on_select_environment: Option<Rc<dyn Fn(EnvironmentTag, &mut Window, &mut App) + 'static>>,
     on_toggle_read_only: Option<Rc<dyn Fn(bool, &mut Window, &mut App) + 'static>>,
     on_test: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_save: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
@@ -100,16 +102,31 @@ impl ConnectionDialog {
             database_input: database_input.clone(),
             user_input: user_input.clone(),
             pass_input: pass_input.clone(),
+            environment: EnvironmentTag::Development,
             is_read_only: false,
             is_testing: false,
             is_editing: false,
             test_result: None,
             on_select_type: None,
+            on_select_environment: None,
             on_toggle_read_only: None,
             on_test: None,
             on_save: None,
             on_cancel: None,
         }
+    }
+
+    pub fn environment(mut self, env: EnvironmentTag) -> Self {
+        self.environment = env;
+        self
+    }
+
+    pub fn on_select_environment<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(EnvironmentTag, &mut Window, &mut App) + 'static,
+    {
+        self.on_select_environment = Some(Rc::new(handler));
+        self
     }
 
     pub fn editing(mut self, is_editing: bool) -> Self {
@@ -646,6 +663,92 @@ impl RenderOnce for ConnectionDialog {
             }
         });
 
+        let on_select_env = self.on_select_environment.clone();
+        let cur_env = self.environment;
+
+        let environment_row = v_flex()
+            .w_full()
+            .p_2p5()
+            .gap_2()
+            .rounded_lg()
+            .bg(ThemeColors::BG_SURFACE)
+            .border_1()
+            .border_color(if cur_env.is_production() {
+                ThemeColors::ERROR
+            } else {
+                ThemeColors::BORDER
+            })
+            .child(
+                h_flex()
+                    .w_full()
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                Icon::new(if cur_env.is_production() {
+                                    IconName::ShieldAlert
+                                } else {
+                                    IconName::Shield
+                                })
+                                .size(px(16.0))
+                                .text_color(if cur_env.is_production() {
+                                    ThemeColors::ERROR
+                                } else {
+                                    ThemeColors::PRIMARY_BORDER
+                                }),
+                            )
+                            .child(
+                                v_flex()
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .text_color(ThemeColors::TEXT_PRIMARY)
+                                            .child("Environment"),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(ThemeColors::TEXT_MUTED)
+                                            .child(match cur_env {
+                                                EnvironmentTag::Production => {
+                                                    "Production database with high-risk safeguard confirmation"
+                                                }
+                                                EnvironmentTag::Staging => "Staging pre-release environment",
+                                                EnvironmentTag::Testing => "Testing and QA validation environment",
+                                                EnvironmentTag::Development => "Local and development workspace",
+                                            }),
+                                    ),
+                            ),
+                    )
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap_1()
+                            .children(EnvironmentTag::ALL.iter().map(|&tag| {
+                                let is_active = tag == cur_env;
+                                let on_select_env = on_select_env.clone();
+                                let mut btn = Button::new(format!("env_btn_{:?}", tag))
+                                    .xsmall();
+                                if is_active {
+                                    btn = btn.primary().label(tag.display_name());
+                                } else {
+                                    btn = btn.ghost().label(tag.display_name());
+                                }
+                                if let Some(ref handler) = on_select_env {
+                                    let handler = handler.clone();
+                                    btn = btn.on_click(move |_, window, cx| {
+                                        handler(tag, window, cx);
+                                    });
+                                }
+                                btn
+                            })),
+                    ),
+            );
+
         let on_toggle_ro = self.on_toggle_read_only.clone();
         let cur_ro = self.is_read_only;
 
@@ -769,6 +872,7 @@ impl RenderOnce for ConnectionDialog {
                     .gap_4()
                     .child(engine_selector)
                     .child(form_fields)
+                    .child(environment_row)
                     .child(read_only_row)
                     .children(test_banner),
             )

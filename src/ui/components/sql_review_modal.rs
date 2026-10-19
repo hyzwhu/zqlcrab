@@ -21,6 +21,7 @@ type CopyCallback = Rc<dyn Fn(String, &mut Window, &mut App)>;
 pub struct SqlReviewModal {
     plan: SqlReviewPlan,
     is_executing: bool,
+    is_production: bool,
     error_message: Option<String>,
     copied: bool,
     on_execute: Option<ActionCallback>,
@@ -33,12 +34,18 @@ impl SqlReviewModal {
         Self {
             plan,
             is_executing: false,
+            is_production: false,
             error_message: None,
             copied: false,
             on_execute: None,
             on_cancel: None,
             on_copy: None,
         }
+    }
+
+    pub fn production(mut self, is_production: bool) -> Self {
+        self.is_production = is_production;
+        self
     }
 
     pub fn executing(mut self, is_executing: bool) -> Self {
@@ -360,6 +367,19 @@ impl RenderOnce for SqlReviewModal {
                                                     .text_color(ThemeColors::TEXT_PRIMARY)
                                                     .child("Review SQL Changes"),
                                             )
+                                            .when(self.is_production, |hdr| {
+                                                hdr.child(
+                                                    div()
+                                                        .px_2()
+                                                        .py_0p5()
+                                                        .rounded_full()
+                                                        .bg(ThemeColors::ERROR)
+                                                        .text_xs()
+                                                        .font_weight(FontWeight::BOLD)
+                                                        .text_color(ThemeColors::TEXT_PRIMARY)
+                                                        .child("PROD"),
+                                                )
+                                            })
                                             .child(
                                                 div()
                                                     .px_2()
@@ -392,6 +412,32 @@ impl RenderOnce for SqlReviewModal {
                     .flex_1()
                     .min_h_0()
                     .min_w_0()
+                    .when(self.is_production, |body| {
+                        body.child(
+                            h_flex()
+                                .w_full()
+                                .items_center()
+                                .gap_2()
+                                .p_2()
+                                .px_3()
+                                .rounded_md()
+                                .bg(rgba(0xEF444418))
+                                .border_1()
+                                .border_color(ThemeColors::ERROR)
+                                .child(
+                                    Icon::new(IconName::ShieldAlert)
+                                        .size(px(16.0))
+                                        .text_color(ThemeColors::ERROR),
+                                )
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .font_weight(FontWeight::BOLD)
+                                        .text_color(ThemeColors::ERROR)
+                                        .child("⚠️ PRODUCTION SAFEGUARD: Applying changes directly to live production database!"),
+                                ),
+                        )
+                    })
                     .child(
                         h_flex()
                             .w_full()

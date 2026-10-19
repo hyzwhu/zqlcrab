@@ -12,7 +12,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::gpui::{
     App, FontWeight, InteractiveElement as _, IntoElement, ParentElement, RenderOnce,
-    StatefulInteractiveElement as _, Styled, Window, div, px, rgba,
+    StatefulInteractiveElement as _, Styled, Window, div, prelude::*, px, rgba,
 };
 use std::rc::Rc;
 
@@ -41,6 +41,7 @@ pub struct ConfirmDialog {
     sql_preview: String,
     language: AppLanguage,
     is_executing: bool,
+    is_production: bool,
     error_message: Option<String>,
     on_confirm: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_cancel: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
@@ -60,10 +61,16 @@ impl ConfirmDialog {
             sql_preview,
             language: AppLanguage::En,
             is_executing: false,
+            is_production: false,
             error_message: None,
             on_confirm: None,
             on_cancel: None,
         }
+    }
+
+    pub fn production(mut self, is_prod: bool) -> Self {
+        self.is_production = is_prod;
+        self
     }
 
     pub fn language(mut self, lang: AppLanguage) -> Self {
@@ -335,7 +342,20 @@ impl RenderOnce for ConfirmDialog {
                                     .font_weight(FontWeight::BOLD)
                                     .text_color(ThemeColors::TEXT_PRIMARY)
                                     .child(title),
-                            ),
+                            )
+                            .when(self.is_production, |hdr| {
+                                hdr.child(
+                                    div()
+                                        .px_2()
+                                        .py_0p5()
+                                        .rounded_full()
+                                        .bg(ThemeColors::ERROR)
+                                        .text_xs()
+                                        .font_weight(FontWeight::BOLD)
+                                        .text_color(ThemeColors::TEXT_PRIMARY)
+                                        .child("PROD"),
+                                )
+                            }),
                     )
                     .child(header_close_btn),
             )
@@ -344,6 +364,31 @@ impl RenderOnce for ConfirmDialog {
                 v_flex()
                     .p_5()
                     .gap_3p5()
+                    .when(self.is_production, |body| {
+                        body.child(
+                            h_flex()
+                                .w_full()
+                                .items_center()
+                                .gap_2()
+                                .p_2p5()
+                                .rounded_md()
+                                .bg(rgba(0xEF444420))
+                                .border_1()
+                                .border_color(ThemeColors::ERROR)
+                                .child(
+                                    Icon::new(IconName::ShieldAlert)
+                                        .size(px(16.0))
+                                        .text_color(ThemeColors::ERROR),
+                                )
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .font_weight(FontWeight::BOLD)
+                                        .text_color(ThemeColors::ERROR)
+                                        .child("⚠️ CRITICAL PRODUCTION WARNING: Irreversible destruction on live production database!"),
+                                ),
+                        )
+                    })
                     .child(table_target_badge)
                     .child(
                         h_flex()

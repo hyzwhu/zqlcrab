@@ -60,8 +60,8 @@ use crate::db::transfer::{
     generate_foreign_keys_toggle, generate_transfer_batch_insert_sql, generate_truncate_table_ddl,
 };
 use crate::db::types::{
-    ColumnInfo, ConnectionConfig, DatabaseFamily, DatabaseType, IndexInfo, QueryResult, QueryValue,
-    SortDirection, TableInfo,
+    ColumnInfo, ConnectionConfig, DatabaseFamily, DatabaseType, EnvironmentTag, IndexInfo,
+    QueryResult, QueryValue, SortDirection, TableInfo,
 };
 use crate::settings::{SettingsManager, ThemePreference};
 use crate::ui::components::{
@@ -69,10 +69,10 @@ use crate::ui::components::{
     ConsoleBottomTab, DataDiffFilterTab, DataDiffModal, DataGrid, DiffFilterTab, DumpModal,
     DumpModalStep, ErDiagramView, ExplainViewMode, ExportDestination, ExportModal,
     ExportSuccessInfo, ExportWizardStep, ImportModal, ImportWizardStep, KillConfirmModal,
-    MaintenanceModal, MaintenanceModalTab, MockDataModal, MockWizardStep, QueryConsole,
-    QueryHistoryView, QueryTabHeader, RestoreModal, RestoreModalStep, SchemaDiffModal,
-    SchemaViewer, SessionsView, SettingsTab, SettingsView, Sidebar, SnippetEditModal, SnippetView,
-    SqlReviewModal, TransferModal, TransferModalStep,
+    MaintenanceModal, MaintenanceModalTab, MockDataModal, MockWizardStep, ProductionSafeguardModal,
+    QueryConsole, QueryHistoryView, QueryTabHeader, RestoreModal, RestoreModalStep,
+    SchemaDiffModal, SchemaViewer, SessionsView, SettingsTab, SettingsView, Sidebar,
+    SnippetEditModal, SnippetView, SqlReviewModal, TransferModal, TransferModalStep,
     create_table_modal::{CreateTableColumnState, CreateTableIndexState, CreateTableModal},
     data_grid::GridCellCoord,
     schema_viewer::SchemaEditColumnState,
@@ -227,6 +227,15 @@ pub struct TableConfirmActionState {
     pub error: Option<String>,
 }
 
+#[derive(Clone, Debug)]
+pub struct ProductionSafeguardState {
+    pub tab_id: Uuid,
+    pub connection_name: String,
+    pub database_name: String,
+    pub risk_summary: &'static str,
+    pub sql: String,
+}
+
 #[derive(Clone)]
 pub struct QueryTab {
     pub id: Uuid,
@@ -315,6 +324,7 @@ pub struct CrabStudioApp {
     dialog_user_input: Entity<InputState>,
     dialog_pass_input: Entity<InputState>,
     dialog_is_read_only: bool,
+    dialog_environment: EnvironmentTag,
     dialog_is_testing: bool,
     dialog_test_result: Option<Result<String, String>>,
 
@@ -521,6 +531,7 @@ pub struct CrabStudioApp {
     is_checking_update: bool,
     update_status_msg: Option<String>,
     update_check_result: Option<crate::update::UpdateCheckResult>,
+    production_safeguard: Option<ProductionSafeguardState>,
 }
 
 impl CrabStudioApp {
@@ -830,6 +841,7 @@ impl CrabStudioApp {
             dialog_user_input,
             dialog_pass_input,
             dialog_is_read_only: false,
+            dialog_environment: EnvironmentTag::Development,
             dialog_is_testing: false,
             dialog_test_result: None,
             create_table_modal_open: false,
@@ -1012,6 +1024,7 @@ impl CrabStudioApp {
             is_checking_update: false,
             update_status_msg: None,
             update_check_result: None,
+            production_safeguard: None,
         }
     }
 
@@ -1663,6 +1676,73 @@ impl CrabStudioApp {
             cx.notify();
             return;
         };
+
+        // Read-only connection protection
+        if let Err(err) =
+            crate::db::safety::QuerySafetyValidator::validate_query(&sql, conn.config.is_read_only)
+        {
+            if let Some(tab) = self.query_tabs.iter_mut().find(|t| t.id == tab_id) {
+                tab.error = Some(err.to_string());
+                tab.bottom_tab = ConsoleBottomTab::Results;
+            }
+            self.status_message = Some("Blocked: Connection is Read-Only".to_string());
+            cx.notify();
+            return;
+        }
+
+        // Production environment safeguard protection
+        if conn.config.environment.is_production() {
+            if let Some(risk_summary) =
+                crate::db::safety::QuerySafetyValidator::detect_production_risk(&sql)
+            {
+                self.production_safeguard = Some(ProductionSafeguardState {
+                    tab_id,
+                    connection_name: conn.config.name.clone(),
+                    database_name: conn.config.database.clone(),
+                    risk_summary,
+                    sql: sql.clone(),
+                });
+                cx.notify();
+                return;
+            }
+        }
+
+        self.execute_query_tab_direct(tab_id, sql, is_selected_exec, cx);
+    }
+
+    /// Confirm and execute a pending production safeguard action.
+    pub fn execute_production_safeguard_confirmed(&mut self, cx: &mut Context<Self>) {
+        if let Some(safeguard) = self.production_safeguard.take() {
+            cx.notify();
+            self.execute_query_tab_direct(safeguard.tab_id, safeguard.sql, false, cx);
+        }
+    }
+
+    /// Directly dispatch an authorized SQL query to the database for a specific query tab.
+    pub fn execute_query_tab_direct(
+        &mut self,
+        tab_id: Uuid,
+        sql: String,
+        is_selected_exec: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(conn) = self
+            .query_tabs
+            .iter()
+            .find(|t| t.id == tab_id)
+            .and_then(|t| self.connection_for_tab(t))
+        else {
+            if let Some(tab) = self.query_tabs.iter_mut().find(|t| t.id == tab_id) {
+                tab.error = Some(
+                    "No active database connection. Please select or create a connection first."
+                        .to_string(),
+                );
+            }
+            cx.notify();
+            return;
+        };
+
+        let settings = self.settings_manager.settings();
 
         // Automatically detect and select target table from query
         if let Some((schema_opt, tbl_name)) = extract_table_from_sql(&sql) {
@@ -4158,6 +4238,7 @@ impl CrabStudioApp {
         self.dialog_test_result = None;
         self.dialog_is_testing = false;
         self.dialog_is_read_only = false;
+        self.dialog_environment = EnvironmentTag::Development;
         cx.notify();
     }
 
@@ -7304,6 +7385,7 @@ impl CrabStudioApp {
         self.dialog_test_result = None;
         self.dialog_is_testing = false;
         self.dialog_is_read_only = false;
+        self.dialog_environment = EnvironmentTag::Development;
 
         self.dialog_name_input.update(cx, |inp, cx| {
             inp.set_value("New Connection", window, cx);
@@ -7331,6 +7413,7 @@ impl CrabStudioApp {
         self.dialog_test_result = None;
         self.dialog_is_testing = false;
         self.dialog_is_read_only = config.is_read_only;
+        self.dialog_environment = config.environment;
 
         let name = config.name.clone();
         self.dialog_name_input.update(cx, |inp, cx| {
@@ -7522,6 +7605,7 @@ impl CrabStudioApp {
         };
 
         cfg.is_read_only = self.dialog_is_read_only;
+        cfg.environment = self.dialog_environment;
         cfg
     }
 
@@ -7876,6 +7960,10 @@ impl Render for CrabStudioApp {
             .as_ref()
             .map(|c| c.config.is_read_only)
             .unwrap_or(false);
+        let active_env = self
+            .active_connection
+            .as_ref()
+            .map(|c| c.config.environment);
         let conn_name = self
             .active_connection
             .as_ref()
@@ -7927,6 +8015,34 @@ impl Render for CrabStudioApp {
                         .flex_shrink(1.0)
                         .min_w_0()
                         .overflow_hidden()
+                        .when_some(active_env, |this, env| {
+                            let (bg_color, text_color) = match env {
+                                EnvironmentTag::Production => {
+                                    (ThemeColors::ERROR, ThemeColors::TEXT_PRIMARY)
+                                }
+                                EnvironmentTag::Staging => {
+                                    (ThemeColors::WARNING, ThemeColors::TEXT_PRIMARY)
+                                }
+                                EnvironmentTag::Testing => {
+                                    (ThemeColors::PRIMARY_BORDER, ThemeColors::TEXT_PRIMARY)
+                                }
+                                EnvironmentTag::Development => {
+                                    (ThemeColors::BG_SURFACE_ACTIVE, ThemeColors::TEXT_MUTED)
+                                }
+                            };
+                            this.child(
+                                div()
+                                    .flex_shrink_0()
+                                    .px_2()
+                                    .py_0p5()
+                                    .rounded_full()
+                                    .bg(bg_color)
+                                    .text_xs()
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(text_color)
+                                    .child(env.display_name()),
+                            )
+                        })
                         .when(is_read_only, |this| {
                             this.child(
                                 div()
@@ -9111,6 +9227,7 @@ impl Render for CrabStudioApp {
         let mut status_bar = AppStatusBar::new()
             .connected(is_connected)
             .read_only(is_read_only)
+            .environment(active_env)
             .status(active_status)
             .language(self.settings_manager.settings().language)
             .query_stats(query_row_count, query_duration);
@@ -9136,6 +9253,15 @@ impl Render for CrabStudioApp {
                 move |ro, _: &mut Window, cx: &mut App| {
                     handle.update(cx, |this, cx| {
                         this.dialog_is_read_only = ro;
+                        cx.notify();
+                    });
+                }
+            };
+            let on_select_env = {
+                let handle = app_handle.clone();
+                move |env, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.dialog_environment = env;
                         cx.notify();
                     });
                 }
@@ -9177,9 +9303,11 @@ impl Render for CrabStudioApp {
                 )
                 .editing(self.dialog_editing_id.is_some())
                 .read_only(self.dialog_is_read_only)
+                .environment(self.dialog_environment)
                 .testing(self.dialog_is_testing)
                 .test_result(self.dialog_test_result.clone())
                 .on_select_type(on_select_type)
+                .on_select_environment(on_select_env)
                 .on_toggle_read_only(on_toggle_ro)
                 .on_test(on_test)
                 .on_save(on_save)
@@ -9224,8 +9352,15 @@ impl Render for CrabStudioApp {
                     }
                 };
 
+                let is_prod = self
+                    .active_connection
+                    .as_ref()
+                    .map(|c| c.config.environment.is_production())
+                    .unwrap_or(false);
+
                 Some(
                     SqlReviewModal::new(plan.clone())
+                        .production(is_prod)
                         .executing(self.sql_review_is_executing)
                         .error(self.sql_review_error.clone())
                         .copied(self.sql_review_copied)
@@ -9457,6 +9592,12 @@ impl Render for CrabStudioApp {
                 }
             };
 
+            let is_prod = self
+                .active_connection
+                .as_ref()
+                .map(|c| c.config.environment.is_production())
+                .unwrap_or(false);
+
             Some(
                 ConfirmDialog::new(
                     action_state.kind,
@@ -9464,6 +9605,7 @@ impl Render for CrabStudioApp {
                     action_state.database_family,
                     action_state.sql_preview.clone(),
                 )
+                .production(is_prod)
                 .language(self.settings_manager.settings().language)
                 .executing(action_state.is_executing)
                 .error(action_state.error.clone())
@@ -9473,6 +9615,37 @@ impl Render for CrabStudioApp {
         } else {
             None
         };
+
+        // Production Safeguard confirmation modal overlay if active
+        let production_safeguard_overlay = self.production_safeguard.clone().map(|safeguard| {
+            let on_confirm = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.execute_production_safeguard_confirmed(cx);
+                    });
+                }
+            };
+            let on_cancel = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.production_safeguard = None;
+                        cx.notify();
+                    });
+                }
+            };
+
+            ProductionSafeguardModal::new(
+                safeguard.connection_name,
+                safeguard.database_name,
+                safeguard.risk_summary,
+                safeguard.sql,
+                self.settings_manager.settings().language,
+            )
+            .on_confirm(on_confirm)
+            .on_cancel(on_cancel)
+        });
 
         // Database Connection Error Dialog modal overlay if active
         let conn_error_overlay = self.connection_error_modal.clone().map(|info| {
@@ -11472,7 +11645,10 @@ impl Render for CrabStudioApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &CloseDialog, _, cx| {
-                if this.maintenance_modal_open {
+                if this.production_safeguard.is_some() {
+                    this.production_safeguard = None;
+                    cx.notify();
+                } else if this.maintenance_modal_open {
                     this.close_maintenance_modal(cx);
                 } else if this.transfer_modal_open {
                     this.close_transfer_modal(cx);
@@ -11517,7 +11693,10 @@ impl Render for CrabStudioApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
-                if this.maintenance_modal_open {
+                if this.production_safeguard.is_some() {
+                    this.production_safeguard = None;
+                    cx.notify();
+                } else if this.maintenance_modal_open {
                     this.close_maintenance_modal(cx);
                 } else if this.transfer_modal_open {
                     this.close_transfer_modal(cx);
@@ -11709,6 +11888,7 @@ impl Render for CrabStudioApp {
                 |this| this.child(status_bar),
             )
             .children(dialog_overlay)
+            .children(production_safeguard_overlay)
             .children(sql_review_overlay)
             .children(create_table_overlay)
             .children(table_confirm_overlay)

@@ -460,12 +460,28 @@ pub enum EnvironmentTag {
 }
 
 impl EnvironmentTag {
+    pub const ALL: [EnvironmentTag; 4] = [
+        Self::Development,
+        Self::Testing,
+        Self::Staging,
+        Self::Production,
+    ];
+
     pub fn display_name(&self) -> &'static str {
         match self {
             Self::Development => "DEV",
             Self::Testing => "TEST",
             Self::Staging => "STAGE",
             Self::Production => "PROD",
+        }
+    }
+
+    pub fn full_name(&self) -> &'static str {
+        match self {
+            Self::Development => "Development",
+            Self::Testing => "Testing",
+            Self::Staging => "Staging",
+            Self::Production => "Production",
         }
     }
 
@@ -996,5 +1012,24 @@ mod tests {
         assert!(deserialized.is_read_only);
         assert_eq!(deserialized.ssl_mode, SslMode::Require);
         assert_eq!(deserialized.max_connections, 10);
+    }
+
+    #[test]
+    fn test_environment_tag_properties() {
+        assert_eq!(EnvironmentTag::ALL.len(), 4);
+        assert!(!EnvironmentTag::Development.is_production());
+        assert!(!EnvironmentTag::Testing.is_production());
+        assert!(!EnvironmentTag::Staging.is_production());
+        assert!(EnvironmentTag::Production.is_production());
+
+        assert_eq!(EnvironmentTag::Development.display_name(), "DEV");
+        assert_eq!(EnvironmentTag::Testing.display_name(), "TEST");
+        assert_eq!(EnvironmentTag::Staging.display_name(), "STAGE");
+        assert_eq!(EnvironmentTag::Production.display_name(), "PROD");
+
+        let json = serde_json::to_string(&EnvironmentTag::Production).unwrap();
+        assert_eq!(json, "\"production\"");
+        let deserialized: EnvironmentTag = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, EnvironmentTag::Production);
     }
 }

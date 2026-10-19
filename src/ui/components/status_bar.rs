@@ -1,6 +1,6 @@
 //! Status bar component displaying database session metrics and engine information.
 
-use crate::db::types::ConnectionStatus;
+use crate::db::types::{ConnectionStatus, EnvironmentTag};
 use crate::settings::AppLanguage;
 use crate::ui::i18n::t;
 use crate::ui::theme::ThemeColors;
@@ -15,6 +15,7 @@ use gpui_kit::gpui::{
 pub struct AppStatusBar {
     pub is_connected: bool,
     pub is_read_only: bool,
+    pub environment: Option<EnvironmentTag>,
     pub profile_name: Option<SharedString>,
     pub db_type: Option<SharedString>,
     pub status: Option<ConnectionStatus>,
@@ -28,6 +29,7 @@ impl AppStatusBar {
         Self {
             is_connected: false,
             is_read_only: false,
+            environment: None,
             profile_name: None,
             db_type: None,
             status: None,
@@ -49,6 +51,11 @@ impl AppStatusBar {
 
     pub fn read_only(mut self, read_only: bool) -> Self {
         self.is_read_only = read_only;
+        self
+    }
+
+    pub fn environment(mut self, env: Option<EnvironmentTag>) -> Self {
+        self.environment = env;
         self
     }
 
@@ -129,6 +136,29 @@ impl RenderOnce for AppStatusBar {
                         .child("READ-ONLY"),
                 )
             })
+            .when_some(self.environment, |this, env| {
+                let (bg_color, text_color) = match env {
+                    EnvironmentTag::Production => (ThemeColors::ERROR, ThemeColors::TEXT_PRIMARY),
+                    EnvironmentTag::Staging => (ThemeColors::WARNING, ThemeColors::TEXT_PRIMARY),
+                    EnvironmentTag::Testing => {
+                        (ThemeColors::PRIMARY_BORDER, ThemeColors::TEXT_PRIMARY)
+                    }
+                    EnvironmentTag::Development => {
+                        (ThemeColors::BG_SURFACE_ACTIVE, ThemeColors::TEXT_MUTED)
+                    }
+                };
+                this.child(
+                    div()
+                        .px_1p5()
+                        .py_0p5()
+                        .rounded_sm()
+                        .bg(bg_color)
+                        .text_xs()
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(text_color)
+                        .child(env.display_name()),
+                )
+            })
             .when_some(self.status, |this, stat| {
                 this.when_some(stat.server_version, |sub, ver| {
                     sub.child(
@@ -175,7 +205,7 @@ impl RenderOnce for AppStatusBar {
                 div()
                     .text_xs()
                     .text_color(ThemeColors::TEXT_FAINT)
-                    .child("zqlcrab v0.1.0"),
+                    .child(concat!("zqlcrab v", env!("CARGO_PKG_VERSION"))),
             );
 
         StatusBar::new().left(left_part).right(right_part)
