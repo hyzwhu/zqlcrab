@@ -46,7 +46,10 @@ pub use er_diagram::{ErDiagramGraph, RelationCardinality, RelationEdge, TableNod
 pub use error::{DbError, DbResult};
 pub use export::{ExportFormat, ExportOptions, export_result};
 pub use handle::ActiveConnection;
-pub use history::{QueryHistoryItem, QueryHistoryManager, QueryHistoryStatus};
+pub use history::{
+    HistoryExportFormat, HistoryStatusFilter, QueryHistoryItem, QueryHistoryManager,
+    QueryHistoryStatus,
+};
 pub use maintenance::{
     DatabaseStorageMetricsSummary, MaintenanceAction, MaintenanceLogEntry, MaintenanceOptions,
     MaintenanceProgress, MaintenanceStatus, MaintenanceSummary, TableStorageMetrics, format_bytes,

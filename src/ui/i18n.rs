@@ -593,6 +593,40 @@ fn translate_en(key: &'static str) -> &'static str {
         "safeguard.esc_to_cancel" => "Press Esc to cancel safely",
         "safeguard.btn_confirm_execute" => "Confirm & Execute in Production",
 
+        // Query execution history & audit
+        "history.title" => "Query Execution History",
+        "history.items_suffix" => "queries",
+        "history.export_label" => "Export:",
+        "history.export_csv" => "Export filtered history as CSV",
+        "history.export_json" => "Export filtered history as JSON",
+        "history.export_sql" => "Export filtered history as SQL script",
+        "history.clear_all" => "Clear all query history records",
+        "history.clear_btn" => "Clear All",
+        "history.kpi_total" => "Total Executed:",
+        "history.kpi_success_rate" => "Success Rate:",
+        "history.kpi_slow_queries" => "Slow Queries (>500ms):",
+        "history.kpi_total_duration" => "Total Duration:",
+        "history.filter_all" => "All",
+        "history.filter_success" => "Success",
+        "history.filter_error" => "Errors",
+        "history.filter_slow" => "Slow",
+        "history.filter_starred" => "Starred",
+        "history.dialect_all" => "All Dialects",
+        "history.empty_hint" => "No query execution history yet",
+        "history.empty_desc" => "Execute SQL queries in the console to record and audit them here.",
+        "history.no_matching" => "No queries match the current search or filters",
+        "history.badge_success" => "SUCCESS",
+        "history.badge_error" => "ERROR",
+        "history.star_item" => "Star this query",
+        "history.unstar_item" => "Remove from starred",
+        "history.load_tooltip" => "Load query into editor",
+        "history.load_btn" => "Load",
+        "history.run_tooltip" => "Execute query directly",
+        "history.run_btn" => "Run",
+        "history.copy_tooltip" => "Copy SQL to clipboard",
+        "history.save_snippet" => "Save as SQL snippet",
+        "history.delete_item" => "Delete this record",
+
         // Fallback
         _ => key,
     }
@@ -1146,6 +1180,40 @@ fn translate_zh(key: &'static str) -> &'static str {
         "safeguard.esc_to_cancel" => "按 Esc 键安全取消",
         "safeguard.btn_confirm_execute" => "确认在生产环境执行",
 
+        // Query execution history & audit
+        "history.title" => "SQL 执行历史审计",
+        "history.items_suffix" => "条记录",
+        "history.export_label" => "导出:",
+        "history.export_csv" => "导出为 CSV 格式",
+        "history.export_json" => "导出为 JSON 格式",
+        "history.export_sql" => "导出为 SQL 脚本",
+        "history.clear_all" => "清空所有执行历史",
+        "history.clear_btn" => "清空历史",
+        "history.kpi_total" => "累计执行总数:",
+        "history.kpi_success_rate" => "执行成功率:",
+        "history.kpi_slow_queries" => "慢查询 (>500ms):",
+        "history.kpi_total_duration" => "累计执行耗时:",
+        "history.filter_all" => "全部",
+        "history.filter_success" => "成功",
+        "history.filter_error" => "异常",
+        "history.filter_slow" => "慢查询",
+        "history.filter_starred" => "已收藏",
+        "history.dialect_all" => "全部方言",
+        "history.empty_hint" => "暂无 SQL 执行记录",
+        "history.empty_desc" => "在查询控制台中执行 SQL 后，将在此处记录审计详情并支持重放。",
+        "history.no_matching" => "未找到符合当前搜索与过滤条件的查询记录",
+        "history.badge_success" => "成功",
+        "history.badge_error" => "失败",
+        "history.star_item" => "收藏此查询",
+        "history.unstar_item" => "取消收藏",
+        "history.load_tooltip" => "载入到当前编辑器",
+        "history.load_btn" => "载入",
+        "history.run_tooltip" => "立即执行此查询",
+        "history.run_btn" => "执行",
+        "history.copy_tooltip" => "复制 SQL 到剪贴板",
+        "history.save_snippet" => "存为 SQL 代码片段",
+        "history.delete_item" => "删除此条记录",
+
         // Fallback
         _ => translate_en(key),
     }
@@ -1305,5 +1373,23 @@ mod tests {
         assert_eq!(t("conn.environment", AppLanguage::ZhCn), "环境标识");
         assert_eq!(t("conn.read_only", AppLanguage::En), "Read-Only Protection");
         assert_eq!(t("conn.read_only", AppLanguage::ZhCn), "只读保护模式");
+
+        // History assertions
+        assert_eq!(
+            t("history.title", AppLanguage::En),
+            "Query Execution History"
+        );
+        assert_eq!(t("history.title", AppLanguage::ZhCn), "SQL 执行历史审计");
+        assert_eq!(t("history.kpi_total", AppLanguage::ZhCn), "累计执行总数:");
+        assert_eq!(t("history.kpi_total", AppLanguage::En), "Total Executed:");
+        assert_eq!(
+            t("history.export_csv", AppLanguage::ZhCn),
+            "导出为 CSV 格式"
+        );
+        assert_eq!(
+            t("history.save_snippet", AppLanguage::En),
+            "Save as SQL snippet"
+        );
+        assert_eq!(t("history.star_item", AppLanguage::ZhCn), "收藏此查询");
     }
 }

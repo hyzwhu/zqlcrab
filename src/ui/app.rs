@@ -15,7 +15,10 @@ use crate::db::export::{
     generate_export_preview, generate_table_dump, suggested_file_name,
 };
 use crate::db::handle::ActiveConnection;
-use crate::db::history::{QueryHistoryItem, QueryHistoryManager, QueryHistoryStatus};
+use crate::db::history::{
+    HistoryExportFormat, HistoryStatusFilter, QueryHistoryItem, QueryHistoryManager,
+    QueryHistoryStatus,
+};
 use crate::db::import::{
     ColumnMapping, CsvDelimiter, CsvImportConfig, CsvPreviewData, CsvSniffer, ErrorPolicy,
     FileEncoding, ImportExecutor, ImportFormat, ImportProgress, ImportResult, SqlPreviewData,
@@ -289,7 +292,9 @@ pub struct CrabStudioApp {
 
     // History & DataGrid state
     history_manager: QueryHistoryManager,
-    history_filter: String,
+    history_search_input: Entity<InputState>,
+    history_status_filter: HistoryStatusFilter,
+    history_dialect_filter: Option<DatabaseFamily>,
     grid_sort_col: Option<usize>,
     grid_sort_dir: Option<SortDirection>,
     grid_page: usize,
@@ -781,6 +786,17 @@ impl CrabStudioApp {
         })
         .detach();
 
+        let history_search_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Search history by SQL, connection, or error...")
+        });
+        cx.subscribe(&history_search_input, |_this, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
+        })
+        .detach();
+
         let mut history_manager = QueryHistoryManager::new();
         history_manager.set_max_entries(settings_manager.settings().query.history_limit);
 
@@ -808,7 +824,9 @@ impl CrabStudioApp {
             status_message: Some("Ready".to_string()),
             profile_copied: false,
             history_manager,
-            history_filter: String::new(),
+            history_search_input,
+            history_status_filter: HistoryStatusFilter::All,
+            history_dialect_filter: None,
             grid_sort_col: None,
             grid_sort_dir: None,
             grid_page: 0,
@@ -1840,6 +1858,7 @@ impl CrabStudioApp {
                     connection_id: conn_id.clone(),
                     connection_name: conn_name.clone(),
                     database_type: Some(db_type),
+                    is_favorite: false,
                 };
                 app.history_manager.record(hist_item);
                 let _ = app.history_manager.save();
@@ -7212,6 +7231,113 @@ impl CrabStudioApp {
         cx.notify();
     }
 
+    /// Export filtered query history records to disk via FileDialog
+    pub fn export_query_history(
+        &mut self,
+        format: HistoryExportFormat,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let search_kw = self
+            .history_search_input
+            .read(cx)
+            .value()
+            .trim()
+            .to_lowercase();
+
+        let items: Vec<&QueryHistoryItem> = self
+            .history_manager
+            .items()
+            .iter()
+            .filter(|it| {
+                let matches_kw = if search_kw.is_empty() {
+                    true
+                } else {
+                    it.query_text.to_lowercase().contains(&search_kw)
+                        || it
+                            .connection_name
+                            .as_deref()
+                            .map(|cn| cn.to_lowercase().contains(&search_kw))
+                            .unwrap_or(false)
+                        || it
+                            .error_message
+                            .as_deref()
+                            .map(|err| err.to_lowercase().contains(&search_kw))
+                            .unwrap_or(false)
+                };
+
+                let matches_status = match self.history_status_filter {
+                    HistoryStatusFilter::All => true,
+                    HistoryStatusFilter::SuccessOnly => it.status == QueryHistoryStatus::Success,
+                    HistoryStatusFilter::ErrorOnly => it.status == QueryHistoryStatus::Error,
+                    HistoryStatusFilter::SlowOnly => it.execution_duration_ms > 500,
+                    HistoryStatusFilter::StarredOnly => it.is_favorite,
+                };
+
+                let matches_dialect = match self.history_dialect_filter {
+                    None => true,
+                    Some(fam) => it.database_type.map(|t| t.family()) == Some(fam),
+                };
+
+                matches_kw && matches_status && matches_dialect
+            })
+            .collect();
+
+        if items.is_empty() {
+            self.status_message = Some("No query history items to export".to_string());
+            cx.notify();
+            return;
+        }
+
+        let (content, ext, filter_name) = match format {
+            HistoryExportFormat::Csv => (
+                self.history_manager.export_as_csv(&items),
+                "csv",
+                "CSV (*.csv)",
+            ),
+            HistoryExportFormat::Json => (
+                self.history_manager.export_as_json(&items),
+                "json",
+                "JSON (*.json)",
+            ),
+            HistoryExportFormat::Sql => (
+                self.history_manager.export_as_sql(&items),
+                "sql",
+                "SQL Script (*.sql)",
+            ),
+        };
+
+        let def_name = format!(
+            "zqlcrab_history_{}.{}",
+            Utc::now().format("%Y%m%d_%H%M%S"),
+            ext
+        );
+
+        let picked = rfd::FileDialog::new()
+            .set_file_name(&def_name)
+            .add_filter(filter_name, &[ext])
+            .add_filter("All Files (*.*)", &["*"])
+            .save_file();
+
+        if let Some(path) = picked {
+            match std::fs::write(&path, content) {
+                Ok(_) => {
+                    self.status_message = Some(format!(
+                        "Successfully exported {} history records to {}",
+                        items.len(),
+                        path.file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_default()
+                    ));
+                }
+                Err(err) => {
+                    self.status_message = Some(format!("Export failed: {err}"));
+                }
+            }
+        }
+        cx.notify();
+    }
+
     /// Refresh active sessions and processlist from the connected database backend
     pub fn refresh_sessions(&mut self, cx: &mut Context<Self>) {
         let Some(conn) = self.active_connection.as_ref() else {
@@ -9071,13 +9197,93 @@ impl Render for CrabStudioApp {
                         }
                     };
 
-                    QueryHistoryView::new(self.history_manager.items().to_vec())
-                        .filter_keyword(self.history_filter.clone())
-                        .on_load_query(on_load)
-                        .on_run_query(on_run)
-                        .on_copy_query(on_copy)
-                        .on_clear_history(on_clear)
-                        .into_any_element()
+                    let on_toggle_favorite = {
+                        let handle = app_handle.clone();
+                        move |id: String, _: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                if let Ok(is_fav) = this.history_manager.toggle_favorite(&id) {
+                                    this.status_message = Some(if is_fav {
+                                        "Query added to favorites".to_string()
+                                    } else {
+                                        "Query removed from favorites".to_string()
+                                    });
+                                    cx.notify();
+                                }
+                            });
+                        }
+                    };
+
+                    let on_delete_item = {
+                        let handle = app_handle.clone();
+                        move |id: String, _: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                if let Ok(deleted) = this.history_manager.delete_item(&id) {
+                                    if deleted {
+                                        this.status_message =
+                                            Some("History entry deleted".to_string());
+                                        cx.notify();
+                                    }
+                                }
+                            });
+                        }
+                    };
+
+                    let on_save_as_snippet = {
+                        let handle = app_handle.clone();
+                        move |sql: String, window: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                this.open_new_snippet_modal(Some(sql), window, cx);
+                            });
+                        }
+                    };
+
+                    let on_export = {
+                        let handle = app_handle.clone();
+                        move |format: HistoryExportFormat, window: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                this.export_query_history(format, window, cx);
+                            });
+                        }
+                    };
+
+                    let on_select_status = {
+                        let handle = app_handle.clone();
+                        move |st: HistoryStatusFilter, _: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                this.history_status_filter = st;
+                                cx.notify();
+                            });
+                        }
+                    };
+
+                    let on_select_dialect = {
+                        let handle = app_handle.clone();
+                        move |dia: Option<DatabaseFamily>, _: &mut Window, cx: &mut App| {
+                            handle.update(cx, |this, cx| {
+                                this.history_dialect_filter = dia;
+                                cx.notify();
+                            });
+                        }
+                    };
+
+                    QueryHistoryView::new(
+                        self.history_manager.items().to_vec(),
+                        &self.history_search_input,
+                        self.history_status_filter,
+                        self.history_dialect_filter,
+                        lang,
+                    )
+                    .on_load_query(on_load)
+                    .on_run_query(on_run)
+                    .on_copy_query(on_copy)
+                    .on_clear_history(on_clear)
+                    .on_toggle_favorite(on_toggle_favorite)
+                    .on_delete_item(on_delete_item)
+                    .on_save_as_snippet(on_save_as_snippet)
+                    .on_export(on_export)
+                    .on_select_status(on_select_status)
+                    .on_select_dialect(on_select_dialect)
+                    .into_any_element()
                 }
                 WorkspaceTab::ERDiagram => {
                     let on_select = {

@@ -15,6 +15,36 @@ pub enum QueryHistoryStatus {
     Error,
 }
 
+/// Query history status filter criteria.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HistoryStatusFilter {
+    #[default]
+    All,
+    SuccessOnly,
+    ErrorOnly,
+    SlowOnly,
+    StarredOnly,
+}
+
+impl HistoryStatusFilter {
+    pub const ALL: [HistoryStatusFilter; 5] = [
+        Self::All,
+        Self::SuccessOnly,
+        Self::ErrorOnly,
+        Self::SlowOnly,
+        Self::StarredOnly,
+    ];
+}
+
+/// Export format for query history.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HistoryExportFormat {
+    Csv,
+    Json,
+    Sql,
+}
+
 /// A logged database query with performance and diagnostic metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueryHistoryItem {
@@ -29,6 +59,8 @@ pub struct QueryHistoryItem {
     pub connection_id: Option<String>,
     pub connection_name: Option<String>,
     pub database_type: Option<DatabaseType>,
+    #[serde(default)]
+    pub is_favorite: bool,
 }
 
 impl QueryHistoryItem {
@@ -53,6 +85,7 @@ impl QueryHistoryItem {
             connection_id: conn_id,
             connection_name: conn_name,
             database_type: db_type,
+            is_favorite: false,
         }
     }
 
@@ -76,6 +109,7 @@ impl QueryHistoryItem {
             connection_id: conn_id,
             connection_name: conn_name,
             database_type: db_type,
+            is_favorite: false,
         }
     }
 }
@@ -197,6 +231,152 @@ impl QueryHistoryManager {
         self.items.clear();
         self.save()
     }
+
+    /// Toggle favorite (starred) status for a specific query history item.
+    pub fn toggle_favorite(&mut self, id: &str) -> DbResult<bool> {
+        let mut new_state = false;
+        let mut found = false;
+        for item in &mut self.items {
+            if item.id == id {
+                item.is_favorite = !item.is_favorite;
+                new_state = item.is_favorite;
+                found = true;
+                break;
+            }
+        }
+        if found {
+            self.save()?;
+        }
+        Ok(new_state)
+    }
+
+    /// Delete a single query history item by id.
+    pub fn delete_item(&mut self, id: &str) -> DbResult<bool> {
+        let prev_len = self.items.len();
+        self.items.retain(|it| it.id != id);
+        let removed = self.items.len() < prev_len;
+        if removed {
+            self.save()?;
+        }
+        Ok(removed)
+    }
+
+    /// Export history records as formatted JSON.
+    pub fn export_as_json(&self, items: &[&QueryHistoryItem]) -> String {
+        serde_json::to_string_pretty(items).unwrap_or_default()
+    }
+
+    /// Export history records as standard CSV format.
+    pub fn export_as_csv(&self, items: &[&QueryHistoryItem]) -> String {
+        let mut wtr = csv::Writer::from_writer(vec![]);
+        let _ = wtr.write_record([
+            "ID",
+            "Timestamp",
+            "Status",
+            "DurationMs",
+            "RowsAffected",
+            "RowsReturned",
+            "DatabaseType",
+            "ConnectionName",
+            "Favorite",
+            "QueryText",
+            "ErrorMessage",
+        ]);
+
+        for item in items {
+            let status = match item.status {
+                QueryHistoryStatus::Success => "success",
+                QueryHistoryStatus::Error => "error",
+            };
+            let rows_affected = item
+                .rows_affected
+                .map(|n| n.to_string())
+                .unwrap_or_default();
+            let rows_returned = item
+                .rows_returned
+                .map(|n| n.to_string())
+                .unwrap_or_default();
+            let db_type = item
+                .database_type
+                .map(|d| d.display_name())
+                .unwrap_or_default();
+            let conn_name = item.connection_name.as_deref().unwrap_or_default();
+            let favorite = if item.is_favorite { "true" } else { "false" };
+            let err_msg = item.error_message.as_deref().unwrap_or_default();
+
+            let _ = wtr.write_record([
+                &item.id,
+                &item.timestamp.to_rfc3339(),
+                status,
+                &item.execution_duration_ms.to_string(),
+                &rows_affected,
+                &rows_returned,
+                db_type,
+                conn_name,
+                favorite,
+                &item.query_text,
+                err_msg,
+            ]);
+        }
+
+        wtr.into_inner()
+            .ok()
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+            .unwrap_or_default()
+    }
+
+    /// Export history records as an executable or archivable SQL script.
+    pub fn export_as_sql(&self, items: &[&QueryHistoryItem]) -> String {
+        let mut out = String::new();
+        out.push_str("-- ========================================================\n");
+        out.push_str("-- zqlcrab Query Execution Audit History Dump\n");
+        out.push_str(&format!("-- Exported At: {}\n", Utc::now().to_rfc3339()));
+        out.push_str(&format!("-- Total Statements: {}\n", items.len()));
+        out.push_str("-- ========================================================\n\n");
+
+        for (idx, item) in items.iter().enumerate() {
+            let status_str = match item.status {
+                QueryHistoryStatus::Success => "SUCCESS",
+                QueryHistoryStatus::Error => "ERROR",
+            };
+            out.push_str(&format!(
+                "-- [{}] Timestamp: {} | Status: {} | Duration: {}ms",
+                idx + 1,
+                item.timestamp.to_rfc3339(),
+                status_str,
+                item.execution_duration_ms
+            ));
+            if let Some(conn) = &item.connection_name {
+                out.push_str(&format!(" | Connection: {}", conn));
+            }
+            if let Some(db) = &item.database_type {
+                out.push_str(&format!(" | Dialect: {}", db.display_name()));
+            }
+            if let Some(aff) = item.rows_affected {
+                out.push_str(&format!(" | Affected: {}", aff));
+            }
+            if let Some(ret) = item.rows_returned {
+                out.push_str(&format!(" | Rows: {}", ret));
+            }
+            if item.is_favorite {
+                out.push_str(" | [STARRED]");
+            }
+            out.push('\n');
+
+            if let Some(err) = &item.error_message {
+                out.push_str(&format!("-- Error: {}\n", err.replace('\n', " ")));
+            }
+
+            let trimmed_sql = item.query_text.trim();
+            out.push_str(trimmed_sql);
+            if !trimmed_sql.ends_with(';') {
+                out.push(';');
+            }
+            out.push_str("\n\n");
+        }
+
+        out
+    }
 }
 
 impl Default for QueryHistoryManager {
@@ -274,6 +454,80 @@ mod tests {
         assert_eq!(reloaded.list().len(), 3);
 
         // Cleanup
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn test_history_item_favorites_deletion_and_export() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("zqlcrab_hist_test_{}", uuid::Uuid::new_v4()));
+        let storage_file = temp_dir.join("history_ext.json");
+
+        let mut mgr = QueryHistoryManager::with_storage_path(storage_file.clone(), 10);
+
+        let item1 = QueryHistoryItem::success(
+            "SELECT * FROM customers WHERE active = 1".to_string(),
+            42,
+            Some(100),
+            None,
+            Some("conn-1".to_string()),
+            Some("Prod PG".to_string()),
+            Some(DatabaseType::Postgres),
+        );
+        let id1 = item1.id.clone();
+        mgr.record(item1);
+
+        let item2 = QueryHistoryItem::error(
+            "UPDATE accounts SET balance = 0".to_string(),
+            550,
+            "permission denied on accounts table".to_string(),
+            Some("conn-2".to_string()),
+            Some("Staging MySQL".to_string()),
+            Some(DatabaseType::Mysql),
+        );
+        let id2 = item2.id.clone();
+        mgr.record(item2);
+
+        assert_eq!(mgr.list().len(), 2);
+        assert!(!mgr.list()[0].is_favorite);
+
+        // Toggle favorite for item2
+        let fav = mgr.toggle_favorite(&id2).expect("toggle should succeed");
+        assert!(fav);
+        assert!(mgr.list()[0].is_favorite);
+
+        // Verify JSON export
+        let all_refs: Vec<&QueryHistoryItem> = mgr.list().iter().collect();
+        let json_export = mgr.export_as_json(&all_refs);
+        assert!(json_export.contains("customers"));
+        assert!(json_export.contains("accounts"));
+        assert!(json_export.contains("\"is_favorite\": true"));
+
+        // Verify CSV export
+        let csv_export = mgr.export_as_csv(&all_refs);
+        assert!(csv_export.contains("ID,Timestamp,Status"));
+        assert!(csv_export.contains("PostgreSQL"));
+        assert!(csv_export.contains("Staging MySQL"));
+        assert!(csv_export.contains("permission denied"));
+
+        // Verify SQL export
+        let sql_export = mgr.export_as_sql(&all_refs);
+        assert!(sql_export.contains("zqlcrab Query Execution Audit History Dump"));
+        assert!(sql_export.contains("[STARRED]"));
+        assert!(sql_export.contains("SELECT * FROM customers WHERE active = 1;"));
+        assert!(sql_export.contains("UPDATE accounts SET balance = 0;"));
+
+        // Delete single item1
+        let removed = mgr.delete_item(&id1).expect("delete should succeed");
+        assert!(removed);
+        assert_eq!(mgr.list().len(), 1);
+        assert_eq!(mgr.list()[0].id, id2);
+
+        // Reload to test persistence of deletion and favorite
+        let reloaded = QueryHistoryManager::with_storage_path(storage_file.clone(), 10);
+        assert_eq!(reloaded.list().len(), 1);
+        assert!(reloaded.list()[0].is_favorite);
+
         let _ = fs::remove_dir_all(temp_dir);
     }
 }

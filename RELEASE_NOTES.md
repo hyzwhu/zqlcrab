@@ -1,21 +1,29 @@
-## 🦀 zqlcrab v0.1.17
+## 🦀 zqlcrab v0.1.18
 
 Fast, lightweight, GPU-accelerated database desktop client built with Rust & GPUI.
 
 ### 📋 Changelog
 
-#### v0.1.17 Release Highlights:
-- 🛡️ **Production Safeguard & Read-Only Connection Protection (生产环境安全保护与只读连接模式)**:
-  - **Comprehensive Multi-Tier Environment Classification**:
-    - Added full environment classification (`DEV`, `TEST`, `STAGE`, `PROD`) across connection configs and profiles.
-    - Integrated segmented environment selector and dedicated Read-Only Protection toggle into `ConnectionDialog`.
-    - Added prominent theme-coded environment badges across TitleBar, StatusBar, and Sidebar connection lists.
-  - **Lexical Safety Analysis & Production Risk Interceptor**:
-    - Implemented `QuerySafetyValidator::detect_production_risk` detecting `DROP TABLE/DATABASE/VIEW`, `TRUNCATE TABLE`, `ALTER TABLE`, and unbounded `DELETE`/`UPDATE` operations missing `WHERE` clauses.
-    - Introduced high-visibility `ProductionSafeguardModal` with red warning banners, risk diagnosis, target database info, syntax preview, and double-confirmation flow.
-  - **Strict Read-Only Connection Guarding**:
-    - Pre-flight blocked mutating and destructive DDL/DML statements (`DROP`, `DELETE`, `UPDATE`, `INSERT`, `ALTER`, etc.) on read-only connections with descriptive explanations.
-    - Contextually hidden destructive UI operations (`Create Table`, `Restore Database`, `Import Data`, `Mock Data`, `Truncate Table`, `Drop Table/View`) in the sidebar toolbar and table context menus when active connection is read-only.
-  - **Enhanced Destructive Action Confirmations**:
-    - Upgraded `ConfirmDialog` and `SqlReviewModal` with production-aware warning banners and high-risk badges when targeting production databases.
-    - Added full bilingual (English & 简体中文) localization for safeguard dialogs and environment configurations.
+#### v0.1.18 Release Highlights:
+- 📜 **Advanced SQL Query History Audit, Search & Export (高级 SQL 查询历史审计、多维检索与导出分析)**:
+  - **Reactive Keyword Search & Multi-Dimensional Filtering**:
+    - Integrated reactive search input box (`Entity<InputState>`) with instant event subscriptions matching SQL text, connection profile names, and database error messages.
+    - Added segmented status filter pills: `All` (全部), `Success` (仅成功), `Errors` (仅异常), `Slow` (慢查询 >500ms), and `Starred` (⭐ 仅收藏) with real-time query counts.
+    - Added dialect filter pills: `All Dialects`, `PostgreSQL`, `MySQL`, and `SQLite`.
+  - **Audit KPI Metrics Dashboard**:
+    - Introduced execution performance KPI strip displaying:
+      - **Total Executed Queries** count.
+      - **Execution Success Rate (%)** with color-coded health indicators.
+      - **Slow Queries Count (>500ms)** in warning amber badge.
+      - **Total Cumulative Duration (ms)** consumed across queries.
+  - **Multi-Format History Audit Export**:
+    - Export filtered history directly to RFC4180 CSV, formatted JSON, or standard runnable `.sql` audit batch scripts with metadata header comments.
+    - Integrated with native platform save dialog (`rfd::FileDialog`).
+  - **Favorite Star Management & Single Record Deletion**:
+    - Added one-click star/favorite toggling (`is_favorite`) persisted automatically to `query_history.json`.
+    - Added individual history entry deletion without needing to wipe the entire audit trail.
+  - **1-Click SQL Snippet Conversion**:
+    - Integrated `Save as Snippet` button directly into history item cards, immediately pre-filling and launching `SnippetEditModal`.
+  - **Full Bilingual Localization & Testing**:
+    - Added complete English and 简体中文 translation keys for history titles, KPI metrics, filters, export tooltips, and badges.
+    - All 183 unit tests passing.
