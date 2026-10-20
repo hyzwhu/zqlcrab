@@ -41,6 +41,7 @@ struct TableActionCallbacks {
     on_data_diff: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_view_er: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_maintenance: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
+    on_index_advisor: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_truncate: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_drop: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     is_read_only: bool,
@@ -84,6 +85,7 @@ pub struct Sidebar {
     on_view_er_diagram: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_maintenance_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_maintenance_database: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
+    on_index_advisor_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_truncate_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_drop_table: Option<Rc<dyn Fn(TableInfo, &mut Window, &mut App) + 'static>>,
     on_create_table: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
@@ -134,6 +136,7 @@ impl Sidebar {
             on_view_er_diagram: None,
             on_maintenance_table: None,
             on_maintenance_database: None,
+            on_index_advisor_table: None,
             on_truncate_table: None,
             on_drop_table: None,
             on_create_table: None,
@@ -291,6 +294,14 @@ impl Sidebar {
         F: Fn(&mut Window, &mut App) + 'static,
     {
         self.on_maintenance_database = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_index_advisor_table<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(TableInfo, &mut Window, &mut App) + 'static,
+    {
+        self.on_index_advisor_table = Some(Rc::new(handler));
         self
     }
 
@@ -666,6 +677,19 @@ impl Sidebar {
                     .on_click(move |_, window, cx| {
                         if let Some(ref handler) = maint_handler {
                             handler(tbl_maint.clone(), window, cx);
+                        }
+                    }),
+            );
+
+            // Index Advisor & Health Diagnostics... / 索引优化与健康顾问...
+            let advisor_handler = actions.on_index_advisor.clone();
+            let tbl_advisor = info.clone();
+            menu = menu.item(
+                PopupMenuItem::new(t("table_menu.index_advisor", lang))
+                    .icon(IconName::Zap)
+                    .on_click(move |_, window, cx| {
+                        if let Some(ref handler) = advisor_handler {
+                            handler(tbl_advisor.clone(), window, cx);
                         }
                     }),
             );
@@ -1349,6 +1373,7 @@ impl RenderOnce for Sidebar {
                         on_data_diff: self.on_data_diff_table.clone(),
                         on_view_er: self.on_view_er_diagram.clone(),
                         on_maintenance: self.on_maintenance_table.clone(),
+                        on_index_advisor: self.on_index_advisor_table.clone(),
                         on_truncate: self.on_truncate_table.clone(),
                         on_drop: self.on_drop_table.clone(),
                         is_read_only: active_is_read_only,

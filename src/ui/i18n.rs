@@ -627,6 +627,31 @@ fn translate_en(key: &'static str) -> &'static str {
         "history.save_snippet" => "Save as SQL snippet",
         "history.delete_item" => "Delete this record",
 
+        // Database Index Advisor & Health Diagnostics
+        "table_menu.index_advisor" => "Index Advisor & Health Diagnostics...",
+        "console.advisor" => "Advisor",
+        "console.advisor_tooltip" => "Index optimization advisor & health diagnostics",
+        "advisor.title" => "Database Index Advisor & Health Diagnostics",
+        "advisor.subtitle" => {
+            "Automated static schema audit, redundant index detection, unindexed foreign keys, and query-driven missing index recommendations"
+        }
+        "advisor.refresh_tooltip" => "Re-analyze table indexes and foreign keys",
+        "advisor.tab_health" => "Health Audit",
+        "advisor.tab_query" => "Query Advisor",
+        "advisor.health_score" => "Index Health Score",
+        "advisor.kpi_total_indexes" => "Total Indexes",
+        "advisor.kpi_redundant_count" => "Redundant / Duplicate",
+        "advisor.kpi_unindexed_fks" => "Unindexed Foreign Keys",
+        "advisor.diagnostic_issues" => "Diagnostic Issues & Anomaly Detection",
+        "advisor.existing_indexes" => "Existing Table Indexes",
+        "advisor.recommend_title" => "Missing Index Recommendations for Target Query",
+        "advisor.btn_copy_ddl" => "Copy Remediation SQL",
+        "advisor.btn_open_console" => "Open in Console",
+        "advisor.empty_healthy" => {
+            "All indexes are optimal and well-structured! No anomalies detected."
+        }
+        "advisor.analyzing" => "Analyzing table indexes, foreign keys, and query filters...",
+
         // Fallback
         _ => key,
     }
@@ -1214,6 +1239,27 @@ fn translate_zh(key: &'static str) -> &'static str {
         "history.save_snippet" => "存为 SQL 代码片段",
         "history.delete_item" => "删除此条记录",
 
+        // Database Index Advisor & Health Diagnostics
+        "table_menu.index_advisor" => "索引优化与体检顾问...",
+        "console.advisor" => "索引顾问",
+        "console.advisor_tooltip" => "表索引健康体检与慢查询智能索引推荐",
+        "advisor.title" => "数据库索引优化诊断与智能推荐顾问",
+        "advisor.subtitle" => "静态模式体检、冗余/覆盖索引检测、外键未索引体检与慢查询智能推荐",
+        "advisor.refresh_tooltip" => "重新扫描并分析表索引与外键状态",
+        "advisor.tab_health" => "表级健康体检",
+        "advisor.tab_query" => "查询优化顾问",
+        "advisor.health_score" => "索引健康评分",
+        "advisor.kpi_total_indexes" => "现有索引数",
+        "advisor.kpi_redundant_count" => "冗余/重复索引",
+        "advisor.kpi_unindexed_fks" => "未建索引外键",
+        "advisor.diagnostic_issues" => "索引诊断问题与异常检测",
+        "advisor.existing_indexes" => "现有索引定义明细",
+        "advisor.recommend_title" => "目标查询的缺失索引优化建议",
+        "advisor.btn_copy_ddl" => "复制修复 DDL 脚本",
+        "advisor.btn_open_console" => "在控制台中打开",
+        "advisor.empty_healthy" => "索引结构非常健康！未检测到冗余或未索引外键。",
+        "advisor.analyzing" => "正在深度体检表索引、外键依赖与查询过滤条件...",
+
         // Fallback
         _ => translate_en(key),
     }
@@ -1391,5 +1437,22 @@ mod tests {
             "Save as SQL snippet"
         );
         assert_eq!(t("history.star_item", AppLanguage::ZhCn), "收藏此查询");
+
+        // Index Advisor assertions
+        assert_eq!(
+            t("advisor.title", AppLanguage::ZhCn),
+            "数据库索引优化诊断与智能推荐顾问"
+        );
+        assert_eq!(
+            t("advisor.title", AppLanguage::En),
+            "Database Index Advisor & Health Diagnostics"
+        );
+        assert_eq!(
+            t("table_menu.index_advisor", AppLanguage::ZhCn),
+            "索引优化与体检顾问..."
+        );
+        assert_eq!(t("console.advisor", AppLanguage::En), "Advisor");
+        assert_eq!(t("console.advisor", AppLanguage::ZhCn), "索引顾问");
+        assert_eq!(t("advisor.health_score", AppLanguage::ZhCn), "索引健康评分");
     }
 }

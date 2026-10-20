@@ -12,6 +12,7 @@ pub mod export;
 pub mod handle;
 pub mod history;
 pub mod import;
+pub mod index_advisor;
 pub mod maintenance;
 pub mod manager;
 pub mod mock_data;
@@ -49,6 +50,11 @@ pub use handle::ActiveConnection;
 pub use history::{
     HistoryExportFormat, HistoryStatusFilter, QueryHistoryItem, QueryHistoryManager,
     QueryHistoryStatus,
+};
+pub use index_advisor::{
+    IndexHealthIssue, IndexHealthReport, IndexHealthScoreLevel, IndexIssueSeverity, IndexIssueType,
+    MissingIndexRecommendation, audit_table_indexes, generate_all_remediation_sql,
+    recommend_indexes_for_query, render_create_index_ddl, render_drop_index_ddl,
 };
 pub use maintenance::{
     DatabaseStorageMetricsSummary, MaintenanceAction, MaintenanceLogEntry, MaintenanceOptions,

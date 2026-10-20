@@ -24,6 +24,9 @@ use crate::db::import::{
     FileEncoding, ImportExecutor, ImportFormat, ImportProgress, ImportResult, SqlPreviewData,
     auto_map_columns,
 };
+use crate::db::index_advisor::{
+    IndexHealthReport, audit_table_indexes, recommend_indexes_for_query,
+};
 use crate::db::maintenance::{
     DatabaseStorageMetricsSummary, MaintenanceAction, MaintenanceLogEntry, MaintenanceOptions,
     MaintenanceProgress, MaintenanceStatus, MaintenanceSummary, TableStorageMetrics,
@@ -71,11 +74,12 @@ use crate::ui::components::{
     ActivityBar, ActivityNav, AppStatusBar, ConfirmActionKind, ConfirmDialog, ConnectionDialog,
     ConsoleBottomTab, DataDiffFilterTab, DataDiffModal, DataGrid, DiffFilterTab, DumpModal,
     DumpModalStep, ErDiagramView, ExplainViewMode, ExportDestination, ExportModal,
-    ExportSuccessInfo, ExportWizardStep, ImportModal, ImportWizardStep, KillConfirmModal,
-    MaintenanceModal, MaintenanceModalTab, MockDataModal, MockWizardStep, ProductionSafeguardModal,
-    QueryConsole, QueryHistoryView, QueryTabHeader, RestoreModal, RestoreModalStep,
-    SchemaDiffModal, SchemaViewer, SessionsView, SettingsTab, SettingsView, Sidebar,
-    SnippetEditModal, SnippetView, SqlReviewModal, TransferModal, TransferModalStep,
+    ExportSuccessInfo, ExportWizardStep, ImportModal, ImportWizardStep, IndexAdvisorModal,
+    IndexAdvisorTab, KillConfirmModal, MaintenanceModal, MaintenanceModalTab, MockDataModal,
+    MockWizardStep, ProductionSafeguardModal, QueryConsole, QueryHistoryView, QueryTabHeader,
+    RestoreModal, RestoreModalStep, SchemaDiffModal, SchemaViewer, SessionsView, SettingsTab,
+    SettingsView, Sidebar, SnippetEditModal, SnippetView, SqlReviewModal, TransferModal,
+    TransferModalStep,
     create_table_modal::{CreateTableColumnState, CreateTableIndexState, CreateTableModal},
     data_grid::GridCellCoord,
     schema_viewer::SchemaEditColumnState,
@@ -528,6 +532,14 @@ pub struct CrabStudioApp {
     maintenance_exec_summary: Option<MaintenanceSummary>,
     maintenance_error_msg: Option<String>,
     maintenance_copied: bool,
+
+    // Database Index Advisor & Health Diagnostics modal state
+    index_advisor_modal_open: bool,
+    index_advisor_table: String,
+    index_advisor_report: Option<IndexHealthReport>,
+    index_advisor_query: Option<String>,
+    index_advisor_tab: IndexAdvisorTab,
+    index_advisor_is_loading: bool,
 
     // Settings state
     settings_manager: SettingsManager,
@@ -1036,6 +1048,12 @@ impl CrabStudioApp {
             maintenance_exec_summary: None,
             maintenance_error_msg: None,
             maintenance_copied: false,
+            index_advisor_modal_open: false,
+            index_advisor_table: String::new(),
+            index_advisor_report: None,
+            index_advisor_query: None,
+            index_advisor_tab: IndexAdvisorTab::HealthAudit,
+            index_advisor_is_loading: false,
             settings_manager,
             active_nav: ActivityNav::Databases,
             active_settings_tab: SettingsTab::Appearance,
@@ -7089,6 +7107,108 @@ impl CrabStudioApp {
         cx.notify();
     }
 
+    // -------------------------------------------------------------------------
+    // Database Index Advisor & Health Diagnostics Modal
+    // -------------------------------------------------------------------------
+
+    pub fn open_index_advisor_modal(
+        &mut self,
+        table_name: Option<String>,
+        query_text: Option<String>,
+        initial_tab: IndexAdvisorTab,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(ref _conn) = self.active_connection else {
+            self.status_message =
+                Some("Cannot run Index Advisor: No active database connection".to_string());
+            cx.notify();
+            return;
+        };
+
+        let target_table = table_name.unwrap_or_else(|| {
+            self.selected_table.clone().unwrap_or_else(|| {
+                self.active_tables
+                    .first()
+                    .map(|t| t.name.clone())
+                    .unwrap_or_else(|| "default".to_string())
+            })
+        });
+
+        self.index_advisor_modal_open = true;
+        self.index_advisor_table = target_table.clone();
+        self.index_advisor_query = query_text.clone();
+        self.index_advisor_tab = initial_tab;
+        self.index_advisor_is_loading = true;
+        self.index_advisor_report = None;
+        cx.notify();
+
+        self.run_index_advisor_analysis(target_table, query_text, cx);
+    }
+
+    pub fn close_index_advisor_modal(&mut self, cx: &mut Context<Self>) {
+        self.index_advisor_modal_open = false;
+        self.index_advisor_report = None;
+        self.index_advisor_query = None;
+        self.index_advisor_is_loading = false;
+        cx.notify();
+    }
+
+    pub fn run_index_advisor_analysis(
+        &mut self,
+        table_name: String,
+        query_text: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(ref conn) = self.active_connection else {
+            self.index_advisor_is_loading = false;
+            return;
+        };
+
+        let conn_clone = conn.clone();
+        let family = conn.config.db_type.family();
+        let database = conn.config.database.clone();
+        let target_tbl = table_name.clone();
+        let query_clone = query_text.clone();
+
+        cx.spawn(async move |this, cx: &mut AsyncApp| {
+            let db_opt = if database.is_empty() {
+                None
+            } else {
+                Some(database.as_str())
+            };
+
+            // Fetch table indexes, foreign keys, and column metadata
+            let indexes_res = conn_clone.list_indexes(db_opt, None, &target_tbl).await;
+            let fks_res = conn_clone
+                .list_foreign_keys(db_opt, None, Some(&target_tbl))
+                .await;
+            let cols_res = conn_clone.list_columns(db_opt, None, &target_tbl).await;
+
+            let indexes = indexes_res.unwrap_or_default();
+            let foreign_keys = fks_res.unwrap_or_default();
+            let columns = cols_res.unwrap_or_default();
+
+            // Run table health audit
+            let mut report = audit_table_indexes(&target_tbl, &indexes, &foreign_keys, family);
+
+            // Run query missing index recommendations if SQL query was provided
+            if let Some(ref sql) = query_clone {
+                if !sql.trim().is_empty() {
+                    let missing =
+                        recommend_indexes_for_query(sql, &target_tbl, &columns, &indexes, family);
+                    report.missing_recommendations = missing;
+                }
+            }
+
+            let _ = this.update(cx, |app, cx| {
+                app.index_advisor_report = Some(report);
+                app.index_advisor_is_loading = false;
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     /// Open modal to create a new SQL snippet
     pub fn open_new_snippet_modal(
         &mut self,
@@ -8385,6 +8505,19 @@ impl Render for CrabStudioApp {
                 });
             }
         })
+        .on_index_advisor_table({
+            let handle = app_handle.clone();
+            move |table, _, cx| {
+                handle.update(cx, |this, cx| {
+                    this.open_index_advisor_modal(
+                        Some(table.name),
+                        None,
+                        IndexAdvisorTab::HealthAudit,
+                        cx,
+                    );
+                });
+            }
+        })
         .on_mock_data_table({
             let handle = app_handle.clone();
             move |table, _, cx| {
@@ -8909,6 +9042,44 @@ impl Render for CrabStudioApp {
                             .on_format(on_format)
                             .on_explain(on_explain)
                             .on_profile(on_profile)
+                            .on_index_advisor({
+                                let handle = app_handle.clone();
+                                move |_, cx| {
+                                    handle.update(cx, |this, cx| {
+                                        let active_sql = this.active_query_tab().map(|t| {
+                                            let ed = t.editor.read(cx);
+                                            let sel = ed.selected_text().to_string();
+                                            if !sel.trim().is_empty() {
+                                                sel
+                                            } else {
+                                                ed.value().to_string()
+                                            }
+                                        });
+                                        let detected_table = active_sql
+                                            .as_ref()
+                                            .and_then(|sql| {
+                                                let lower = sql.to_lowercase();
+                                                this.active_tables
+                                                    .iter()
+                                                    .find(|t| {
+                                                        lower.contains(&t.name.to_lowercase())
+                                                    })
+                                                    .map(|t| t.name.clone())
+                                            })
+                                            .or_else(|| this.selected_table.clone())
+                                            .or_else(|| {
+                                                this.active_tables.first().map(|t| t.name.clone())
+                                            });
+
+                                        this.open_index_advisor_modal(
+                                            detected_table,
+                                            active_sql,
+                                            IndexAdvisorTab::QueryAdvisor,
+                                            cx,
+                                        );
+                                    });
+                                }
+                            })
                             .on_copy_profile(on_copy_profile)
                             .on_bottom_tab(on_bottom_tab)
                             .on_explain_view(on_explain_view)
@@ -11713,6 +11884,92 @@ impl Render for CrabStudioApp {
             None
         };
 
+        // Database Index Advisor & Health Diagnostics modal overlay
+        let index_advisor_overlay = if self.index_advisor_modal_open {
+            let active_family = self
+                .active_connection
+                .as_ref()
+                .map(|c| c.config.db_type.family())
+                .unwrap_or(DatabaseFamily::Sqlite);
+
+            let on_tab_change = {
+                let handle = app_handle.clone();
+                move |tab: IndexAdvisorTab, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.index_advisor_tab = tab;
+                        cx.notify();
+                    });
+                }
+            };
+
+            let on_refresh = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        let tbl = this.index_advisor_table.clone();
+                        let qry = this.index_advisor_query.clone();
+                        this.index_advisor_is_loading = true;
+                        cx.notify();
+                        this.run_index_advisor_analysis(tbl, qry, cx);
+                    });
+                }
+            };
+
+            let on_copy_sql = {
+                let handle = app_handle.clone();
+                move |sql: String, _: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(sql));
+                        this.status_message = Some("Copied Index DDL to clipboard".to_string());
+                        cx.notify();
+                    });
+                }
+            };
+
+            let on_open_console = {
+                let handle = app_handle.clone();
+                move |sql: String, window: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        let tab_name = format!("Advisor: {}", this.index_advisor_table);
+                        let _ = this.create_query_tab(Some(tab_name), Some(&sql), window, cx);
+                        this.index_advisor_modal_open = false;
+                        this.status_message =
+                            Some("Loaded index remediation SQL into Query Console".to_string());
+                        cx.notify();
+                    });
+                }
+            };
+
+            let on_close = {
+                let handle = app_handle.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    handle.update(cx, |this, cx| {
+                        this.close_index_advisor_modal(cx);
+                    });
+                }
+            };
+
+            Some(
+                IndexAdvisorModal::new(
+                    self.index_advisor_table.clone(),
+                    self.index_advisor_report.clone(),
+                    self.index_advisor_query.clone(),
+                    active_family,
+                    self.settings_manager.settings().language,
+                )
+                .active_tab(self.index_advisor_tab)
+                .is_loading(self.index_advisor_is_loading)
+                .on_tab_change(on_tab_change)
+                .on_refresh(on_refresh)
+                .on_copy_sql(on_copy_sql)
+                .on_open_console(on_open_console)
+                .on_close(on_close)
+                .into_any_element(),
+            )
+        } else {
+            None
+        };
+
         // Settings View component
         let settings_view = SettingsView::new(
             self.settings_manager.settings().clone(),
@@ -11854,6 +12111,8 @@ impl Render for CrabStudioApp {
                 if this.production_safeguard.is_some() {
                     this.production_safeguard = None;
                     cx.notify();
+                } else if this.index_advisor_modal_open {
+                    this.close_index_advisor_modal(cx);
                 } else if this.maintenance_modal_open {
                     this.close_maintenance_modal(cx);
                 } else if this.transfer_modal_open {
@@ -11902,6 +12161,8 @@ impl Render for CrabStudioApp {
                 if this.production_safeguard.is_some() {
                     this.production_safeguard = None;
                     cx.notify();
+                } else if this.index_advisor_modal_open {
+                    this.close_index_advisor_modal(cx);
                 } else if this.maintenance_modal_open {
                     this.close_maintenance_modal(cx);
                 } else if this.transfer_modal_open {
@@ -12110,5 +12371,6 @@ impl Render for CrabStudioApp {
             .children(restore_overlay)
             .children(transfer_overlay)
             .children(maintenance_overlay)
+            .children(index_advisor_overlay)
     }
 }

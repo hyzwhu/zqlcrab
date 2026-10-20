@@ -71,6 +71,7 @@ pub struct QueryConsole {
     on_format: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_explain: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_profile: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
+    on_index_advisor: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_bottom_tab: Option<Rc<dyn Fn(ConsoleBottomTab, &mut Window, &mut App) + 'static>>,
     on_explain_view: Option<Rc<dyn Fn(ExplainViewMode, &mut Window, &mut App) + 'static>>,
     on_copy_profile: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
@@ -109,6 +110,7 @@ impl QueryConsole {
             on_format: None,
             on_explain: None,
             on_profile: None,
+            on_index_advisor: None,
             on_bottom_tab: None,
             on_explain_view: None,
             on_copy_profile: None,
@@ -248,6 +250,14 @@ impl QueryConsole {
         F: Fn(&mut Window, &mut App) + 'static,
     {
         self.on_profile = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_index_advisor<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&mut Window, &mut App) + 'static,
+    {
+        self.on_index_advisor = Some(Rc::new(handler));
         self
     }
 
@@ -405,6 +415,20 @@ impl RenderOnce for QueryConsole {
             });
         }
 
+        let mut advisor_button = Button::new("advisor_query")
+            .ghost()
+            .small()
+            .flex_shrink_0()
+            .icon(IconName::Zap)
+            .label(t("console.advisor", lang))
+            .disabled(busy)
+            .tooltip(t("console.advisor_tooltip", lang));
+        if let Some(on_advisor) = self.on_index_advisor {
+            advisor_button = advisor_button.on_click(move |_, window, cx| {
+                on_advisor(window, cx);
+            });
+        }
+
         // Consolidated Snippets & Actions dropdown button
         let on_snip = self.on_snippets.clone();
         let on_save_snip = self.on_save_as_snippet.clone();
@@ -479,6 +503,7 @@ impl RenderOnce for QueryConsole {
                     .child(format_button)
                     .child(explain_button)
                     .child(profile_button)
+                    .child(advisor_button)
                     .child(
                         div()
                             .h(px(14.0))
