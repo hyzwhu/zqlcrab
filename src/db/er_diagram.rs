@@ -360,6 +360,168 @@ impl ErDiagramGraph {
 
         lines.join("\n")
     }
+
+    /// Exports the current ER diagram graph as a standalone, styled SVG vector image.
+    pub fn to_svg(&self) -> String {
+        let width = (self.canvas_width.max(1200.0) + 100.0) as u32;
+        let height = (self.canvas_height.max(800.0) + 100.0) as u32;
+
+        let mut svg = String::with_capacity(8192);
+        svg.push_str(&format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {} {}\" width=\"{}\" height=\"{}\" style=\"background-color: #18181b; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;\">\n",
+            width, height, width, height
+        ));
+
+        // SVG Definitions (markers, drop shadow)
+        svg.push_str("  <defs>\n");
+        svg.push_str("    <filter id=\"shadow\" x=\"-5%\" y=\"-5%\" width=\"115%\" height=\"115%\">\n");
+        svg.push_str("      <feDropShadow dx=\"0\" dy=\"4\" stdDeviation=\"6\" flood-color=\"#000000\" flood-opacity=\"0.35\"/>\n");
+        svg.push_str("    </filter>\n");
+        svg.push_str("    <marker id=\"arrow\" viewBox=\"0 0 10 10\" refX=\"8\" refY=\"5\" markerWidth=\"6\" markerHeight=\"6\" orient=\"auto-start-reverse\">\n");
+        svg.push_str("      <path d=\"M 0 1 L 10 5 L 0 9 Z\" fill=\"#38bdf8\"/>\n");
+        svg.push_str("    </marker>\n");
+        svg.push_str("    <marker id=\"dot\" viewBox=\"0 0 10 10\" refX=\"5\" refY=\"5\" markerWidth=\"6\" markerHeight=\"6\">\n");
+        svg.push_str("      <circle cx=\"5\" cy=\"5\" r=\"3\" fill=\"#94a3b8\"/>\n");
+        svg.push_str("    </marker>\n");
+        svg.push_str("  </defs>\n\n");
+
+        // 1. Render Relationships (Connector Lines)
+        let table_map: std::collections::HashMap<&str, &TableNode> =
+            self.tables.iter().map(|t| (t.name.as_str(), t)).collect();
+
+        svg.push_str("  <!-- Relationship Connectors -->\n  <g id=\"relations\">\n");
+        for rel in &self.relations {
+            if let (Some(from_tbl), Some(to_tbl)) = (
+                table_map.get(rel.from_table.as_str()),
+                table_map.get(rel.to_table.as_str()),
+            ) {
+                let x1 = from_tbl.x + from_tbl.width;
+                let y1 = from_tbl.y + (from_tbl.height / 2.0);
+                let x2 = to_tbl.x;
+                let y2 = to_tbl.y + (to_tbl.height / 2.0);
+
+                let dx = ((x2 - x1).abs() * 0.5).max(40.0);
+                let cx1 = x1 + dx;
+                let cy1 = y1;
+                let cx2 = x2 - dx;
+                let cy2 = y2;
+
+                svg.push_str(&format!(
+                    "    <path d=\"M {:.1} {:.1} C {:.1} {:.1}, {:.1} {:.1}, {:.1} {:.1}\" fill=\"none\" stroke=\"#38bdf8\" stroke-width=\"2\" stroke-dasharray=\"4,4\" marker-end=\"url(#arrow)\" marker-start=\"url(#dot)\" opacity=\"0.85\"/>\n",
+                    x1, y1, cx1, cy1, cx2, cy2, x2, y2
+                ));
+
+                let mid_x = (x1 + x2) / 2.0;
+                let mid_y = (y1 + y2) / 2.0 - 6.0;
+                let card_label = rel.cardinality.badge_label();
+                svg.push_str(&format!(
+                    "    <text x=\"{:.1}\" y=\"{:.1}\" fill=\"#cbd5e1\" font-size=\"11\" font-weight=\"bold\" text-anchor=\"middle\">{}</text>\n",
+                    mid_x, mid_y, escape_xml(card_label)
+                ));
+            }
+        }
+        svg.push_str("  </g>\n\n");
+
+        // 2. Render Table Cards
+        svg.push_str("  <!-- Table Entities -->\n  <g id=\"tables\">\n");
+        for tbl in &self.tables {
+            let rx = tbl.x;
+            let ry = tbl.y;
+            let rw = tbl.width;
+            let rh = tbl.height;
+
+            svg.push_str(&format!(
+                "    <g transform=\"translate({:.1}, {:.1})\" filter=\"url(#shadow)\">\n",
+                rx, ry
+            ));
+            svg.push_str(&format!(
+                "      <rect width=\"{:.1}\" height=\"{:.1}\" rx=\"8\" fill=\"#1e293b\" stroke=\"#334155\" stroke-width=\"1.5\"/>\n",
+                rw, rh
+            ));
+            svg.push_str(&format!(
+                "      <path d=\"M 0 8 Q 0 0 8 0 L {:.1} 0 Q {:.1} 0 {:.1} 8 L {:.1} 36 L 0 36 Z\" fill=\"#0f172a\"/>\n",
+                rw - 8.0, rw, rw, rw
+            ));
+            svg.push_str(&format!(
+                "      <line x1=\"0\" y1=\"36\" x2=\"{:.1}\" y2=\"36\" stroke=\"#334155\" stroke-width=\"1\"/>\n",
+                rw
+            ));
+            svg.push_str(&format!(
+                "      <text x=\"14\" y=\"23\" fill=\"#f8fafc\" font-size=\"13\" font-weight=\"bold\">{}</text>\n",
+                escape_xml(&tbl.name)
+            ));
+            svg.push_str(&format!(
+                "      <rect x=\"{:.1}\" y=\"10\" width=\"36\" height=\"18\" rx=\"4\" fill=\"#334155\"/>\n",
+                rw - 46.0
+            ));
+            svg.push_str(&format!(
+                "      <text x=\"{:.1}\" y=\"22\" fill=\"#94a3b8\" font-size=\"10\" font-weight=\"bold\" text-anchor=\"middle\">{}c</text>\n",
+                rw - 28.0, tbl.columns.len()
+            ));
+
+            // Columns
+            let mut col_y = 56.0;
+            for col in &tbl.columns {
+                let is_pk = col.is_primary_key;
+                let is_fk = tbl.is_foreign_key(&col.name);
+
+                let badge_xml = if is_pk {
+                    format!(
+                        "<rect x=\"14\" y=\"{:.1}\" width=\"22\" height=\"14\" rx=\"3\" fill=\"#eab308\" fill-opacity=\"0.2\"/><text x=\"25\" y=\"{:.1}\" fill=\"#facc15\" font-size=\"9\" font-weight=\"bold\" text-anchor=\"middle\">PK</text>",
+                        col_y - 10.0, col_y
+                    )
+                } else if is_fk {
+                    format!(
+                        "<rect x=\"14\" y=\"{:.1}\" width=\"22\" height=\"14\" rx=\"3\" fill=\"#0284c7\" fill-opacity=\"0.2\"/><text x=\"25\" y=\"{:.1}\" fill=\"#38bdf8\" font-size=\"9\" font-weight=\"bold\" text-anchor=\"middle\">FK</text>",
+                        col_y - 10.0, col_y
+                    )
+                } else {
+                    format!("<circle cx=\"25\" cy=\"{:.1}\" r=\"3\" fill=\"#64748b\"/>", col_y - 3.0)
+                };
+
+                let col_name_color = if is_pk {
+                    "#facc15"
+                } else if is_fk {
+                    "#38bdf8"
+                } else {
+                    "#e2e8f0"
+                };
+
+                svg.push_str(&format!(
+                    "      {}\n      <text x=\"44\" y=\"{:.1}\" fill=\"{}\" font-size=\"12\">{}</text>\n      <text x=\"{:.1}\" y=\"{:.1}\" fill=\"#94a3b8\" font-size=\"11\" text-anchor=\"end\">{}</text>\n",
+                    badge_xml,
+                    col_y,
+                    col_name_color,
+                    escape_xml(&col.name),
+                    rw - 14.0,
+                    col_y,
+                    escape_xml(&col.data_type)
+                ));
+
+                col_y += 22.0;
+            }
+
+            svg.push_str("    </g>\n");
+        }
+        svg.push_str("  </g>\n</svg>\n");
+
+        svg
+    }
+}
+
+fn escape_xml(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 fn sanitize_mermaid_ident(ident: &str) -> String {
@@ -484,6 +646,46 @@ mod tests {
         assert!(mermaid.contains("posts {"));
         assert!(mermaid.contains("integer id PK"));
         assert!(mermaid.contains("users ||--o{ posts : \"author_id\""));
+    }
+
+    #[test]
+    fn test_svg_export() {
+        let mut users = TableNode::new("users", None, false);
+        users.columns = vec![
+            mock_col("id", "integer", true),
+            mock_col("username", "text", false),
+        ];
+        users.update_dimensions();
+
+        let mut posts = TableNode::new("posts", None, false);
+        posts.columns = vec![
+            mock_col("id", "integer", true),
+            mock_col("author_id", "integer", false),
+        ];
+        posts.update_dimensions();
+
+        let fks = vec![ForeignKeyInfo {
+            name: "fk_posts_author".to_string(),
+            table_name: "posts".to_string(),
+            columns: vec!["author_id".to_string()],
+            referenced_table: "users".to_string(),
+            referenced_columns: vec!["id".to_string()],
+            on_update: None,
+            on_delete: None,
+        }];
+
+        let graph = ErDiagramGraph::from_metadata(vec![users, posts], &fks);
+        let svg = graph.to_svg();
+
+        assert!(svg.starts_with("<svg"));
+        assert!(svg.contains("<g id=\"relations\">"));
+        assert!(svg.contains("<g id=\"tables\">"));
+        assert!(svg.contains("users"));
+        assert!(svg.contains("posts"));
+        assert!(svg.contains("1 : N"));
+        assert!(svg.contains("PK"));
+        assert!(svg.contains("FK"));
+        assert!(svg.ends_with("</svg>\n"));
     }
 
     #[test]

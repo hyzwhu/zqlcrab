@@ -9550,6 +9550,37 @@ impl Render for CrabStudioApp {
                             });
                         }
                     };
+                    let on_export_svg = {
+                        let handle = app_handle.clone();
+                        move |svg_content: String, _: &mut Window, cx: &mut App| {
+                            let picked = rfd::FileDialog::new()
+                                .add_filter("SVG Image", &["svg"])
+                                .set_file_name("er_diagram.svg")
+                                .save_file();
+
+                            if let Some(path) = picked {
+                                match std::fs::write(&path, &svg_content) {
+                                    Ok(_) => {
+                                        handle.update(cx, |this, cx| {
+                                            this.status_message = Some(format!(
+                                                "Successfully exported ER diagram SVG to {}",
+                                                path.display()
+                                            ));
+                                            cx.notify();
+                                        });
+                                    }
+                                    Err(err) => {
+                                        handle.update(cx, |this, cx| {
+                                            this.status_message = Some(format!(
+                                                "Failed to save ER diagram SVG: {err}"
+                                            ));
+                                            cx.notify();
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    };
                     let on_refresh = {
                         let handle = app_handle.clone();
                         move |_: &mut Window, cx: &mut App| {
@@ -9575,6 +9606,7 @@ impl Render for CrabStudioApp {
                     .on_zoom_out(on_zoom_out)
                     .on_zoom_reset(on_zoom_reset)
                     .on_copy_mermaid(on_copy_mermaid)
+                    .on_export_svg(on_export_svg)
                     .on_refresh(on_refresh)
                     .into_any_element()
                 }

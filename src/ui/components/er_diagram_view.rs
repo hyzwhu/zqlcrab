@@ -37,6 +37,7 @@ pub struct ErDiagramView {
     on_zoom_out: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_zoom_reset: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_copy_mermaid: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
+    on_export_svg: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
     on_view_data: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
     on_view_schema: Option<Rc<dyn Fn(String, &mut Window, &mut App) + 'static>>,
     on_refresh: Option<Rc<dyn Fn(&mut Window, &mut App) + 'static>>,
@@ -65,6 +66,7 @@ impl ErDiagramView {
             on_zoom_out: None,
             on_zoom_reset: None,
             on_copy_mermaid: None,
+            on_export_svg: None,
             on_view_data: None,
             on_view_schema: None,
             on_refresh: None,
@@ -108,6 +110,14 @@ impl ErDiagramView {
         F: Fn(String, &mut Window, &mut App) + 'static,
     {
         self.on_copy_mermaid = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_export_svg<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(String, &mut Window, &mut App) + 'static,
+    {
+        self.on_export_svg = Some(Rc::new(handler));
         self
     }
 
@@ -245,6 +255,27 @@ impl ErDiagramView {
             });
         }
 
+        // SVG Export Button
+        let on_svg = self.on_export_svg.clone();
+        let svg_code = self
+            .graph
+            .as_ref()
+            .map(|g| g.to_svg())
+            .unwrap_or_default();
+        let mut svg_btn = Button::new("er_export_svg")
+            .ghost()
+            .xsmall()
+            .icon(IconName::Download)
+            .child(t("er_diagram.export_svg", lang))
+            .tooltip("Export high-resolution standalone SVG vector image");
+
+        if let Some(handler) = on_svg {
+            let code = svg_code.clone();
+            svg_btn = svg_btn.on_click(move |_, window, cx| {
+                handler(code.clone(), window, cx);
+            });
+        }
+
         // Refresh Button
         let on_ref = self.on_refresh.clone();
         let mut refresh_btn = Button::new("er_refresh_btn")
@@ -298,6 +329,7 @@ impl ErDiagramView {
                     .gap_2()
                     .child(zoom_bar)
                     .child(mermaid_btn)
+                    .child(svg_btn)
                     .child(refresh_btn),
             )
     }
