@@ -29,6 +29,7 @@ pub mod snippets;
 pub mod sql_format;
 pub mod sql_gen;
 pub mod sqlite;
+pub mod table_designer;
 pub mod transfer;
 pub mod types;
 
@@ -96,6 +97,9 @@ pub use sql_gen::{
     generate_create_table_sql, generate_review_plan, split_sql_statements, truncate_sql_snippet,
 };
 pub use sqlite::SqliteAdapter;
+pub use table_designer::{
+    DesignerColumn, DesignerForeignKey, DesignerIndex, DesignerTable, TableDiffSummary,
+};
 pub use transfer::{
     TransferAuditLog, TransferLogLevel, TransferOptions, TransferProgress, TransferScope,
     TransferSummary, TransferTableMapping, generate_create_table_ddl, generate_drop_table_ddl,
