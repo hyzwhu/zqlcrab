@@ -97,7 +97,10 @@ impl MysqlAdapter {
 #[async_trait]
 impl DatabaseAdapter for MysqlAdapter {
     async fn connect(&mut self) -> DbResult<()> {
-        let mut builder = OptsBuilder::default();
+        // Disable prefer_socket so mysql_async won't execute `SELECT @@socket...` during handshake,
+        // which fails on TDSQL, TiDB, cloud MySQL proxies, and distributed MySQL engines with:
+        // "ERROR HY000 (1193): Unknown system variable 'socket'"
+        let mut builder = OptsBuilder::default().prefer_socket(false);
         if !self.config.host.is_empty() {
             builder = builder.ip_or_hostname(self.config.host.clone());
         }
